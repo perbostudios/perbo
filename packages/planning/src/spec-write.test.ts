@@ -13,7 +13,6 @@ import {
   SpecConflict,
   specSlug,
   specTitleFromMessage,
-  UNTITLED_SPEC,
   type SpecText,
 } from "./spec-text.js";
 import { readSpecText, retitleSpecFile, writeSpecFile, type WrittenSpec } from "./spec-write.js";
@@ -107,25 +106,36 @@ describe("writing a spec", () => {
     expect(parsed.notes).toBe("The queue package already has a sender.");
   });
 
-  it("names a new spec's folder from words that are not its title, and writes only the title on its title line (D-118)", () => {
+  it("names a new spec's folder from words that are not its title, and writes no title line while it has none (D-118)", () => {
     const root = repository();
     const written = writeSpecFile({
       repositoryRoot: root,
       slug: null,
       folderName: "Dark mode toggle",
-      text: { ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC },
+      text: EMPTY_SPEC_TEXT,
       base: EMPTY_SPEC_TEXT,
     });
     expect(written.slug).toBe("dark-mode-toggle");
-    expect(readSpecText(written.path).text.title).toBe("Untitled");
-    expect(readFileSync(written.path, "utf8")).not.toContain("Dark mode toggle");
+    expect(readSpecText(written.path).text.title).toBe("");
+    const bytes = readFileSync(written.path, "utf8");
+    expect(bytes).not.toContain("Dark mode toggle");
+    expect(bytes).not.toContain("Untitled");
+    expect(bytes).not.toMatch(/^# /m);
+    // Named later, the title goes on its own line at the head.
+    const named = writeSpecFile({
+      repositoryRoot: root,
+      slug: written.slug,
+      text: { ...EMPTY_SPEC_TEXT, title: "Theme switcher" },
+      base: EMPTY_SPEC_TEXT,
+    });
+    expect(named.markdown.split("\n")[0]).toBe("# Theme switcher");
     // A second spec from the same words is refused in their words, not the title's.
     expect(() =>
       writeSpecFile({
         repositoryRoot: root,
         slug: null,
         folderName: "Dark mode toggle",
-        text: { ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC },
+        text: EMPTY_SPEC_TEXT,
         base: EMPTY_SPEC_TEXT,
       }),
     ).toThrow("'Dark mode toggle' takes the same folder");

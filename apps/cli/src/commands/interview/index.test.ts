@@ -1316,8 +1316,11 @@ describe("the orientation asks for the spec's title as a title", () => {
   it("asks for a title, not a sentence or a cut of the message, when it first writes the spec", () => {
     expect(oriented).toMatch(/The spec's one `#` heading is its title/);
     expect(oriented).toMatch(
-      /Where that line is\nUntitled — the folder was named from the person's first message, and the work has no title\nyet — and only then, make it a title when you first write the spec/,
+      /Where the spec has\nno such line — the folder was named from the person's first message, and the work has no title\nyet — and only then, give it one at its head when you first write the spec/,
     );
+    // Untitled is what the app shows while the spec has no title line; the
+    // Architect is never told to look for it in the file (D-118).
+    expect(oriented).not.toContain("Untitled");
     expect(oriented).toMatch(/as a noun\nphrase and not a sentence or a cut of what they said/);
     expect(oriented).toMatch(/tell it apart from every name in the names block below/);
     expect(oriented).toMatch(/The folder keeps its name/);

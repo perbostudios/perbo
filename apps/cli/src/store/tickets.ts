@@ -526,7 +526,8 @@ export const DraftSnapshotSchema = z.strictObject({
          * snapshot is read from somewhere else. Null for a fetch.
          */
         path: z.string().min(1).nullable().default(null),
-        title: z.string().min(1),
+        /** Empty for a spec nobody has named, which has no title line (D-118). */
+        title: z.string(),
       }),
       /** Exactly what the model returned, before any override or derivation. */
       proposed: ContractDraftSchema,

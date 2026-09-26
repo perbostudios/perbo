@@ -2798,12 +2798,13 @@ readline.createInterface({ input: process.stdin })
       "--spec",
       "specs/dark-mode-toggle",
     ]);
-    // The cut names the folder only: the file's title line says Untitled and
-    // is recorded as the host's, so the planning is listed with no title
-    // until another is written, and the cut's words are no title (D-118).
-    expect((await service.request({ kind: "editingRead", id: fresh.id })).specCut).toBe("Untitled");
+    // The cut names the folder only: the file has no title line, so the
+    // planning is listed with no title until one is written, the cut's words
+    // are no title, and Untitled is the app's to show, never the file's
+    // (D-118).
     const written = readFileSync(join(repo, "specs", "dark-mode-toggle", "spec.md"), "utf8");
-    expect(written.split("\n")[0]).toBe("# Untitled");
+    expect(written).not.toMatch(/^# /m);
+    expect(written).not.toContain("Untitled");
     expect(written).not.toContain("Dark mode toggle");
     expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === fresh.id)?.title).toBeNull();
     // The naming is said, and the turn it came from is part of the conversation.
@@ -5130,7 +5131,9 @@ describe("the plan read against the spec (D-128)", () => {
       if (args[1] === "run") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
       return otherwise(binary, args, options);
     };
-    return { ...fixture(runner, startProcess), drifts };
+    // A reading that does not run is tried again at once here, rather than
+    // after the seconds the host waits between tries.
+    return { ...fixture(runner, startProcess, { readingPause: async () => undefined }), drifts };
   }
   /** A second place the two have parted, for a reading that finds more than one. */
   const second = {
@@ -5272,7 +5275,7 @@ readline.createInterface({ input: process.stdin })
     expect(await listed()).toBe("0123456789abcdef");
   });
 
-  it("falls back to the settings' models, and fails the job on a print that is not a verdict", async () => {
+  it("falls back to the settings' models, and fails the job on a print that is not a verdict once all four tries have printed one", async () => {
     const { service, repo, drifts } = canned({ findings: "not a verdict" });
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
@@ -5281,7 +5284,20 @@ readline.createInterface({ input: process.stdin })
     expect(drifts[0]).toEqual([
       "drift", "PRB-1", "--provider", settings.draftingProvider, "--model", settings.executorModel, "--json",
     ]);
+    // Tried until it runs (D-NEW-basic-and-epic-flows): once, and three times more.
+    expect(drifts).toHaveLength(4);
     expect(job.state).toBe("failed");
+  });
+
+  it("lands the verdict a second try prints where the first did not run", async () => {
+    let tries = 0;
+    const { service, repo, drifts } = canned(() => (tries++ === 0 ? { findings: "not a verdict" } : verdict([finding])));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
+    expect(drifts).toHaveLength(2);
+    expect(job.state).toBe("completed");
+    expect((await service.request({ kind: "editingRead", id })).drift?.open).toEqual([finding]);
   });
 
   it("refuses to read before there is a spec, before there is a plan, and once the plan is approved", async () => {

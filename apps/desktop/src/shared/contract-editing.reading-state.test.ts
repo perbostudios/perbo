@@ -44,7 +44,6 @@ describe("the state a reading is of", () => {
       nodes: 0,
       drift: null,
       specSlug: "signup-mail",
-      specCut: null,
       lastPane: null,
       confirmed: null,
       read: null,

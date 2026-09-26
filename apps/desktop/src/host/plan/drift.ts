@@ -7,6 +7,7 @@ import {
   turnOverlapped,
   type TurnMark,
 } from "../../shared/contract-editing.js";
+import { untilItRuns } from "../../shared/reading-retry.js";
 import type { Cli } from "../cli.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
 import type { JobRunner } from "../jobs/runner.js";
@@ -37,6 +38,8 @@ export interface DriftDeps {
    * `shared/contract-editing.ts` states it, or null where it cannot be read.
    */
   state(id: string): string | null;
+  /** The wait between tries of a reading that did not run; tests make it instant. */
+  pause(ms: number): Promise<void>;
   /** The planning's chat, which a reading lands in. */
   interview: {
     working(id: string): boolean;
@@ -128,19 +131,28 @@ export class DriftReadings {
       { repo, key, kind: "drift", label: "Read the plan against the spec" },
       async (job, run) => {
         const models = this.deps.models(repo.id, key);
-        await run.invoke([
-          "drift",
-          key,
-          "--provider",
-          models.draftingProvider,
-          "--model",
-          models.executorModel,
-          "--json",
-        ]);
-        // Parsed so the renderer holds a verdict and never the CLI's raw
-        // stdout; a print that is not one fails the job rather than reaching a
-        // card.
-        const verdict = DriftVerdictSchema.parse(job.result);
+        // Tried until it runs (D-NEW-basic-and-epic-flows): a command that
+        // exits with an error — no credential, the network, a crash — or
+        // prints something that is not a verdict is run again after each of
+        // the pauses, and fails the job only once every try has; a cancelled
+        // job is not tried again. Parsed so the renderer holds a verdict and
+        // never the CLI's raw stdout.
+        const verdict = await untilItRuns(
+          async () => {
+            await run.invoke([
+              "drift",
+              key,
+              "--provider",
+              models.draftingProvider,
+              "--model",
+              models.executorModel,
+              "--json",
+            ]);
+            return DriftVerdictSchema.parse(job.result);
+          },
+          (ms) => this.deps.pause(ms),
+          () => run.signal.aborted,
+        );
         // And what the model said goes to the person redacted and flattened,
         // because it is the model's text about the spec and the plan, and a
         // secret either quoted would otherwise land on the page. `perbo drift`
@@ -284,8 +296,8 @@ export class DriftReadings {
    * either: a turn that ends while one is running is owed its reading, which
    * starts as that one settles, and however many turns end meanwhile owe one
    * reading between them, since it reads the plan as it then stands. A reading
-   * that cannot be started is said in the chat, because the page is waiting on
-   * it.
+   * that cannot be started is said in the chat in one sentence, with why
+   * behind its `i`, because the page is waiting on it.
    *
    * Never for a planning thrown away. Its chat is stopped as its work is
    * deleted, and that stop and the chat's exit both end a turn: a reading
@@ -322,9 +334,11 @@ export class DriftReadings {
       // in the gap would fail the same way.
       this.readings.delete(id);
       this.rereadOwed.delete(id);
+      const why = redact(error instanceof Error ? error.message : String(error)).trim();
       this.deps.interview.say(id, {
         kind: "note",
-        text: `${REREAD_COULD_NOT_START}: ${redact(error instanceof Error ? error.message : String(error))}`,
+        text: `${REREAD_COULD_NOT_START}.`,
+        ...(why === "" ? {} : { output: why }),
       });
     }
   }

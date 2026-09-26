@@ -63,9 +63,6 @@ export function wrap(text: string, indent: number): string[] {
   return out;
 }
 
-export const pad = (text: string, width: number) =>
-  text.length >= width ? text.slice(0, width) : text + " ".repeat(width - text.length);
-
 /**
  * An identifier held to a fixed column: a rule id or a denial rule, which no
  * person reads as prose. Text a person reads is never clipped; it goes through
@@ -73,6 +70,14 @@ export const pad = (text: string, width: number) =>
  */
 export const clip = (text: string, width: number) =>
   text.length <= Math.max(0, width) ? text : `${text.slice(0, Math.max(1, width - 1))}…`;
+
+/**
+ * A label or an identifier filled out to a fixed column. One longer than the
+ * column is cut by {@link clip}, so the "…" shows the cut and the row keeps
+ * its width (D-NEW-nothing-shown-is-cut).
+ */
+export const pad = (text: string, width: number) =>
+  text.length > width ? clip(text, width) : text + " ".repeat(width - text.length);
 
 /**
  * A line as it is where it fits the width, and otherwise the same words

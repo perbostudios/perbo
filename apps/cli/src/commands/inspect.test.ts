@@ -1843,6 +1843,25 @@ describe("the card, whole", () => {
     expect(out).toContain(level);
   });
 
+  it("prints how the approval went whole", () => {
+    const out = rendered((report) => {
+      report.admission = { human_elapsed_ms: 3_600_000 * 1e20, edit_count: 1e20 } as never;
+    });
+    expect(out).toContain("100000000000000000000.0 hours from first rendering · 100000000000000000000 edits");
+  });
+
+  it("marks where a check's name or a bundle object's name is cut to its column", () => {
+    const name = "typecheck:desktop-renderer";
+    const artifact = "a-bundle-object-named-past-its-column.json";
+    const out = rendered((report) => {
+      report.attempts[1]!.checks = [check({ name })];
+      const bundle = report.attempts[1]!.bundles[0]!;
+      bundle.artifacts = [{ ...bundle.artifacts[0]!, name: artifact }];
+    }, true);
+    expect(out).toContain(" typecheck:desk… ");
+    expect(out).toContain(` ${artifact.slice(0, 27)}… `);
+  });
+
   it("prints a local run's contract and url whole", () => {
     const reference = long("owner/repository#412");
     const url = `https://github.com/owner/repository/pull/412/${"files".repeat(20)}`;

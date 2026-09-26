@@ -35,7 +35,7 @@ it("names a planning by its spec, then by the plan's own shorter name, and Untit
 describe("the title the drafts list carries (D-118)", () => {
   const session = (over: Partial<EditingSession> = {}) =>
     ({ id: "s-1", repoId: "repo-1", key: null, admitted: false, phase: "editing", nodes: 0, drift: null,
-      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, confirmed: null, read: null, impact: null,
+      specSlug: "dark-mode-toggle", named: null, lastPane: null, confirmed: null, read: null, impact: null,
       form: { draft: { outcome: "", criteria: [], paths: [], prohibited: [] } }, ...over }) as unknown as EditingSession;
   const titled = (title: string | null) => () => (title === null ? null : { title, sections: null });
 
@@ -43,11 +43,15 @@ describe("the title the drafts list carries (D-118)", () => {
     expect(openDrafts([session()], titled("Dark mode toggle"))[0]!.title).toBe("Dark mode toggle");
   });
 
-  it("is none while the spec still states the cut of the first turn that named its folder", () => {
-    const cut = session({ specCut: "Dark mode toggle" });
-    expect(openDrafts([cut], titled("Dark mode toggle"))[0]!.title).toBeNull();
+  it("is none while the spec has no title line, as the first turn that named its folder leaves it", () => {
+    expect(openDrafts([session()], titled(""))[0]!.title).toBeNull();
+    expect(openDrafts([session()], titled("  "))[0]!.title).toBeNull();
     // And the spec's own the moment the Architect or the person titles it.
-    expect(openDrafts([cut], titled("A dark mode for the store"))[0]!.title).toBe("A dark mode for the store");
+    expect(openDrafts([session()], titled("A dark mode for the store"))[0]!.title).toBe("A dark mode for the store");
+  });
+
+  it("is whatever the spec states, a title that is the word Untitled included: the word is the app's display, never a mark in the file", () => {
+    expect(openDrafts([session()], titled("Untitled"))[0]!.title).toBe("Untitled");
   });
 
   it("is none with no spec, or a spec with no file to read", () => {

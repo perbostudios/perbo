@@ -16,6 +16,7 @@ import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/
 import { heldRepository, isLive, isRun } from "../shared/jobs.js";
 import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
+import { untilItRuns } from "../shared/reading-retry.js";
 import type { Job, ReplyMap, Request, RequestHandlers, TaskRow } from "../shared/protocol.js";
 import {
   afterTheNote,
@@ -58,6 +59,7 @@ import {
   plans,
   readings,
   readingSettled,
+  sampleReadings,
   recordDrift,
   removeSpecFile,
   SAMPLE_INDEX,
@@ -355,11 +357,17 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       "drift",
       editing.read(id).repoId,
       key,
-      (job) => {
-        // A spec that cannot be read is the reading failing, as `perbo drift`
-        // fails on one: the job carries the error, and the page reads it off
-        // the job.
-        if (unreadable) throw new Error(`specs/${slug}/spec.md could not be read.`);
+      async (job) => {
+        // Tried until it runs, as the host tries `perbo drift`: a try that
+        // does not run — a spec that cannot be read, as `perbo drift` fails
+        // on one — is made again after each pause, and only once every try
+        // has failed does the job carry the error, which the page reads off
+        // the job. A job stopped meanwhile is not tried again.
+        await untilItRuns(
+          () => sampleReadings.attempt(slug),
+          (ms) => sampleReadings.pause(ms),
+          () => job.state !== "running",
+        );
         const held = driftRecords.get(key);
         const verdict: DriftVerdict =
           held !== undefined &&
@@ -596,8 +604,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     specs: Object.entries(specFiles()).flatMap(([slug, markdown]) => {
       const repoId = snapshot.repositories[0]?.id;
       if (repoId === undefined) return [];
-      const title = readSpecSections(markdown).text.title.trim();
-      return title.length > 0 ? [{ repoId, slug, title }] : [];
+      // Empty where nobody has named the work: the picker calls it Untitled (D-118).
+      return [{ repoId, slug, title: readSpecSections(markdown).text.title.trim() }];
     }),
     interviews: [...sampleInterviews],
     working: [...sampleWorking.keys()],

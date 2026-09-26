@@ -20,7 +20,8 @@ import { TaskPage } from "../tasks/TaskPage.js";
 import { NOT_LISTED, PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { handlers } from "../../sample-host/handlers.js";
-import { editing as sampleEditing } from "../../sample-host/records.js";
+import { editing as sampleEditing, sampleReadings } from "../../sample-host/records.js";
+import { CONFIRM_TO_CHECK, READING_FAILED } from "../planning/ReadingFailed.js";
 import { bridge } from "../workspace/index.js";
 import { isLive } from "../../shared/jobs.js";
 import { setPlatformForTests } from "../../shared/shortcuts.js";
@@ -568,8 +569,62 @@ describe("interactive desktop flows", () => {
     );
   });
 
-  it("refuses the confirm while problems are open though the reading after a change could not be made, and never offers to go on without it", async () => {
-    const { key } = await landedFlat("Signup notice mail");
+  /**
+   * Every try of a reading made to fail, as a reading with no credential
+   * fails, and the host's wait between tries made instant: the tries and the
+   * waits asked for are what the returned record holds.
+   */
+  function readingsDoNotRun(times = Infinity) {
+    const paused: number[] = [];
+    let tries = 0;
+    vi.spyOn(sampleReadings, "pause").mockImplementation(async (ms) => {
+      paused.push(ms);
+    });
+    const attempt = vi.spyOn(sampleReadings, "attempt").mockImplementation(() => {
+      tries += 1;
+      if (tries <= times) throw new Error("No credential for Claude. Run `claude login`, then try again.");
+    });
+    return { paused, tries: () => tries, restore: () => attempt.mockRestore() };
+  }
+
+  it("says in a pop-up that the plan could not be checked where every try of the confirm's reading fails, confirms nothing, and reads again on the next confirm", async () => {
+    const { id, key } = await landedFlat("Signup notice mail");
+    await reword("Every new signup queues exactly one email.");
+    const before = await readings(key);
+    const failing = readingsDoNotRun();
+    const sent = vi.spyOn(bridge, "request");
+    fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+    const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+    // Tried four times, 2, 4 and 8 seconds apart, before it was said.
+    expect(failing.tries()).toBe(4);
+    expect(failing.paused).toEqual([2_000, 4_000, 8_000]);
+    // Why in one sentence, and the whole error behind the `i`.
+    expect(within(popup).getByText(`${READING_FAILED}: No credential for Claude.`)).toBeTruthy();
+    expect(within(popup).getByText(CONFIRM_TO_CHECK)).toBeTruthy();
+    expect(within(popup).getByRole("button", { name: "The whole error" })).toBeTruthy();
+    expect(popup.textContent).toContain("No credential for Claude. Run `claude login`, then try again.");
+    expect(within(popup).getAllByRole("button").map((button) => button.textContent)).toEqual(["i", "Got it"]);
+    // Nothing is confirmed, and nothing offers a way past the reading.
+    expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
+    expect(screen.queryByText(/without the reading/)).toBeNull();
+    expect(screen.queryByText(PROBLEMS_HOLD)).toBeNull();
+    expect(await readings(key)).toBe(before + 1);
+    // Acknowledged: back on the contract, where the confirm is offered again.
+    fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull());
+    expect(location.hash).toBe(`#planning/${id}/contract`);
+    const approve = screen.getByRole("button", { name: "Approve · start the loop" });
+    expect(approve.hasAttribute("disabled")).toBe(false);
+    // Pressed again, the plan is read again rather than passed over.
+    fireEvent.click(approve);
+    await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+    expect(await readings(key)).toBe(before + 2);
+    expect(failing.tries()).toBe(8);
+    expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
+  });
+
+  it("refuses the confirm while problems are open where the reading after a change does not run, and never offers to go on without it", async () => {
+    const { key } = await landedFlat("Signup notice held mail");
     await reword("Every new signup queues exactly one email.");
     fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
     await screen.findByText(PROBLEMS_HOLD, {}, { timeout: 8000 });
@@ -577,23 +632,38 @@ describe("interactive desktop flows", () => {
     // Changed again, so the next confirm owes a reading, and that reading fails.
     await reword("Each new signup queues exactly one email.");
     const before = await readings(key);
-    const original = bridge.request.bind(bridge);
-    const sent = vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
-      request.kind === "driftCheck"
-        ? Promise.reject(new Error("The reviewer could not be reached."))
-        : request.kind === "run"
-          ? Promise.resolve(null as never)
-          : original(request)) as typeof bridge.request);
+    readingsDoNotRun();
+    const sent = vi.spyOn(bridge, "request");
     fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
-    const failed = await screen.findByText(/^The reviewer could not be reached\./, {}, { timeout: 8000 });
-    expect(failed.textContent).toBe(`The reviewer could not be reached. ${PROBLEMS_HOLD}`);
-    expect(screen.queryByText(/Confirm again to go ahead without the reading/)).toBeNull();
-    // Pressed again at the state the reading could not be made at: still held.
+    const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+    expect(screen.queryByText(/without the reading/)).toBeNull();
+    fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull());
+    // Pressed again: read again, and still nothing confirmed.
     fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
-    await screen.findByText(PROBLEMS_HOLD);
+    await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
-    expect(await readings(key)).toBe(before);
+    expect(await readings(key)).toBe(before + 2);
+  });
+
+  it("confirms as it would have where the confirm's reading fails once and then runs", async () => {
+    const { key } = await landedFlat("Signup second try mail");
+    await reword("Every new signup queues exactly one email.");
+    fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+    await screen.findByText(PROBLEMS_HOLD, {}, { timeout: 8000 });
+    // Edited back to what the spec asks: the next confirm reads the plan, and
+    // its first try does not run.
+    await reword("A signup queues exactly one email.");
+    const before = await readings(key);
+    const failing = readingsDoNotRun(1);
+    const run = holdRun();
+    fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+    expect(await run()).toMatchObject({ kind: "run", key, approve: true });
+    expect(failing.tries()).toBe(2);
+    expect(failing.paused).toEqual([2_000]);
+    expect(await readings(key)).toBe(before + 1);
+    expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull();
   });
 
   it("holds the confirm, reading nothing and starting nothing, while the drafts list does not carry the planning", async () => {

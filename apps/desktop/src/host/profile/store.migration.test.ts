@@ -8,9 +8,11 @@ import { Profile } from "./store.js";
 import { SettingsSchema } from "../../shared/protocol.js";
 
 /**
- * `scripts/migrate-workspace-round8.mjs` against profiles shaped as the two
- * builds before this one wrote them — `main`, and the round before this one —
- * run as it is run, a process started with argv, and then read by the
+ * `scripts/migrate-workspace-round8.mjs` against the two profiles it changes
+ * — one as `main` writes it, and one that has `lastOpened`, `named` and a
+ * `specCut` the desktop does not read, but none of `confirmed`, `read` or
+ * `impact` — run as
+ * it is run, a process started with argv, and then read by the
  * profile's own loader: what the migrated file has to pass is the schema
  * Perbo starts on, and a field the script leaves out stops Perbo starting.
  */
@@ -42,12 +44,12 @@ const promise = (last: string) => ({
 });
 
 /**
- * A basic ticket's planning as the round before this one saved it: its
- * contract last seen on the contract page, left on the Plan pane's
- * "criteria", its last change recorded with no author, and none of
- * `confirmed`, `read` or `impact`.
+ * A basic ticket's planning written without `confirmed`, `read` or `impact`
+ * and with a `specCut` the schema refuses: its contract last seen on the
+ * contract page, left on the Plan pane's "criteria", and its last change
+ * recorded with no author.
  */
-function roundBefore(id: string) {
+function unmigrated(id: string) {
   return {
     version: 1,
     id,
@@ -118,11 +120,11 @@ function roundBefore(id: string) {
 }
 
 /**
- * The same planning as `main` saved it: no `specCut` or `named` yet, and a
- * note in its conversation that offered the way on to the contract.
+ * The same planning as `main` writes it: no `specCut` or `named`, and a note
+ * in its conversation that offers the way on to the contract.
  */
 function fromMain(id: string) {
-  const before = roundBefore(id);
+  const before = unmigrated(id);
   const session: Partial<typeof before> = { ...before };
   delete session.specCut;
   delete session.named;
@@ -168,7 +170,7 @@ function profile(state: Record<string, unknown>): string {
 
 const migrate = (dir: string): string => execFileSync(process.execPath, [SCRIPT, dir], { encoding: "utf8" });
 
-describe("a profile from before, migrated, is one Perbo starts on", () => {
+describe("a profile without these fields, migrated, is one Perbo starts on", () => {
   const base = {
     version: 1,
     settings,
@@ -181,7 +183,7 @@ describe("a profile from before, migrated, is one Perbo starts on", () => {
   };
 
   it.each([
-    ["the round before this one", { ...base, lastOpened: {}, editingSessions: [roundBefore("3e1b7c3b-2d84-4b1c-9c4d-9f0a5b6c7d8e")] }],
+    ["a profile with `named` and `specCut`", { ...base, lastOpened: {}, editingSessions: [unmigrated("3e1b7c3b-2d84-4b1c-9c4d-9f0a5b6c7d8e")] }],
     ["main", { ...base, archivedSeeded: true, editingSessions: [fromMain("3e1b7c3b-2d84-4b1c-9c4d-9f0a5b6c7d8e")] }],
   ])("from %s", (_, state) => {
     const dir = profile(state);
@@ -192,9 +194,10 @@ describe("a profile from before, migrated, is one Perbo starts on", () => {
     const [session] = opened.state.editingSessions;
     expect(session).toMatchObject({ confirmed: null, read: null, impact: null, lastPane: null, change: null });
     expect(session).not.toHaveProperty("lastView");
+    expect(session).not.toHaveProperty("specCut");
     // What was already there is kept as it was.
-    expect(session!.drift).toEqual(roundBefore("x").drift);
-    expect(session!.form).toEqual(roundBefore("x").form);
+    expect(session!.drift).toEqual(unmigrated("x").drift);
+    expect(session!.form).toEqual(unmigrated("x").form);
     expect(opened.state.jobs).toEqual([job]);
     // And a second run finds nothing to change.
     const again = readFileSync(join(dir, "workspace.json"), "utf8");

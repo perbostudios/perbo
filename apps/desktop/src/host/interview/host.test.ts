@@ -221,16 +221,17 @@ describe("a person's turn", () => {
     const session = await w.open();
     await w.interviews.turn(session.id, "Retry a failed run without losing its records");
     expect(w.editing.read(session.id).specSlug).toBe("retry-a-failed-run-without-losing-its-records");
-    // The cut names the folder only: the title line says Untitled until the
-    // Architect or the person names the work, and that is what is recorded as
-    // the host's (D-118).
+    // The cut names the folder only: the spec has no title line until the
+    // Architect or the person names the work, and never says Untitled, which
+    // is the app's to show (D-118).
     const spec = readFileSync(
       join(repo.path, "specs", "retry-a-failed-run-without-losing-its-records", "spec.md"),
       "utf8",
     );
-    expect(spec.split("\n")[0]).toBe("# Untitled");
+    expect(spec).not.toMatch(/^# /m);
+    expect(spec).not.toContain("Untitled");
     expect(spec).not.toContain("Retry a failed run");
-    expect(w.editing.read(session.id).specCut).toBe("Untitled");
+    expect(w.editing.read(session.id).named).toBeNull();
     expect(w.conversation(session.id).some((entry) => entry.line.kind === "turn")).toBe(true);
   });
 

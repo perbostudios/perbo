@@ -28,13 +28,14 @@ import {
 /**
  * A fragment of the submission, made fit to put in a rejection reason.
  *
- * A rejection reason is recorded on the artifact, read by a person, and quoted
- * back to the reviewer as the retry turn, which the transport sends on stdin.
- * Anything taken from the verdict is therefore reduced to printable ASCII on a
- * single line, and kept whole (D-NEW-nothing-shown-is-cut).
+ * A rejection reason is recorded on the artifact and quoted back to the
+ * reviewer as the retry turn, and on the CLI transport a turn is an argv
+ * element. Anything taken from the verdict is therefore reduced to printable
+ * ASCII on a single line and capped.
  */
-function fromSubmission(value: string): string {
-  return value.replace(/[^\x20-\x7E]+/g, " ").replace(/\s+/g, " ").trim();
+function fromSubmission(value: string, limit = 120): string {
+  const printable = value.replace(/[^\x20-\x7E]+/g, " ").replace(/\s+/g, " ").trim();
+  return printable.length > limit ? `${printable.slice(0, limit)}...` : printable;
 }
 
 export class UnknownCriterionError extends Error {
@@ -361,6 +362,7 @@ export function verdictSchemas(criterionIds: string[], checkIds: string[]): Verd
               parsed.error.issues
                 .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
                 .join("; "),
+              400,
             ),
         );
       }

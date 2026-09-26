@@ -1,5 +1,5 @@
 import { formatUsd } from "@perbo/contracts/browser";
-import type { ProhibitedAction } from "@perbo/contracts";
+import type { ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isRun } from "../../shared/jobs.js";
 import { spokenWords } from "../../shared/runner-progress.js";
 import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
@@ -138,6 +138,26 @@ export function watchTranscript(
   return spoken.some((entries) => entries.length > 0) || logged.length === 0 ? recorded : logged;
 }
 
+/**
+ * Whether a review's error means the reviewer answered and its answer could
+ * not be used — every verdict it returned rejected, or one the plan could not
+ * accept — rather than no answer being had at all.
+ */
+const UNPARSED: Record<ReviewError["kind"], boolean> = {
+  verdict_rejected: true,
+  malformed_verdict: true,
+  unknown_criterion_id: true,
+  provider_unavailable: false,
+  budget_exhausted: false,
+  timeout: false,
+  internal: false,
+};
+/** What the desktop says of a review whose answer could not be used; the error as the review recorded it sits behind an `i` beside it. */
+export const REVIEW_UNPARSED = "The reviewer's answer could not be parsed.";
+/** The sentence a review's error is said in: {@link REVIEW_UNPARSED} for an answer that could not be used, `otherwise` for every other kind. */
+export const reviewErrorSentence = (error: ReviewError, otherwise: string): string =>
+  UNPARSED[error.kind] ? REVIEW_UNPARSED : otherwise;
+
 /** A rule's or a reason's name in words: `wall_clock_exceeded` reads "wall clock exceeded". Only ever a name, never a path or a command. */
 const words = (name: string): string => name.replaceAll("_", " ");
 /** A duration as it is said: "10 minutes", or seconds under one. */
@@ -238,16 +258,17 @@ export interface RunEnding {
  * closing: one sentence, and the fuller reason behind it.
  *
  * A run whose loop reached a verdict ends `failed` whenever the verdict is not
- * an approval — the review requesting changes, an attempt terminated, a
- * ceiling reached — and its error is then the whole run log. What a person
+ * an approval — the review requesting changes, the reviewer's answer not
+ * parsing, an attempt terminated, a ceiling reached — and its error is then
+ * the whole run log. What a person
  * needs is the verdict, read from the attempt the run recorded. Where there is
  * no verdict to read — the CLI refusing to start, an approval refused, a
  * failure after the review, Perbo closing mid-command — the command's own
  * output is what there is, carried whole in `log`.
  *
  * Every word of `reason` comes from the records: the termination the runner
- * wrote, the ceiling it hit, the review's findings and the CLI's own error
- * lines. The findings are the reviewer's words, shown as what it found and
+ * wrote, the ceiling it hit, the review's findings or its error and the
+ * CLI's own error lines. The findings are the reviewer's words, shown as what it found and
  * never acted on.
  *
  * Null where the last command neither failed nor was interrupted.
@@ -346,6 +367,9 @@ export function runEnding(
       `The runner ended the attempt (${words(reason)})${detail ? `. It recorded: ${detail}` : ""}.`,
     );
   const review = latest.review;
+  // The reviewer answered and nothing it answered could be used: one sentence,
+  // with the error behind the `i` exactly as the review recorded it.
+  if (review?.error && UNPARSED[review.error.kind]) return ended(REVIEW_UNPARSED, review.error.message);
   const decision = review?.decision ?? latest.reviewDecision;
   const open = (review?.findings ?? []).filter((finding) => finding.status === "open");
   const findings = (asked: string): string =>

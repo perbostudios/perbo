@@ -236,6 +236,12 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
  * reads the plan against the spec by the same rule
  * (D-NEW-basic-and-epic-flows). An approved plan is frozen and goes straight
  * to its contract, and so does a plan with no planning to read it in.
+ *
+ * Asked only by a press that navigates to what it returns, it records an
+ * epic's confirm as on its way ({@link confirmArrives}): the Problems pane
+ * reads the plan only on the arrival a confirm made, and an arrival by the
+ * rail or a reopened planning shows the last reading's problems and starts
+ * none.
  */
 export function confirmRoute(way: {
   repoId: string;
@@ -244,7 +250,20 @@ export function confirmRoute(way: {
   approved: boolean;
   basic: boolean;
 }): Route {
-  return way.approved || way.sessionId == null
-    ? { page: "task", repoId: way.repoId, key: way.key, view: "contract" }
-    : { page: "planning", sessionId: way.sessionId, pane: way.basic ? "contract" : "drift" };
+  if (way.approved || way.sessionId == null) return { page: "task", repoId: way.repoId, key: way.key, view: "contract" };
+  if (!way.basic) confirmsOnTheWay.add(way.sessionId);
+  return { page: "planning", sessionId: way.sessionId, pane: way.basic ? "contract" : "drift" };
+}
+
+/** The plannings whose Confirm the plan is on its way to their Problems pane. */
+const confirmsOnTheWay = new Set<string>();
+
+/**
+ * Whether this planning's arrival at its Problems pane is a Confirm the
+ * plan's, which is the one arrival that reads the plan against its spec
+ * (D-NEW-basic-and-epic-flows). `take` is the arrival itself, which uses it
+ * up, so a later arrival by the rail is not taken for a confirm.
+ */
+export function confirmArrives(sessionId: string, take = false): boolean {
+  return take ? confirmsOnTheWay.delete(sessionId) : confirmsOnTheWay.has(sessionId);
 }

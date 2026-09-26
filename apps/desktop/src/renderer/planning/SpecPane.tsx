@@ -158,15 +158,12 @@ export function SpecPane({
   // a resend that finds nothing left to send — anything else leaves the next
   // save read against a base the person can no longer see.
   const refused = useRef<SpecView | null>(null);
-  // The title a file's title line gives the field: none while it is still the
-  // Untitled the host wrote as it named the folder (D-118), and no plan has
-  // been drafted. The field is then empty, for the person to name the work or
-  // for the Architect's title to fill once it replaces that line in the file;
-  // once a plan is drafted the title line is the ticket's name (D-127),
-  // whatever its words.
-  const cut = editor.session?.key == null ? editor.session?.specCut : null;
-  const titleIn = (source: SpecView | null | undefined): string =>
-    !source || source.title === cut ? "" : source.title;
+  // The title a file's title line gives the field: none while the spec has no
+  // title line, as the host mints it from the person's first turn (D-118). The
+  // field is then empty, for the person to name the work or for the
+  // Architect's title to fill once it writes one; once a plan is drafted the
+  // title line is the ticket's name (D-127).
+  const titleIn = (source: SpecView | null | undefined): string => source?.title ?? "";
 
   // One save at a time. Two in flight would each read the file without the
   // other's ids and number the same requirements twice; a section left while a
@@ -303,10 +300,11 @@ export function SpecPane({
     // come back refused in its turn rather than be read as if this writer
     // had already seen it.
     // A title the person has not typed, or has typed blank, is the file's,
-    // the cut included: a save of a section leaves the title line as it is
-    // rather than being held back for want of one.
+    // none included: a save of a section leaves the title line as it is, or
+    // absent, rather than being held back for want of one. Only a spec not
+    // yet written waits for a title, which is what names its folder.
     const wanted = { title: title?.trim() ? title : view.title, sections: { ...sections, ...over }, base: refused.current ?? view };
-    if (wanted.title.trim().length === 0) return null;
+    if (wanted.title.trim().length === 0 && view.slug === null) return null;
     if (
       wanted.title === view.title &&
       JSON.stringify(wanted.sections) === JSON.stringify(view.sections)

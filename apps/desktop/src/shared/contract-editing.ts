@@ -376,10 +376,9 @@ export function readingStateOf(record: EditingSession, spec: SpecReader): string
 /**
  * The sessions a person can pick up again, newest first. Both hosts put this
  * on the snapshot, each reading a spec from where it keeps specs (`spec`,
- * null where there is none): its title, where a title that is still the cut
- * the folder was named from is none (D-118), and a fingerprint of its
- * sections, which is the spec's part of the state the contract was reached
- * at (D-NEW-basic-and-epic-flows).
+ * null where there is none): its title, none while the spec has no title line
+ * (D-118), and a fingerprint of its sections, which is the spec's part of the
+ * state the contract was reached at (D-NEW-basic-and-epic-flows).
  */
 export function openDrafts(records: readonly EditingSession[], spec: SpecReader): OpenDraft[] {
   return records
@@ -400,7 +399,7 @@ export function openDrafts(records: readonly EditingSession[], spec: SpecReader)
           : { open: record.drift.open.length, resolved: record.drift.resolved },
       scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
       specSlug: record.specSlug,
-      title: titleOfSpec(record, text?.title ?? null),
+      title: text?.title.trim() || null,
       lastPane: record.lastPane,
       confirmed: record.confirmed,
       read: record.read,
@@ -411,13 +410,12 @@ export function openDrafts(records: readonly EditingSession[], spec: SpecReader)
     .reverse();
 }
 
-function titleOfSpec(record: EditingSession, stated: string | null): string | null {
-  const title = stated?.trim();
-  return !title || title === record.specCut ? null : title;
-}
-
-/** A title on one line, as the spec's title line and a ticket's name hold it. */
-const oneLineTitle = (title: string): string => title.replace(/\s+/g, " ").trim().slice(0, 500);
+/**
+ * A title on one line, as the spec's title line and a ticket's name hold it:
+ * folded, never cut. One past a ticket name's cap is renamed or refused at
+ * admission (D-127), and nothing shown is cut (D-NEW-nothing-shown-is-cut).
+ */
+const oneLineTitle = (title: string): string => title.replace(/\s+/g, " ").trim();
 
 /**
  * Whether a spec save changed the title its writer read: the person typed
@@ -531,7 +529,6 @@ export class ContractEditing {
           // writes the folder that is already there rather than minting a
           // second from the same title.
           specSlug: target.kind === "spec" ? target.slug : null,
-          specCut: null,
           named: null,
           lastPane: null,
           confirmed: null,
@@ -612,15 +609,14 @@ export class ContractEditing {
 
   /**
    * Which spec this planning writes (D-103), so reopening the session opens the
-   * same one. Set by the host the first time a spec is saved; the text itself
-   * lives in the repository, not here. `cut` is the title line the host wrote,
-   * Untitled, where the person's first turn is what named the folder (D-118).
+   * same one. Set by the host the first time a spec is saved, or as the
+   * person's first turn names its folder (D-118); the text itself lives in the
+   * repository, not here.
    */
-  recordSpec(id: string, slug: string, cut: string | null = null): EditingSession {
+  recordSpec(id: string, slug: string): EditingSession {
     return this.update(id, (session) => {
       if (session.specSlug === slug) return;
       session.specSlug = slug;
-      session.specCut = cut;
       session.revision++;
     });
   }
@@ -651,15 +647,14 @@ export class ContractEditing {
 
   /**
    * A turn of the chat left this planning's spec with a title other than the
-   * one it began with: the Architect titled it. A title that is still the one
-   * the host wrote as it named the folder names nobody's work (D-118), and one
-   * that is already the recorded name was not changed by the turn, whoever
-   * saved it while the turn ran.
+   * one it began with: the Architect titled it. A spec left with no title line
+   * names nobody's work (D-118), and a title that is already the recorded name
+   * was not changed by the turn, whoever saved it while the turn ran.
    */
   architectTitled(id: string, title: string): void {
     const written = oneLineTitle(title);
     this.update(id, (session) => {
-      if (!written || written === session.specCut || written === session.named?.title) return;
+      if (!written || written === session.named?.title) return;
       session.named = { by: "architect", title: written };
     });
   }

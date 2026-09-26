@@ -18,7 +18,6 @@ import {
   retitleSpec,
   specSlug,
   specTitleFromMessage,
-  UNTITLED_SPEC,
   undoGraphEdit,
   type GraphEditOutcome,
   type Spec,
@@ -800,7 +799,8 @@ export function job(
   kind: string,
   repository: string,
   key: string | null,
-  operation: (job: Job) => void,
+  /** The job's work; a promise it returns is what the job waits on. */
+  operation: (job: Job) => void | Promise<void>,
   delay = 1000,
   owner?: EditingOwner,
   /** Called once the job has settled and been said, however it ended. */
@@ -826,24 +826,49 @@ export function job(
   snapshot.jobs = journal([...snapshot.jobs, job]);
   if (owner) editing.started(owner, job);
   emit({ kind: "progress", job });
+  const failed = (error: unknown): void => {
+    job.state = "failed";
+    job.error = String(error instanceof Error ? error.message : error);
+  };
+  const end = (): void => {
+    job.endedAt = new Date().toISOString();
+    void editing.settled(job).catch((error: unknown) => {
+      job.error = String(error);
+      job.state = "failed";
+    }).finally(() => {
+      emit({ kind: "records", repoId: repository, key: job.resultKey ?? key, job });
+      settled?.();
+    });
+  };
   setTimeout(
     () => {
       if (job.state !== "running") return;
+      let pending: void | Promise<void>;
       try {
-        operation(job);
-        job.state = "completed";
+        pending = operation(job);
       } catch (error) {
-        job.state = "failed";
-        job.error = String(error instanceof Error ? error.message : error);
+        failed(error);
+        end();
+        return;
       }
-      job.endedAt = new Date().toISOString();
-      void editing.settled(job).catch((error: unknown) => {
-        job.error = String(error);
-        job.state = "failed";
-      }).finally(() => {
-        emit({ kind: "records", repoId: repository, key: job.resultKey ?? key, job });
-        settled?.();
-      });
+      if (pending === undefined) {
+        job.state = "completed";
+        end();
+        return;
+      }
+      // A job stopped while its work was pending was settled by the stop.
+      pending.then(
+        () => {
+          if (job.state !== "running") return;
+          job.state = "completed";
+          end();
+        },
+        (error: unknown) => {
+          if (job.state !== "running") return;
+          failed(error);
+          end();
+        },
+      );
     },
     new URLSearchParams(location.search).has("slow") ? 8000 : delay,
   );
@@ -1220,6 +1245,20 @@ if (specFiles()[stoppedSlug] === undefined)
  * plan's promise texts, and held while neither moves.
  */
 export const driftRecords = new Map<string, DriftVerdict>();
+
+/**
+ * One try at reading a sample plan against its spec, and the wait between
+ * tries of one that did not run, as the host tries `perbo drift` until it
+ * runs (D-NEW-basic-and-epic-flows). A try throws where the reading does not
+ * run — here, a spec that cannot be read, as `perbo drift` fails on one.
+ * Tests replace either, to make a try fail or the wait instant.
+ */
+export const sampleReadings = {
+  attempt(slug: string | undefined): void {
+    if (slug !== undefined && specFiles()[slug] === undefined) throw new Error(`specs/${slug}/spec.md could not be read.`);
+  },
+  pause: (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms)),
+};
 /**
  * The sample tickets whose plan a person has edited by hand since it was
  * drafted — on a basic ticket's contract page or in an epic's Graph pane — as
@@ -1631,15 +1670,14 @@ export function graphView(repoId: string, key: string): GraphView {
 /**
  * What a ticket drafted from a spec is called, as `admit` calls it where
  * nothing drafted a name, which is always here because the sample has no
- * drafter: the spec's title, unless it still says Untitled (D-118) or another
- * ticket in the repository carries it, else the plan's outcome (D-127). With
+ * drafter: the spec's title, unless it has none (D-118) or another ticket in
+ * the repository carries it, else the plan's outcome (D-127). With
  * `keepTitle`, as `admit --keep-title` calls it, the spec's title is the
  * person's name and stands whatever another ticket is called.
  * Read after the plan is drafted, which is where the outcome comes from.
  */
 function specTicketName(repo: string, key: string, markdown: string, keepTitle: boolean): string {
-  const stated = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
-  const title = !keepTitle && stated === UNTITLED_SPEC ? "" : stated;
+  const title = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
   const taken =
     !keepTitle &&
     snapshot.tasks.some(
@@ -1834,8 +1872,8 @@ export function interviewStatus(id: string): InterviewStatus {
 }
 /**
  * The host's own naming of an unnamed spec from the person's first turn, in
- * the preview's terms: the same folder, the same Untitled title line, the same
- * note.
+ * the preview's terms: the same folder, the same spec with no title line, the
+ * same note.
  */
 export function nameSpecFromTurn(id: string, text: string): void {
   const session = editing.read(id);
@@ -1853,8 +1891,8 @@ export function nameSpecFromTurn(id: string, text: string): void {
         "Two pieces of work are two specs: give this one a title of its own, or open the spec " +
         "that is already there",
     );
-  saveSpec(slug, renderSpec({ ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC }, { highWater: 0, existing: [] }).markdown);
-  editing.recordSpec(id, slug, UNTITLED_SPEC);
+  saveSpec(slug, renderSpec(EMPTY_SPEC_TEXT, { highWater: 0, existing: [] }).markdown);
+  editing.recordSpec(id, slug);
   converse(id, { kind: "note", text: `Named specs/${slug} from your first message.` });
 }
 /**
@@ -2096,7 +2134,8 @@ export function sampleReadingState(id: string): string | null {
  * never lost either — a turn that ends while one is running is owed its
  * reading, which starts as that one settles, and however many turns end
  * meanwhile owe one reading between them. A reading that cannot be started
- * is said in the chat, because the page is waiting on it. The state it is of
+ * is said in the chat in one sentence, with why behind its `i`, because the
+ * page is waiting on it. The state it is of
  * is recorded as the host records it, so the confirm after it reads nothing
  * again.
  */
@@ -2122,9 +2161,11 @@ async function rereadDrift(id: string, owed = false): Promise<void> {
     readings.delete(id);
     rereadOwed.delete(id);
     if (!stillThere(id)) return;
+    const why = (error instanceof Error ? error.message : String(error)).trim();
     converse(id, {
       kind: "note",
-      text: `${REREAD_COULD_NOT_START}: ${error instanceof Error ? error.message : String(error)}`,
+      text: `${REREAD_COULD_NOT_START}.`,
+      ...(why === "" ? {} : { output: why }),
     });
   }
 }

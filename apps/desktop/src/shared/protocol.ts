@@ -633,18 +633,9 @@ export const EditingSessionSchema = z.strictObject({
    */
   specSlug: specSlugText.nullable().default(null),
   /**
-   * The title line the host wrote where it named this planning's spec folder
-   * from the person's first turn (D-118) — Untitled, since the words cut from
-   * the turn name the folder and are no title — or null where the folder was
-   * named any other way. A session recorded while the host wrote the cut
-   * itself on that line holds the cut. Either is no title, so the planning is
-   * Untitled while its spec still states it.
-   */
-  specCut: z.string().min(1).max(500).nullable(),
-  /**
    * Who last wrote the title this planning's spec states, and that title: the
    * person, from the Spec pane's title field, or the Architect, in a turn of
-   * the chat. Null until one of them titles it; the cut is no title (D-118).
+   * the chat. Null until one of them titles it (D-118).
    *
    * A plan is drafted with `admit --keep-title` while the person's is the
    * title the spec still states, so the ticket takes their name and the spec
@@ -653,7 +644,7 @@ export const EditingSessionSchema = z.strictObject({
    * longer states is not mistaken for the person's.
    */
   named: z
-    .strictObject({ by: z.enum(["person", "architect"]), title: z.string().min(1).max(500) })
+    .strictObject({ by: z.enum(["person", "architect"]), title: z.string().min(1) })
     .nullable(),
   /**
    * The asking being put to the person and how much of it they have answered
@@ -815,10 +806,9 @@ export interface OpenDraft {
    */
   specSlug: string | null;
   /**
-   * What the spec it writes is titled, or null while it has no spec, or one
-   * whose title line is still the one the host wrote as it named the folder
-   * (D-118): the planning is Untitled until the Architect or the person
-   * titles it.
+   * What the spec it writes is titled, or null while it has no spec or its spec
+   * has no title line (D-118): the planning is shown as Untitled until the
+   * Architect or the person titles it, and the file never says so.
    */
   title: string | null;
 }
@@ -835,7 +825,10 @@ export interface OpenDraft {
 export interface SpecRow {
   repoId: string;
   slug: string;
-  /** The spec's own first heading, which is what a person named the work. */
+  /**
+   * The spec's own first heading, which is what a person named the work, or
+   * empty where it has none: the picker shows it as Untitled (D-118).
+   */
   title: string;
 }
 export const EditingTargetSchema = z.discriminatedUnion("kind", [

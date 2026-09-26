@@ -48,6 +48,12 @@ describe("the review card, whole", () => {
     expect(out).toContain(summary);
   });
 
+  it("marks where a check's name is cut to its column", () => {
+    const artifact = makeReview({ review_id: "rev_card000000003", changeset_id: "cs_card00000003", decision: "remediable", cost_basis: "unavailable" });
+    artifact.checks = [{ ...artifact.checks[0]!, name: "typecheck:desktop-renderer" }];
+    expect(card(artifact)).toContain(" typecheck:desk… ");
+  });
+
   it("prints a finding's location whole, blocking or not", () => {
     const file = long("packages/search/src/a/deeply/nested/directory/query.ts").replace(/ /g, "-");
     const artifact = makeReview({ review_id: "rev_card000000002", changeset_id: "cs_card00000002", decision: "remediable", cost_basis: "unavailable" });

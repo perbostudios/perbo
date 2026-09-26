@@ -5,7 +5,7 @@ import { createScratch } from "@perbo/test-support";
 import { EditingSessionSchema, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
 import { driftHash, writeDriftRecord } from "@perbo/planning";
 import { editingForm, readingStateOf } from "../../shared/contract-editing.js";
-import { draftedReading, mintSpecFromTitle, saveSpec, specTexts, specView, type SpecDeps } from "./spec.js";
+import { draftedReading, mintSpecFromTitle, repositorySpecs, saveSpec, specTexts, specView, type SpecDeps } from "./spec.js";
 import type { EditingSession, RequestOf, SpecSections } from "../../shared/protocol.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -38,7 +38,6 @@ const session = (over: Record<string, unknown> = {}): EditingSession =>
     change: null,
     lastPane: null,
     confirmed: null, read: null, impact: null,
-    specCut: null,
     named: null,
     interviewModel: null,
     ...over,
@@ -380,15 +379,36 @@ describe("the slug a session records", () => {
 });
 
 describe("mintSpecFromTitle", () => {
-  it("mints a folder from the cut, with an otherwise empty spec titled Untitled (D-118)", () => {
+  it("mints a folder from the cut, with an otherwise empty spec and no title line (D-118)", () => {
     const repo = repository();
     const written = mintSpecFromTitle(repo, "Retry a failed run");
     expect(written.slug).toBe("retry-a-failed-run");
     expect(written.folder).toBe("specs/retry-a-failed-run");
     const text = readFileSync(join(repo.path, written.folder, "spec.md"), "utf8");
-    // The cut names the folder and is no title: it never shows as one.
-    expect(text.split("\n")[0]).toBe("# Untitled");
+    // The cut names the folder and is no title: it never shows as one, and
+    // Untitled is the app's to show, never the file's to say.
+    expect(text).not.toMatch(/^# /m);
+    expect(text).not.toContain("Untitled");
     expect(text).not.toContain("Retry a failed run");
+    expect(repositorySpecs(repo)).toEqual([{ repoId, slug: "retry-a-failed-run", title: "" }]);
+  });
+
+  it("keeps the title line absent through a section saved while nobody has named it, and writes the name given", () => {
+    const repo = repository();
+    const { slug } = mintSpecFromTitle(repo, "Retry a failed run");
+    const d = deps(repo, session({ specSlug: slug }));
+    const empty = { outcome: "", requirements: "", no_gos: "", rabbit_holes: "", notes: "" };
+    const path = join(repo.path, "specs", slug, "spec.md");
+    const saved = saveSpec(d, repo, request({ title: "", sections, base: { title: "", sections: empty } }));
+    expect(saved.conflicting).toEqual([]);
+    expect(saved.view.title).toBe("");
+    expect(readFileSync(path, "utf8")).not.toMatch(/^# |Untitled/m);
+    expect(d.titled).toEqual([]);
+    // Named on the pane: the name is the file's title line, and the person's.
+    const named = saveSpec(d, repo, request({ title: "Theme switcher", sections, base: { title: "", sections } }));
+    expect(named.view.title).toBe("Theme switcher");
+    expect(readFileSync(path, "utf8").split("\n")[0]).toBe("# Theme switcher");
+    expect(d.titled).toEqual(["Theme switcher"]);
   });
 
   it("refuses a cut whose folder is taken, naming the words the folder came from", () => {

@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type PropsWithChildren } from "react";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
-import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, keepsPersonsTitle, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
+import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, keepsPersonsTitle, sameProblems, titleChanged, untouchedPlanning } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
@@ -603,7 +603,6 @@ describe("a planning that holds nothing (D-129)", () => {
       resumeNew: false,
       lastPane: null,
       confirmed: null, read: null, impact: null,
-      specCut: null,
       named: null,
       drift: null,
       change: null,
@@ -702,11 +701,36 @@ describe("who named the spec (D-127)", () => {
     expect(keepsPersonsTitle(f.editing.read(session.id), "Night mode")).toBe(true);
   });
 
-  it("does not take the cut for the Architect's title (D-118)", async () => {
+  it("folds a title of any length to one line and keeps it whole, for admission to rename or refuse (D-127)", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "fresh", repoId });
-    f.editing.recordSpec(session.id, "dark-mode", "Dark mode");
-    f.editing.architectTitled(session.id, "Dark mode");
+    const words = Array.from({ length: 100 }, (_, n) => `word${n}`);
+    const title = words.join(" \n ");
+    const folded = words.join(" ");
+    expect(folded.length).toBeGreaterThan(500);
+    // The Architect's: recorded whole, and not the person's, so the plan is
+    // drafted without --keep-title and the drafter's name replaces it.
+    f.editing.architectTitled(session.id, title);
+    const architect = EditingSessionSchema.parse(f.records().find((record) => record.id === session.id));
+    expect(architect.named).toEqual({ by: "architect", title: folded });
+    expect(keepsPersonsTitle(architect, title)).toBe(false);
+    // The person's: recorded whole and kept, so the plan is drafted with
+    // --keep-title, which refuses a name past the cap rather than cutting it
+    // (admit.from-spec.test.ts, "refuses a title longer than a ticket's name may be").
+    f.editing.personTitled(session.id, title);
+    expect(f.editing.read(session.id).named).toEqual({ by: "person", title: folded });
+    expect(keepsPersonsTitle(f.editing.read(session.id), title)).toBe(true);
+    expect(keepsPersonsTitle(f.editing.read(session.id), `${folded.slice(0, 500)} changed`)).toBe(false);
+    // A save that changes a long title past any column is a change.
+    expect(titleChanged({ title: `${folded} a`, base: { title: `${folded} b` } })).toBe(true);
+  });
+
+  it("does not take a spec left with no title line for the Architect's title (D-118)", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.recordSpec(session.id, "dark-mode");
+    f.editing.architectTitled(session.id, "");
+    f.editing.architectTitled(session.id, "  ");
     expect(f.editing.read(session.id).named).toBeNull();
   });
 });

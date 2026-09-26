@@ -69,7 +69,7 @@ function captureEdits(context: TaskContext) {
   const original = bridge.request.bind(bridge);
   let session = EditingSessionSchema.parse({
     version: 1, id: crypto.randomUUID(), repoId: context.repoId, key: context.detail.ticket.key,
-    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, confirmed: null, read: null, impact: null, specCut: null, named: null, drift: null, change: null, phase: "editing", error: null,
+    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, confirmed: null, read: null, impact: null, named: null, drift: null, change: null, phase: "editing", error: null,
     operation: null, interviewModel: null, form: editingForm(context.workspace.settings, context.detail),
   });
   return vi.spyOn(bridge, "request").mockImplementation(

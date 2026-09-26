@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
-import { editing, job, sampleInterviews, saveSpec, snapshot, specFiles, writeGraphEdit } from "./records.js";
+import { editing, job, sampleInterviews, sampleReadings, saveSpec, snapshot, specFiles, writeGraphEdit } from "./records.js";
 import { applyGraphEdit } from "@perbo/planning/browser";
 import type { EditingSession, Job } from "../shared/protocol.js";
 import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
@@ -140,14 +140,19 @@ it("deletes the ticket once nothing holds it, and every planning over it with it
  * drafted from with Generate plan: the ticket it drafts, and the spec's title
  * after. `byPerson` is whether the person gave that title on the Spec pane.
  */
-async function draftedUnder(byPerson: boolean): Promise<{ ticket: string; spec: string }> {
+async function draftedUnder(
+  byPerson: boolean,
+  heading?: string | null,
+): Promise<{ ticket: string; spec: string }> {
   const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+  const title = heading === undefined ? taken : heading;
   const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
   const slug = "confirmation-email";
   editing.recordSpec(opened.id, slug);
   saveSpec(
     slug,
-    `# ${taken}\n\n## Outcome\n\nNew users receive a confirmation email.\n\n` +
+    (title === null ? "" : `# ${title}\n\n`) +
+      "## Outcome\n\nNew users receive a confirmation email.\n\n" +
       "## Requirements\n\n- R1: A signup queues exactly one email.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
   );
   if (byPerson) editing.personTitled(opened.id, taken);
@@ -173,6 +178,17 @@ it("names a plan whose spec nobody titled as admit does, and the spec takes that
     ticket: "New users receive a confirmation email.",
     spec: "# New users receive a confirmation email.",
   });
+});
+
+it("names a plan whose spec has no title line by its outcome, and the spec takes that name (D-118, D-127)", async () => {
+  expect(await draftedUnder(false, null)).toEqual({
+    ticket: "New users receive a confirmation email.",
+    spec: "# New users receive a confirmation email.",
+  });
+});
+
+it("names a plan whose spec is titled Untitled by that title, which is the app's display word and no mark in the file (D-118)", async () => {
+  expect(await draftedUnder(false, "Untitled")).toEqual({ ticket: "Untitled", spec: "# Untitled" });
 });
 
 it("moves a ticket on a principle with no finding answered, as the principle alone does, and publishes nothing (D-065)", async () => {
@@ -427,6 +443,37 @@ it("lands a plan Start over drafts with none of the problems of the plan it repl
   expect(landed.drift).toBeNull();
   expect(landed.read).not.toBeNull();
   expect(readingsOf(key)).toHaveLength(before);
+});
+
+it("tries a reading again until it runs, and stops trying once it is cancelled, landing nothing (D-NEW-basic-and-epic-flows)", async () => {
+  const { id, key } = await draftedFromSpec("reading-cancelled-between-tries", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  let tries = 0;
+  let release = (): void => undefined;
+  const attempt = vi.spyOn(sampleReadings, "attempt").mockImplementation(() => {
+    tries += 1;
+    if (tries === 1) throw new Error("No credential for Claude.");
+  });
+  const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(
+    () => new Promise<void>((done) => (release = done)),
+  );
+  try {
+    const reading = await sampleBridge.request({ kind: "driftCheck", id, state: "0123456789abcdef" });
+    await vi.waitFor(() => expect(pause).toHaveBeenCalledWith(2_000), { timeout: 5000 });
+    await sampleBridge.request({ kind: "cancel", jobId: reading.id });
+    release();
+    await new Promise((done) => setTimeout(done, 50));
+    expect(tries).toBe(1);
+    expect(snapshot.jobs.find((each) => each.id === reading.id)!.state).toBe("cancelled");
+    expect(editing.read(id).drift).toBeNull();
+    expect(editing.read(id).read).not.toBe("0123456789abcdef");
+  } finally {
+    attempt.mockRestore();
+    pause.mockRestore();
+  }
 });
 
 it("records nothing of a reading Start over overtook: the plan it read has gone", async () => {

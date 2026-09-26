@@ -320,9 +320,16 @@ interface Row {
 }
 type Bin = { label: string; confirm: string; remove: () => Promise<void> };
 /**
+ * What a planning or a spec is called on screen while nobody has named the
+ * work. Display only: the spec's file has no title line meanwhile, and never
+ * says this (D-118).
+ */
+export const UNTITLED = "Untitled";
+
+/**
  * What to call a planning: its ticket's name, else the title of the spec it is
- * writing (D-127), else Untitled — never the cut of the person's first turn
- * that named the spec's folder, which the drafts list leaves off (D-118). Both
+ * writing (D-127), else {@link UNTITLED} — never the cut of the person's first
+ * turn that named the spec's folder, which is no title (D-118). Both
  * names are read off the snapshot: the drafts list, with each spec's title, is
  * read again on every editing change — any write to a planning's record, and a
  * Spec-pane save of a new title — and the tickets and their names on a records
@@ -332,7 +339,7 @@ export function titleOfDraft(workspace: Pick<Snapshot, "tasks" | "titles">, draf
   // The ticket's name: the one a person gave it on this machine, else the one on the ticket.
   const ticket = workspace.tasks.find((row) => row.repoId === draft.repoId && row.ticket.key === draft.key);
   const named = ticket && (workspace.titles?.[draft.repoId + ":" + ticket.ticket.key] ?? ticket.ticket.title).trim();
-  return named || draft.title?.trim() || "Untitled";
+  return named || draft.title?.trim() || UNTITLED;
 }
 
 /**
@@ -510,14 +517,14 @@ function Picker({
     ...orphaned.map((spec) => ({
       id: "spec:" + spec.repoId + "/" + spec.slug,
       glyph: "spec" as const,
-      title: spec.title,
+      title: spec.title || UNTITLED,
       detail: repoName(spec.repoId) + " · spec written, no plan yet",
       run: () => open({ kind: "spec", repoId: spec.repoId, slug: spec.slug }, "spec"),
       // This row is the spec itself, with no planning and no plan around it to
       // name in the sentence. It is kept nowhere else and nothing puts it back.
       bin: {
         label: "Delete spec",
-        confirm: `Delete the spec “${spec.title}”? Everything written in it goes, and it is not kept anywhere else.`,
+        confirm: `Delete the spec “${spec.title || UNTITLED}”? Everything written in it goes, and it is not kept anywhere else.`,
         remove: () =>
           remove(deletes.spec(spec.repoId, spec.slug), [], () =>
             bridge.request({ kind: "specDelete", repoId: spec.repoId, slug: spec.slug }),

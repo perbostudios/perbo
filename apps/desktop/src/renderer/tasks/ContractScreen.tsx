@@ -14,6 +14,7 @@ import { readingState } from "../../shared/contract-editing.js";
 import { useSettled } from "../planning/settled.js";
 import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { CriteriaEditor } from "./CriteriaEditor.js";
+import { ReadingFailedNotice } from "../planning/ReadingFailed.js";
 import { changeKey, chatChange, criteriaChange } from "../planning/change-marks.js";
 import type { useContractEditing } from "../contract-editor.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
@@ -26,8 +27,6 @@ const ContractGraph = lazy(() =>
 /** Why a confirm is refused while a reading of the plan against its spec has problems open, for either shape. */
 export const PROBLEMS_HOLD =
   "The plan and the spec no longer promise the same thing. Resolve each problem on the Problems tab, or change the plan, then confirm again.";
-/** What a confirm the reading could not be made for says after why, where no problem is open. */
-const CONFIRM_WITHOUT = "Confirm again to go ahead without the reading.";
 /** Why a basic ticket's Confirm contract waits while the drafts list does not yet carry its planning. */
 export const NOT_LISTED = "The planning is still being read. Confirm again in a moment.";
 
@@ -185,9 +184,11 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   const readAt = reads ? readingState(listed.spec, session.form.draft) : null;
   const [confirming, setConfirming] = useState(false);
   const [holding, setHolding] = useState<string | null>(null);
-  // The state a reading could not be made at: never a wall of its own, so the
-  // next confirm at it goes ahead without one where no problem is open.
-  const [unread, setUnread] = useState<string | null>(null);
+  // Why the confirm's reading did not run, once the host tried it until it
+  // ran and every try failed: said in a pop-up over this page, which puts the
+  // person back here with the confirm offered again. Nothing is confirmed
+  // without the reading (D-NEW-basic-and-epic-flows).
+  const [failedReading, setFailedReading] = useState<string | null>(null);
   // The last change the chat made to a basic ticket's criteria, marked over
   // the words it left; a change made here by hand is the person's own and is
   // marked nowhere (D-128). Diffed once per change.
@@ -273,28 +274,26 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
       return;
     }
     setHolding(null);
-    // Problems still open hold the confirm whatever else is true: a reading
-    // that could not be made lets it go ahead only where none is open.
-    if (unread === readAt || listed.read === readAt) {
+    // Problems still open hold the confirm whatever else is true.
+    if (listed.read === readAt) {
       if (problemsOpen(workspace.drafts, session.id)) setHolding(PROBLEMS_HOLD);
       else start();
       return;
     }
-    // What a reading that could not be made says after why: the way on where
-    // no problem is open, and the problems where any are.
-    const withoutReading = (): string => (problemsOpen(workspace.drafts, session.id) ? PROBLEMS_HOLD : CONFIRM_WITHOUT);
+    // A reading that did not run holds the confirm too: the pop-up says why,
+    // and the next press reads again.
     setConfirming(true);
     try {
       const job = await settled(await bridge.request({ kind: "driftCheck", id: session.id, state: readAt }));
       const verdict = job.state === "completed" ? DriftVerdictSchema.safeParse(job.result) : null;
-      if (verdict === null || !verdict.success) {
-        setUnread(readAt);
-        setHolding(`${job.error ?? "The reading did not finish."} ${withoutReading()}`);
-      } else if (!verdict.data.dismissed && verdict.data.findings.length > 0) setHolding(PROBLEMS_HOLD);
+      if (verdict === null)
+        setFailedReading(job.error ?? "The reading did not finish.");
+      else if (!verdict.success)
+        setFailedReading("The reading came back in a shape this page does not understand.");
+      else if (!verdict.data.dismissed && verdict.data.findings.length > 0) setHolding(PROBLEMS_HOLD);
       else start();
     } catch (error) {
-      setUnread(readAt);
-      setHolding(`${errorMessage(error)} ${withoutReading()}`);
+      setFailedReading(errorMessage(error));
     } finally {
       setConfirming(false);
     }
@@ -316,7 +315,8 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     retry: false,
   });
   const outside = impact.data?.warnings.length ?? 0;
-  const approving = busy || action.isPending || pending !== null || writing !== null || confirming;
+  const approving =
+    busy || action.isPending || pending !== null || writing !== null || confirming || failedReading !== null;
   useShortcut("approve", approving ? null : () => void confirm());
   useShortcut("rename", () => setRenaming(true));
   // While the confirm's reading runs, that is the page: the contract is not
@@ -332,378 +332,385 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
       />
     );
   return (
-    <section className="screen" data-screen="s11">
-      <WizardHeader>
-        <span className="mono muted small">{costLabel(detail)} spent</span>
-      </WizardHeader>
-      <div className="contract-layout">
-        <div className="contract-main">
-          <div>
-            <div className="contract-title">
-              <span className="mono muted">{displayKey(ticket.key)}</span>
-              <Rename
-                title={title}
-                size={17}
-                open={renaming}
-                onOpenChange={setRenaming}
-                onSave={(title) =>
-                  action.mutateAsync({
-                    kind: "rename",
-                    repoId,
-                    key: ticket.key,
-                    title,
-                  })
-                }
-              />
-              <span className="small muted">click to rename</span>
-            </div>
-            <div className="outcome-summary">{contract.outcome}</div>
-          </div>
-          {shows === "graph" ? (
-            // What a graph freezes, on the page that freezes it: the division
-            // itself, read and never curated here — that is the Graph pane's
-            // (D-NEW-basic-and-epic-flows).
+    <>
+      <section className="screen" data-screen="s11">
+        <WizardHeader>
+          <span className="mono muted small">{costLabel(detail)} spent</span>
+        </WizardHeader>
+        <div className="contract-layout">
+          <div className="contract-main">
             <div>
-              <SectionLabel>Execution graph · {criteria.length} criteria</SectionLabel>
-              <Suspense fallback={<p className="small muted">Reading the graph…</p>}>
-                <ContractGraph repoId={repoId} ticketKey={ticket.key} />
-              </Suspense>
-              {/* Approving freezes how each criterion is proven, and a graph
-                  shows what is proven rather than how, so what moved since the
-                  draft is named under it (D-128). */}
-              {criteria.some((criterion) => moved.has(criterion.id)) && (
-                <p className="criterion-note">
-                  Proven differently from the draft:{" "}
-                  <span className="mono">
-                    {criteria.filter((criterion) => moved.has(criterion.id)).map((criterion) => criterion.id).join(", ")}
-                  </span>
-                </p>
-              )}
+              <div className="contract-title">
+                <span className="mono muted">{displayKey(ticket.key)}</span>
+                <Rename
+                  title={title}
+                  size={17}
+                  open={renaming}
+                  onOpenChange={setRenaming}
+                  onSave={(title) =>
+                    action.mutateAsync({
+                      kind: "rename",
+                      repoId,
+                      key: ticket.key,
+                      title,
+                    })
+                  }
+                />
+                <span className="small muted">click to rename</span>
+              </div>
+              <div className="outcome-summary">{contract.outcome}</div>
             </div>
-          ) : shows === "criteria-editor" && editor !== null ? (
-            // A basic ticket's plan is its criteria, and this is where they
-            // are changed: each change written into the contract as it is
-            // made. The marks are the chat's last change; direct edits carry
-            // none (D-128).
+            {shows === "graph" ? (
+              // What a graph freezes, on the page that freezes it: the division
+              // itself, read and never curated here — that is the Graph pane's
+              // (D-NEW-basic-and-epic-flows).
+              <div>
+                <SectionLabel>Execution graph · {criteria.length} criteria</SectionLabel>
+                <Suspense fallback={<p className="small muted">Reading the graph…</p>}>
+                  <ContractGraph repoId={repoId} ticketKey={ticket.key} />
+                </Suspense>
+                {/* Approving freezes how each criterion is proven, and a graph
+                    shows what is proven rather than how, so what moved since the
+                    draft is named under it (D-128). */}
+                {criteria.some((criterion) => moved.has(criterion.id)) && (
+                  <p className="criterion-note">
+                    Proven differently from the draft:{" "}
+                    <span className="mono">
+                      {criteria.filter((criterion) => moved.has(criterion.id)).map((criterion) => criterion.id).join(", ")}
+                    </span>
+                  </p>
+                )}
+              </div>
+            ) : shows === "criteria-editor" && editor !== null ? (
+              // A basic ticket's plan is its criteria, and this is where they
+              // are changed: each change written into the contract as it is
+              // made. The marks are the chat's last change; direct edits carry
+              // none (D-128).
+              <div>
+                <SectionLabel>Acceptance criteria · {criteria.length}</SectionLabel>
+                <CriteriaEditor editor={editor} onCommit={writeThrough} marks={marks} />
+                {(writing !== null || turnedAway !== null || editor.error) && (
+                  <p className="small muted" role="status">
+                    {writing !== null
+                      ? "Writing the change into the contract…"
+                      : (turnedAway ?? editor.error)}
+                  </p>
+                )}
+              </div>
+            ) : (
             <div>
               <SectionLabel>Acceptance criteria · {criteria.length}</SectionLabel>
-              <CriteriaEditor editor={editor} onCommit={writeThrough} marks={marks} />
-              {(writing !== null || turnedAway !== null || editor.error) && (
-                <p className="small muted" role="status">
-                  {writing !== null
-                    ? "Writing the change into the contract…"
-                    : (turnedAway ?? editor.error)}
-                </p>
-              )}
-            </div>
-          ) : (
-          <div>
-            <SectionLabel>Acceptance criteria · {criteria.length}</SectionLabel>
-            <div className="contract-criteria">
-              {criteria.map((criterion, index) => (
-                <div key={criterion.id}>
-                  <span className="criterion-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div className="criterion-content">
-                    <p>{criterion.text}</p>
-                    <p className="criterion-note">
-                      Expected {criterion.expected_verification.kind}:{" "}
-                      {criterion.expected_verification.assertion}
-                      {/* Approving freezes this, so the eye goes to what moved
-                          rather than evenly over every line. An assertion
-                          changed on purpose is the ordinary case — this is an
-                          invitation to read one line, not a warning. */}
-                      {moved.has(criterion.id) && (
-                        <span className="criterion-moved"> · changed since the draft</span>
+              <div className="contract-criteria">
+                {criteria.map((criterion, index) => (
+                  <div key={criterion.id}>
+                    <span className="criterion-number">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="criterion-content">
+                      <p>{criterion.text}</p>
+                      <p className="criterion-note">
+                        Expected {criterion.expected_verification.kind}:{" "}
+                        {criterion.expected_verification.assertion}
+                        {/* Approving freezes this, so the eye goes to what moved
+                            rather than evenly over every line. An assertion
+                            changed on purpose is the ordinary case — this is an
+                            invitation to read one line, not a warning. */}
+                        {moved.has(criterion.id) && (
+                          <span className="criterion-moved"> · changed since the draft</span>
+                        )}
+                      </p>
+                      {criterion.expected_verification.kind === "manual" && (
+                        <>
+                          <p className="criterion-note">
+                            Reviewer:{" "}
+                            {criterion.expected_verification.manual_reviewer}
+                          </p>
+                          <p className="criterion-note">
+                            Why manual:{" "}
+                            {criterion.expected_verification.manual_reason}
+                          </p>
+                        </>
                       )}
-                    </p>
-                    {criterion.expected_verification.kind === "manual" && (
-                      <>
-                        <p className="criterion-note">
-                          Reviewer:{" "}
-                          {criterion.expected_verification.manual_reviewer}
-                        </p>
-                        <p className="criterion-note">
-                          Why manual:{" "}
-                          {criterion.expected_verification.manual_reason}
-                        </p>
-                      </>
-                    )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-          )}
-          <FactList
-            className="boundary-facts"
-            rows={[
-              [
-                "Allowed scope",
-                contract.scope.paths_allowed.join(" · ") +
-                  " · " +
-                  contract.scope.expansion_budget_files +
-                  " files of headroom",
-              ],
-              ["Off limits", contract.scope.paths_prohibited.join(" · ")],
-              [
-                "Base commit",
-                contract.base.base_commit.slice(0, 7) +
-                  " · " +
-                  (repo?.branch ?? "") +
-                  (repo?.head === contract.base.base_commit
-                    ? " · still current"
-                    : " · verify before running"),
-              ],
-            ]}
-          />
-          {/* The scope reads as globs; the files it reaches are what a person
-              is actually approving. This opens them read-only, beside the
-              contract, rather than asking anyone to hold a glob in their head. */}
-          <button
-            type="button"
-            className="text-button small"
-            onClick={() => show("explorer")}
-          >
-            Browse the files this scope reaches
-          </button>
-          {/* Where the plan and the spec disagree, read before the contract is
-              frozen: this is the last moment either can still move. Beside the
-              impact count and in its manner — advice, never a gate, because a
-              warning that held the button is one people learn to click past
-              (D-128). */}
-          {ticket.approved_at === null && detail.specFindings.length > 0 && (
-            <div className="spec-findings">
-              {detail.specFindings.map((finding) => (
-                <p className="scope-outside" key={`${finding.kind}:${finding.requirementId}`}>
-                  <InkIcon name="document" size={18} />
-                  <span>
-                    {finding.kind === "uncited" ? (
-                      <>
-                        <b>{finding.requirementId}</b> is in the spec and nothing in this plan
-                        answers it{finding.text === null ? "" : `: “${finding.text}”`}. Add a
-                        criterion for it, or ask the chat to take it out of the spec.
-                      </>
-                    ) : (
-                      <>
-                        {finding.criteria.length === 1 ? "A criterion" : "Criteria"}{" "}
-                        <span className="mono">{finding.criteria.join(", ")}</span> cite{" "}
-                        <b>{finding.requirementId}</b>, which the spec no longer states. Point them
-                        at a requirement it does carry, or ask the chat to put it back —
-                        approving is refused while a citation points at nothing.
-                      </>
-                    )}
-                  </span>
-                </p>
-              ))}
-            </div>
-          )}
-          {/* Only where there is something to say. A scope that covers what the
-              work reaches is the ordinary case, and a line reporting nothing is
-              a line in the way of the one that matters. */}
-          {ticket.approved_at === null && outside > 0 && (
-            <p className="scope-outside">
-              <InkIcon name="growth-chart" size={18} />
+            )}
+            <FactList
+              className="boundary-facts"
+              rows={[
+                [
+                  "Allowed scope",
+                  contract.scope.paths_allowed.join(" · ") +
+                    " · " +
+                    contract.scope.expansion_budget_files +
+                    " files of headroom",
+                ],
+                ["Off limits", contract.scope.paths_prohibited.join(" · ")],
+                [
+                  "Base commit",
+                  contract.base.base_commit.slice(0, 7) +
+                    " · " +
+                    (repo?.branch ?? "") +
+                    (repo?.head === contract.base.base_commit
+                      ? " · still current"
+                      : " · verify before running"),
+                ],
+              ]}
+            />
+            {/* The scope reads as globs; the files it reaches are what a person
+                is actually approving. This opens them read-only, beside the
+                contract, rather than asking anyone to hold a glob in their head. */}
+            <button
+              type="button"
+              className="text-button small"
+              onClick={() => show("explorer")}
+            >
+              Browse the files this scope reaches
+            </button>
+            {/* Where the plan and the spec disagree, read before the contract is
+                frozen: this is the last moment either can still move. Beside the
+                impact count and in its manner — advice, never a gate, because a
+                warning that held the button is one people learn to click past
+                (D-128). */}
+            {ticket.approved_at === null && detail.specFindings.length > 0 && (
+              <div className="spec-findings">
+                {detail.specFindings.map((finding) => (
+                  <p className="scope-outside" key={`${finding.kind}:${finding.requirementId}`}>
+                    <InkIcon name="document" size={18} />
+                    <span>
+                      {finding.kind === "uncited" ? (
+                        <>
+                          <b>{finding.requirementId}</b> is in the spec and nothing in this plan
+                          answers it{finding.text === null ? "" : `: “${finding.text}”`}. Add a
+                          criterion for it, or ask the chat to take it out of the spec.
+                        </>
+                      ) : (
+                        <>
+                          {finding.criteria.length === 1 ? "A criterion" : "Criteria"}{" "}
+                          <span className="mono">{finding.criteria.join(", ")}</span> cite{" "}
+                          <b>{finding.requirementId}</b>, which the spec no longer states. Point them
+                          at a requirement it does carry, or ask the chat to put it back —
+                          approving is refused while a citation points at nothing.
+                        </>
+                      )}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            )}
+            {/* Only where there is something to say. A scope that covers what the
+                work reaches is the ordinary case, and a line reporting nothing is
+                a line in the way of the one that matters. */}
+            {ticket.approved_at === null && outside > 0 && (
+              <p className="scope-outside">
+                <InkIcon name="growth-chart" size={18} />
+                <span>
+                  {outside} {outside === 1 ? "file" : "files"} outside this scope{" "}
+                  {outside === 1 ? "imports" : "import"} what it changes, or sit in a class worth
+                  reading — a migration, a manifest, configuration, CI. Widening the scope is
+                  free now and a new contract later.
+                </span>
+                <button type="button" className="text-button small" onClick={() => show("explorer")}>
+                  Read them
+                </button>
+              </p>
+            )}
+            <div className="scope-message">
+              <InkIcon name="locked" size={22} />
               <span>
-                {outside} {outside === 1 ? "file" : "files"} outside this scope{" "}
-                {outside === 1 ? "imports" : "import"} what it changes, or sit in a class worth
-                reading — a migration, a manifest, configuration, CI. Widening the scope is
-                free now and a new contract later.
+                Four fields freeze when you approve: outcome, criteria, scope,
+                base. How the work gets done stays the agent’s — you never approve
+                steps, and a change to any frozen field is a new version of the
+                contract.
               </span>
-              <button type="button" className="text-button small" onClick={() => show("explorer")}>
-                Read them
-              </button>
-            </p>
-          )}
-          <div className="scope-message">
-            <InkIcon name="locked" size={22} />
-            <span>
-              Four fields freeze when you approve: outcome, criteria, scope,
-              base. How the work gets done stays the agent’s — you never approve
-              steps, and a change to any frozen field is a new version of the
-              contract.
-            </span>
-          </div>
-          {action.error && (
-            <Notice tone="danger">{errorMessage(action.error)}</Notice>
-          )}
-        </div>
-        <aside className="contract-side">
-          <section>
-            <SectionLabel>Repository</SectionLabel>
-            <div className="row">
-              <InkIcon name="folder" size={17} />
-              <span className="mono spacer">{repo?.name}</span>
-              <span className="mono muted small">{repo?.branch}</span>
             </div>
-          </section>
-          <section>
-            <SectionLabel>Computation</SectionLabel>
-            {/* Chosen here, on the last page before the loop starts. The
-                models are not among the four fields approving freezes
-                (ADR-0016), so they stay a choice right up to that moment. */}
-            <FactList
-              className="run-facts"
-              rows={[
-                ["Executor", model("executor", models.executorModel + effortText(models.executorEffort))],
-                [
-                  "Reviewer",
-                  model("reviewer", models.reviewerModel + effortText(models.reviewerEffort) + " · independent"),
-                ],
-                ["Plan level", contract.level],
-                ...(models.executorSkills.length
-                  ? ([["Skills", models.executorSkills.join(" · ")]] as [
-                      string,
-                      ReactNode,
-                    ][])
-                  : []),
-              ]}
-            />
-            {modelError !== null && <Notice tone="danger">{modelError}</Notice>}
-          </section>
-          <section>
-            <SectionLabel>This run</SectionLabel>
-            <FactList
-              className="run-facts"
-              rows={[
-                [
-                  "Stops after",
-                  detail.effective.stallMinutes + " min with no tool activity",
-                ],
-                ["Time, tokens, commands", "No ceiling"],
-                [
-                  "Cost cap",
-                  "$" +
-                    detail.effective.ticketDollars.toFixed(2) +
-                    " a ticket, on an API key",
-                ],
-              ]}
-            />
-          </section>
-          <section>
-            <span className="small muted">Likely cost</span>
-            <div className="cost-estimate">Not estimated</div>
-            <p className="small muted">
-              On a subscription nothing caps the spend, because the figure the
-              runner measures is not your bill. The cost cap above applies only
-              where your executor authenticates with an API key.
-            </p>
-          </section>
-          <div className="approval-buttons">
-            {bundle && (
+            {action.error && (
+              <Notice tone="danger">{errorMessage(action.error)}</Notice>
+            )}
+          </div>
+          <aside className="contract-side">
+            <section>
+              <SectionLabel>Repository</SectionLabel>
+              <div className="row">
+                <InkIcon name="folder" size={17} />
+                <span className="mono spacer">{repo?.name}</span>
+                <span className="mono muted small">{repo?.branch}</span>
+              </div>
+            </section>
+            <section>
+              <SectionLabel>Computation</SectionLabel>
+              {/* Chosen here, on the last page before the loop starts. The
+                  models are not among the four fields approving freezes
+                  (ADR-0016), so they stay a choice right up to that moment. */}
+              <FactList
+                className="run-facts"
+                rows={[
+                  ["Executor", model("executor", models.executorModel + effortText(models.executorEffort))],
+                  [
+                    "Reviewer",
+                    model("reviewer", models.reviewerModel + effortText(models.reviewerEffort) + " · independent"),
+                  ],
+                  ["Plan level", contract.level],
+                  ...(models.executorSkills.length
+                    ? ([["Skills", models.executorSkills.join(" · ")]] as [
+                        string,
+                        ReactNode,
+                      ][])
+                    : []),
+                ]}
+              />
+              {modelError !== null && <Notice tone="danger">{modelError}</Notice>}
+            </section>
+            <section>
+              <SectionLabel>This run</SectionLabel>
+              <FactList
+                className="run-facts"
+                rows={[
+                  [
+                    "Stops after",
+                    detail.effective.stallMinutes + " min with no tool activity",
+                  ],
+                  ["Time, tokens, commands", "No ceiling"],
+                  [
+                    "Cost cap",
+                    "$" +
+                      detail.effective.ticketDollars.toFixed(2) +
+                      " a ticket, on an API key",
+                  ],
+                ]}
+              />
+            </section>
+            <section>
+              <span className="small muted">Likely cost</span>
+              <div className="cost-estimate">Not estimated</div>
+              <p className="small muted">
+                On a subscription nothing caps the spend, because the figure the
+                runner measures is not your bill. The cost cap above applies only
+                where your executor authenticates with an API key.
+              </p>
+            </section>
+            <div className="approval-buttons">
+              {bundle && (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={recover}
+                    onChange={(event) => setRecover(event.target.checked)}
+                  />
+                  <span>Continue from the last attempt’s retained changes.</span>
+                </label>
+              )}
               <label className="checkbox-row">
                 <input
                   type="checkbox"
-                  checked={recover}
-                  onChange={(event) => setRecover(event.target.checked)}
+                  checked={publish}
+                  onChange={(event) => setPublish(event.target.checked)}
                 />
-                <span>Continue from the last attempt’s retained changes.</span>
+                <span>
+                  After the review gate passes, push the branch and open a pull
+                  request. I will merge it myself.
+                </span>
               </label>
-            )}
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={publish}
-                onChange={(event) => setPublish(event.target.checked)}
-              />
-              <span>
-                After the review gate passes, push the branch and open a pull
-                request. I will merge it myself.
-              </span>
-            </label>
-            {pending !== null && (
-              <Notice tone="warning">
-                This planning holds a scope the contract does not carry yet —{" "}
-                {pending.allowed.length} allowed{" "}
-                {pending.allowed.length === 1 ? "path" : "paths"} and{" "}
-                {pending.prohibited.length} prohibited. Approving freezes the
-                contract&rsquo;s scope, not this one, so write it in first
-                {shows === "criteria-editor" ? "." : ": open the contract again with Back and save it."}
-                {shows === "criteria-editor" && (
-                  <Button disabled={writing !== null || busy} onClick={writeThrough}>
-                    Write the scope in
-                  </Button>
-                )}
-              </Notice>
-            )}
-            {confirming && (
-              <p className="small muted" role="status">
-                Reading the plan against the spec…
-              </p>
-            )}
-            {holding !== null && <Notice tone="warning">{holding}</Notice>}
-            <Button variant="primary" disabled={approving} onClick={() => void confirm()}>
-              {ticket.approved_at
-                ? "Start the loop"
-                : "Approve · start the loop"}
-            </Button>
-            <div className="row">
-              {/* Inside planning the planning's tabs are the way back. */}
-              {planning === undefined && <Button
-                // Shut only where it leads to the ticket's own editor: a
-                // contract with named manual reviewers is edited with the CLI
-                // so the assignments survive, and an approved one is frozen
-                // (ADR-0016). Neither is a reason not to go back to a planning
-                // — a person not ready to approve has nowhere else to go.
-                disabled={
-                  curating === undefined &&
-                  (criteria.some(
-                    (criterion) => criterion.expected_verification.kind === "manual",
-                  ) ||
-                    ticket.approved_at !== null)
-                }
-                onClick={() =>
-                  // The contract states what freezes; changing it is done in
-                  // the planning curating it, or else the ticket's own editor.
-                  curating === undefined
-                    ? navigate({ page: "task", repoId, key: ticket.key, edit: true })
-                    : navigate({ page: "planning", sessionId: curating.id, pane: curatingPane })
-                }
+              {pending !== null && (
+                <Notice tone="warning">
+                  This planning holds a scope the contract does not carry yet —{" "}
+                  {pending.allowed.length} allowed{" "}
+                  {pending.allowed.length === 1 ? "path" : "paths"} and{" "}
+                  {pending.prohibited.length} prohibited. Approving freezes the
+                  contract&rsquo;s scope, not this one, so write it in first
+                  {shows === "criteria-editor" ? "." : ": open the contract again with Back and save it."}
+                  {shows === "criteria-editor" && (
+                    <Button disabled={writing !== null || busy} onClick={writeThrough}>
+                      Write the scope in
+                    </Button>
+                  )}
+                </Notice>
+              )}
+              {confirming && (
+                <p className="small muted" role="status">
+                  Reading the plan against the spec…
+                </p>
+              )}
+              {holding !== null && <Notice tone="warning">{holding}</Notice>}
+              <Button variant="primary" disabled={approving} onClick={() => void confirm()}>
+                {ticket.approved_at
+                  ? "Start the loop"
+                  : "Approve · start the loop"}
+              </Button>
+              <div className="row">
+                {/* Inside planning the planning's tabs are the way back. */}
+                {planning === undefined && <Button
+                  // Shut only where it leads to the ticket's own editor: a
+                  // contract with named manual reviewers is edited with the CLI
+                  // so the assignments survive, and an approved one is frozen
+                  // (ADR-0016). Neither is a reason not to go back to a planning
+                  // — a person not ready to approve has nowhere else to go.
+                  disabled={
+                    curating === undefined &&
+                    (criteria.some(
+                      (criterion) => criterion.expected_verification.kind === "manual",
+                    ) ||
+                      ticket.approved_at !== null)
+                  }
+                  onClick={() =>
+                    // The contract states what freezes; changing it is done in
+                    // the planning curating it, or else the ticket's own editor.
+                    curating === undefined
+                      ? navigate({ page: "task", repoId, key: ticket.key, edit: true })
+                      : navigate({ page: "planning", sessionId: curating.id, pane: curatingPane })
+                  }
+                >
+                  Back to planning
+                </Button>}
+                <Button onClick={() => navigate({ page: "home" })}>
+                  Save draft
+                </Button>
+              </div>
+              {/* Offered at every stage, the loop included: a piece of work is
+                  deleted whole and the evidence goes with it
+                  (D-129). One stage is not: a ticket
+                  whose pull request is open has a record on GitHub that this
+                  machine does not own, and the host refuses it there too. */}
+              {ticket.state !== "pr_open" && (
+                <button
+                  className="text-button small muted contract-delete"
+                  disabled={held}
+                  onClick={() => setDeleting(true)}
+                >
+                  Delete this contract
+                </button>
+              )}
+            </div>
+          </aside>
+        </div>
+        {deleting && (
+          <Dialog title={"Delete " + displayKey(ticket.key) + "?"} onClose={() => setDeleting(false)}>
+            <p>
+              This removes the ticket, its contract and plan, the reading of that plan against its
+              spec, every attempt it recorded and the evidence those attempts sealed, and the spec
+              folder they came from. A piece of work is deleted whole. It cannot be undone.
+            </p>
+            <div className="dialog-actions">
+              <Button onClick={() => setDeleting(false)}>Keep it</Button>
+              <Button
+                variant="danger"
+                disabled={busy || action.isPending}
+                onClick={() => discard(repoId, ticket.key, () => setDeleting(false))}
               >
-                Back to planning
-              </Button>}
-              <Button onClick={() => navigate({ page: "home" })}>
-                Save draft
+                Delete permanently
               </Button>
             </div>
-            {/* Offered at every stage, the loop included: a piece of work is
-                deleted whole and the evidence goes with it
-                (D-129). One stage is not: a ticket
-                whose pull request is open has a record on GitHub that this
-                machine does not own, and the host refuses it there too. */}
-            {ticket.state !== "pr_open" && (
-              <button
-                className="text-button small muted contract-delete"
-                disabled={held}
-                onClick={() => setDeleting(true)}
-              >
-                Delete this contract
-              </button>
-            )}
-          </div>
-        </aside>
-      </div>
-      {deleting && (
-        <Dialog title={"Delete " + displayKey(ticket.key) + "?"} onClose={() => setDeleting(false)}>
-          <p>
-            This removes the ticket, its contract and plan, the reading of that plan against its
-            spec, every attempt it recorded and the evidence those attempts sealed, and the spec
-            folder they came from. A piece of work is deleted whole. It cannot be undone.
-          </p>
-          <div className="dialog-actions">
-            <Button onClick={() => setDeleting(false)}>Keep it</Button>
-            <Button
-              variant="danger"
-              disabled={busy || action.isPending}
-              onClick={() => discard(repoId, ticket.key, () => setDeleting(false))}
-            >
-              Delete permanently
-            </Button>
-          </div>
-          {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
-        </Dialog>
+            {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
+          </Dialog>
+        )}
+      </section>
+      {/* Over the pane rather than inside the page, which scrolls: the pop-up
+          stays in the centre wherever the page is scrolled to. */}
+      {failedReading !== null && (
+        <ReadingFailedNotice error={failedReading} onAcknowledge={() => setFailedReading(null)} />
       )}
-    </section>
+    </>
   );
 }

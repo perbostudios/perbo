@@ -1076,7 +1076,7 @@ function admissionLines(
     paint("  ADMISSION", "sect") + paint("   how this ticket was admitted", "dim"),
     ...sourceLines,
     ...labelled(`    ${pad("criteria", 10)} `, criteria, paint, "mid"),
-    `    ${pad("approval", 10)} ` + paint(clip(approval, WIDTH - 15), "mid"),
+    ...labelled(`    ${pad("approval", 10)} `, approval, paint, "mid"),
     ...labelled(`    ${pad("level", 10)} `, level, paint, "mid"),
     // The `admit` command's own runtime, which measures the machine.
     `    ${pad("admit", 10)} ` +
@@ -1280,7 +1280,7 @@ function localRunLines(report: InspectReport, paint: Paint): string[] {
   const lines = [
     paint("  LOCAL RUN", "sect") + paint("   no ticket was admitted for this work", "dim"),
     ...labelled(`    ${pad("contract", 10)} `, from, paint, "mid"),
-    `    ${pad("criteria", 10)} ` + paint(clip(criteria, WIDTH - 15), "mid"),
+    ...labelled(`    ${pad("criteria", 10)} `, criteria, paint, "mid"),
   ];
   if (report.outcome !== null) {
     lines.push(
@@ -1742,7 +1742,7 @@ export function renderInspect(
         const at = finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""}` : "(no file)";
         const style = finding.blocking ? "bad" : finding.routing === "remediable" ? "warn" : "dim";
         // The location whole: beside the rule where it fits, under it where it does not.
-        const row = `    ${paint(pad(tag, 8), style)} ${paint(pad(clip(finding.rule_id, 28), 28), "hi")} `;
+        const row = `    ${paint(pad(tag, 8), style)} ${paint(pad(finding.rule_id, 28), "hi")} `;
         if (43 + at.length <= WIDTH) lines.push(row + paint(at, "mid"));
         else lines.push(row.trimEnd(), ...wrap(at, 13).map((line) => paint(line, "mid")));
         lines.push(
@@ -1808,7 +1808,7 @@ export function renderInspect(
       );
       for (const denial of attempt.denials) {
         // The refused target whole (D-NEW-nothing-shown-is-cut): beside the rule where it fits.
-        const rule = `    ${paint(pad(clip(denial.rule, 24), 24), "warn")} `;
+        const rule = `    ${paint(pad(denial.rule, 24), "warn")} `;
         if (32 + denial.target.length <= WIDTH) lines.push(rule + paint(denial.target, "hi"));
         else lines.push(rule.trimEnd(), ...wrap(denial.target, 6).map((line) => paint(line, "hi")));
         const by = denial.agent === null ? "" : `${denial.agent}  `;

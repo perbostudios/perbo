@@ -4,7 +4,6 @@ import {
   EMPTY_SPEC_TEXT,
   PlanningError,
   SpecConflict,
-  UNTITLED_SPEC,
   assertNoSymlink,
   driftHash,
   parseSpec,
@@ -147,8 +146,8 @@ export function repositorySpecs(repo: RegisteredRepository): SpecRow[] {
     if (!entry.isDirectory() || !SPEC_SLUG.test(entry.name)) return [];
     try {
       const { text } = readSpecText(join(root, entry.name, "spec.md"));
-      const title = text.title.trim();
-      return title.length > 0 ? [{ repoId: repo.id, slug: entry.name, title }] : [];
+      // Empty where nobody has named the work: the picker calls it Untitled (D-118).
+      return [{ repoId: repo.id, slug: entry.name, title: text.title.trim() }];
     } catch {
       return [];
     }
@@ -366,10 +365,11 @@ export function saveSpec(
 
 /**
  * A spec whose folder is named from the words cut from the person's first
- * turn, minted in the repository's spec folder, with {@link UNTITLED_SPEC} on
- * its title line: the cut names the folder and is no title (D-118). The folder
- * is minted once and never moves, so what it was called is worth saying while
- * the spec is still empty enough to start again.
+ * turn, minted in the repository's spec folder with no title line: the cut
+ * names the folder and is no title, and the work has none until the Architect
+ * or the person names it (D-118). The folder is minted once and never moves,
+ * so what it was called is worth saying while the spec is still empty enough
+ * to start again.
  */
 export function mintSpecFromTitle(
   repo: RegisteredRepository,
@@ -380,7 +380,7 @@ export function mintSpecFromTitle(
     folder: specFolder(repo),
     slug: null,
     folderName: cut,
-    text: { ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC },
+    text: EMPTY_SPEC_TEXT,
     base: EMPTY_SPEC_TEXT,
   });
   return { slug: written.slug, folder: written.folder };

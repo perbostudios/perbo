@@ -23,7 +23,7 @@ import type { CoverageStatus, VerificationStrength } from "@perbo/contracts";
 import { errorMessage, useAction, useOutputs } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { TaskHeader } from "./LoopScreen.js";
-import { cliSentence, costLabel, taskRecords, watchTranscript } from "./task-context.js";
+import { cliSentence, costLabel, reviewErrorSentence, taskRecords, watchTranscript } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 import { retainedOutput } from "./retained-output.js";
 import { displayKey } from "./ticket-workspace.js";
@@ -92,6 +92,14 @@ export function ReviewScreen(context: TaskContext) {
                 : "inspect the checks below"}{" "}
               ·{" "}
               {kind === "closure" ? `${projection.evidence.closure?.open_keys.length ?? 0} unresolved closures` :
+                // A review that ended on an error says why in one sentence,
+                // and the error as the review recorded it sits behind the `i`.
+                review?.error ? (
+                  <>
+                    {reviewErrorSentence(review.error, "review findings unavailable")}{" "}
+                    <InfoHint text={review.error.message} label="The review's error" />
+                  </>
+                ) :
                 review ? `${review.findings.filter((finding) => finding.status === "open").length} unresolved findings` : "review findings unavailable"}
             </p>
           </div>

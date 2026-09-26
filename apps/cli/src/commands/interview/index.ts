@@ -41,7 +41,7 @@ import {
   type WorktreeScope,
 } from "@perbo/runner";
 import { collectOutput } from "../../diagnostics.js";
-import { UNTITLED_SPEC, namesBlock } from "@perbo/planning";
+import { namesBlock } from "@perbo/planning";
 import { UsageError } from "../../usage-error.js";
 import {
   parseArgv,
@@ -1814,9 +1814,9 @@ nothing else: \`**bold**\` for the thing a reader must not miss, backticks for a
 spends a reader's attention on nothing. Say a thing once — a line that repeats its heading, or a
 requirement already stated in the Outcome, is a line to cut.
 
-The spec's one \`#\` heading is its title, and the app shows it as the work's name. Where that line is
-${UNTITLED_SPEC} — the folder was named from the person's first message, and the work has no title
-yet — and only then, make it a title when you first write the spec: what the work is, as a noun
+The spec's one \`#\` heading is its title, and the app shows it as the work's name. Where the spec has
+no such line — the folder was named from the person's first message, and the work has no title
+yet — and only then, give it one at its head when you first write the spec: what the work is, as a noun
 phrase and not a sentence or a cut of what they said, in the fewest words that
 tell it apart from every name in the names block below. Leave out what does not tell it apart: the
 file or folder it lands in, "a single file", "app", "page", the repository. Never a name already

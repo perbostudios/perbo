@@ -28,7 +28,9 @@ const listItems = (lines: readonly string[]): string[] =>
 const prose = (lines: readonly string[]): string => lines.join("\n").trim();
 
 /**
- * Split the document into its title and its `##` sections.
+ * Split the document into its title and its `##` sections. A spec with no `#`
+ * heading has an empty title: nobody has named the work yet, and its ticket is
+ * named without it (D-118, D-127).
  *
  * A `##` heading that is not one of the five is refused rather than ignored:
  * silently dropping `## No-Go` would give a ticket no No-Gos and say nothing
@@ -71,12 +73,7 @@ function sections(markdown: string): { title: string; sections: Map<SpecHeading,
     found.set(known, current);
   }
 
-  if (title === null || title.length === 0) {
-    throw new PlanningError(
-      "the spec has no title: the first '# ' heading is the title of the work it states",
-    );
-  }
-  return { title, sections: found };
+  return { title: title ?? "", sections: found };
 }
 
 function requirementsOf(lines: readonly string[]): SpecRequirement[] {

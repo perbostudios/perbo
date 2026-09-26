@@ -23,7 +23,9 @@ import { PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
 import { handlers } from "../../sample-host/handlers.js";
 import { isLive } from "../../shared/jobs.js";
 import { DELETE_WAITS_FOR_COMMANDS } from "../../shared/discard.js";
-import { job } from "../../sample-host/records.js";
+import { job, sampleReadings } from "../../sample-host/records.js";
+import { READING_FAILED } from "./ReadingFailed.js";
+import { confirmRoute } from "./panes.js";
 import { SpecSection } from "./SpecSection.js";
 import { firstSentence } from "./InterviewDock.js";
 import { GraphInspector } from "./GraphInspector.js";
@@ -58,6 +60,9 @@ afterEach(() => {
   client.clear();
   setPlatformForTests(null);
 });
+/** A spec's bytes as the sample keeps them in place of the repository's folder. */
+const storedSpec = (slug: string): string =>
+  (JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>)[slug] ?? "";
 const newClient = (): QueryClient =>
   new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
 function mount() {
@@ -331,6 +336,20 @@ describe("Create in the rail (SCP-334)", () => {
     const picker = await openPicker();
     expect(
       within(picker).getByRole("button", { name: /^Have a dark mode/ }).textContent,
+    ).toContain("spec written, no plan yet");
+  });
+
+  it("offers a spec nobody has named as Untitled, which its file never says (D-118)", async () => {
+    const unnamed = planningBrowser.renderSpec(
+      { ...planningBrowser.EMPTY_SPEC_TEXT, outcome: "Dark mode follows the system." },
+      { highWater: 0, existing: [] },
+    ).markdown;
+    expect(unnamed).not.toMatch(/^# |Untitled/m);
+    localStorage.setItem("perbo:preview-specs", JSON.stringify({ "have-a-dark-mode": unnamed }));
+    mount();
+    const picker = await openPicker();
+    expect(
+      within(picker).getByRole("button", { name: /^Untitled/ }).textContent,
     ).toContain("spec written, no plan yet");
   });
 
@@ -2820,6 +2839,134 @@ describe("the Graph pane (SCP-316)", () => {
     expect(location.hash).toBe(`#planning/${plan.id}/drift`);
   });
 
+  /**
+   * Every try of a reading made to fail, up to `times`, as a reading with no
+   * credential fails, and the host's wait between tries made instant.
+   */
+  function readingsDoNotRun(times = Infinity) {
+    const paused: number[] = [];
+    let tries = 0;
+    const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(async (ms) => {
+      paused.push(ms);
+    });
+    const attempt = vi.spyOn(sampleReadings, "attempt").mockImplementation(() => {
+      tries += 1;
+      if (tries <= times) throw new Error("No credential for Claude. Run `claude login`, then try again.");
+    });
+    return {
+      paused,
+      tries: () => tries,
+      restore: () => {
+        pause.mockRestore();
+        attempt.mockRestore();
+      },
+    };
+  }
+  /** An epic's plan open on its Graph with a criterion reworded by hand, so Confirm the plan reads it. */
+  async function handEdited() {
+    const plan = await openGraph();
+    fireEvent.click(nodeAt(/^Node node_1/));
+    const inspector = await screen.findByRole("region", { name: "Node node_1" });
+    const box = within(inspector).getByRole("textbox", { name: "Criterion ac_1" });
+    fireEvent.change(box, { target: { value: "A person can choose the colour mode, after a restart." } });
+    fireEvent.blur(box);
+    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toMatch(/after a restart/));
+    return plan;
+  }
+
+  it("says in a pop-up that the plan could not be checked where every try of Confirm the plan's reading fails, and puts the person back on the Graph with nothing confirmed", async () => {
+    const plan = await handEdited();
+    const failing = readingsDoNotRun();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      // Tried four times, 2, 4 and 8 seconds apart, before it was said.
+      expect(failing.tries()).toBe(4);
+      expect(failing.paused).toEqual([2_000, 4_000, 8_000]);
+      expect(within(popup).getByText(`${READING_FAILED}: No credential for Claude.`)).toBeTruthy();
+      expect(popup.textContent).toContain("No credential for Claude. Run `claude login`, then try again.");
+      // One way off it, and none on to the contract.
+      expect(within(popup).getByRole("button", { name: "Got it" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Go on to the contract anyway" })).toBeNull();
+      fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+      // Back where Confirm the plan was pressed, with it offered again, and
+      // nothing confirmed: the contract was never reached.
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+      await screen.findByRole("heading", { name: "Execution graph" });
+      expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull();
+      const again = screen.getByRole("button", { name: "Confirm the plan" });
+      expect(again.hasAttribute("disabled")).toBe(false);
+      const { read } = await sampleBridge.request({ kind: "editingRead", id: plan.id });
+      // Pressed again, the plan is read again.
+      failing.restore();
+      fireEvent.click(again);
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 8000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      expect((await sampleBridge.request({ kind: "editingRead", id: plan.id })).read).not.toBe(read);
+    } finally {
+      failing.restore();
+    }
+  });
+
+  it("puts a person who confirmed from the Explorer back on the Explorer where the reading does not run", async () => {
+    const plan = await handEdited();
+    location.hash = `planning/${plan.id}/explorer`;
+    await waitFor(async () =>
+      expect((await sampleBridge.request({ kind: "drafts" }))?.find((draft) => draft.id === plan.id)?.lastPane).toBe("explorer"),
+    );
+    const failing = readingsDoNotRun();
+    try {
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }, { timeout: 5000 }));
+      const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+      fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
+    } finally {
+      failing.restore();
+    }
+  });
+
+  it("stays on the Problems page where a reading that found problems lands ahead of the record it wrote", async () => {
+    // The reading's job settles a round trip ahead of the session record it
+    // wrote, which the pane reads over the bridge: a verdict with findings,
+    // over a record that does not show them yet, is not the way on.
+    const plan = await handEdited();
+    const stale = await sampleBridge.request({ kind: "editingRead", id: plan.id });
+    const original = bridge.request.bind(bridge);
+    const held = vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
+      request.kind === "editingRead" && request.id === plan.id
+        ? Promise.resolve(stale)
+        : original(request)) as typeof bridge.request);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await waitFor(async () => {
+        const read = (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key);
+        expect(read.at(-1)?.state).toBe("completed");
+        expect((read.at(-1)?.result as { findings: unknown[] }).findings.length).toBeGreaterThan(0);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+    } finally {
+      held.mockRestore();
+    }
+  });
+
+  it("goes on as it would have where Confirm the plan's reading fails once and then runs", async () => {
+    const plan = await handEdited();
+    const failing = readingsDoNotRun(1);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 8000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      expect(failing.tries()).toBe(2);
+      expect(failing.paused).toEqual([2_000]);
+      expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull();
+    } finally {
+      failing.restore();
+    }
+  });
+
   it("undoes the latest edit of the plan from its history", async () => {
     const plan = await openGraph();
     const before = (await graphOf(plan)).criteria[0]!;
@@ -3051,6 +3198,9 @@ describe("the Graph pane (SCP-316)", () => {
     /** That planning open on the Problems pane, with the first problem in front of the person. */
     async function problems(): Promise<{ id: string; repoId: string; key: string }> {
       const plan = await parted();
+      // Confirmed, as a Confirm the plan press confirms: the one arrival at
+      // the Problems pane that reads.
+      confirmRoute({ repoId: plan.repoId, key: plan.key, sessionId: plan.id, approved: false, basic: false });
       location.hash = `planning/${plan.id}/drift`;
       mount();
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
@@ -3794,14 +3944,17 @@ describe("the Graph pane (SCP-316)", () => {
         expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/WCAG AA /),
       );
       expect((await editingRead(plan.id)).asking).not.toBeNull();
-      // Arriving again reads the plan against the spec, and the reading
+      // Confirming again reads the plan against the spec, and the reading
       // finds nothing: the card comes down with the problems, so the chat
       // offers the way on rather than a card over a problem that is gone —
       // and the arrival goes on to the contract, since nothing was resolved
       // in front of the person to stop for.
       location.hash = `planning/${plan.id}/graph`;
       await screen.findByRole("heading", { name: "Execution graph" });
-      location.hash = `planning/${plan.id}/drift`;
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
       await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
       await waitFor(async () =>
         expect((await editingRead(plan.id)).asking).toBeNull(),
@@ -3815,7 +3968,7 @@ describe("the Graph pane (SCP-316)", () => {
 
     it("keeps the way back, and no way past, while it reads and while it waits", async () => {
       const plan = await problems();
-      // Arriving again with a problem open and the plan moved since: the
+      // Confirmed again with a problem open and the plan moved since: the
       // reading first, and the footer with it.
       location.hash = `planning/${plan.id}/graph`;
       await screen.findByRole("heading", { name: "Execution graph" });
@@ -3833,7 +3986,10 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(async () =>
         expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/every background/),
       );
-      location.hash = `planning/${plan.id}/drift`;
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
       await screen.findByRole("heading", { name: "Checking for drift" });
       expect(footerOrder()).toEqual(WAY_BACK);
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
@@ -3844,6 +4000,49 @@ describe("the Graph pane (SCP-316)", () => {
       expect(footerOrder()).toEqual(WAY_BACK);
       fireEvent.click(screen.getByRole("button", { name: "Back to the plan" }));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+    });
+
+    it("reads nothing on arriving at the Problems tab by the rail or by reopening the planning after a hand edit, and puts the last reading's problems", async () => {
+      const plan = await problems();
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      await sampleBridge.request({
+        kind: "graphEdit",
+        repoId: plan.repoId,
+        key: plan.key,
+        edit: {
+          op: "set_criterion",
+          id: "ac_2",
+          text: "Text meets WCAG AAA contrast against every background.",
+          expected_verification: { kind: "test", assertion: "every background" },
+        },
+      });
+      await waitFor(async () =>
+        expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/every background/),
+      );
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      const before = await readings();
+      // By the rail: the last reading's problems, and no reading started.
+      fireEvent.click(within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name: "Problems" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(screen.queryByRole("heading", { name: "Checking for drift" })).toBeNull();
+      expect(await readings()).toBe(before);
+      // By reopening the planning, which lands on its problems while any is open.
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      location.hash = `planning/${plan.id}`;
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await readings()).toBe(before);
+      // Confirm the plan is what reads it.
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }, { timeout: 5000 }));
+      await waitFor(async () => expect(await readings()).toBe(before + 1));
     });
 
     it("shows a question the interview asks of its own, and answers it from the same page", async () => {
@@ -3878,21 +4077,53 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
     });
 
-    it("shows a reading the host started that failed, with the way back and no way past the problems still open", async () => {
+    it("says in a pop-up that a reading the host started did not run, with no way past the problems still open, and goes back to the plan", async () => {
       const plan = await problems();
-      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
-      // The spec goes unreadable under the reading the host starts once the
-      // interview has applied the answer: the reading fails, and the page
-      // says so rather than waiting on it.
-      const slug = (await editingRead(plan.id)).specSlug!;
-      const specs = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
-      delete specs[slug];
-      localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
-      await screen.findByText(`specs/${slug}/spec.md could not be read.`, {}, { timeout: 5000 });
-      expect((await editingRead(plan.id)).drift?.open.length).toBeGreaterThan(0);
-      expect(footerOrder()).toEqual(WAY_BACK);
-      expect(screen.queryByRole("heading", { name: "Resolving the problem" })).toBeNull();
-      expect(screen.queryByRole("group", { name: /Criterion \d and R\d/ })).toBeNull();
+      // The host's wait between tries, made instant.
+      const paused: number[] = [];
+      const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(async (ms) => {
+        paused.push(ms);
+      });
+      try {
+        answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+        // The spec goes unreadable under the reading the host starts once the
+        // interview has applied the answer: every try of the reading fails,
+        // and the page says so rather than waiting on it.
+        const slug = (await editingRead(plan.id)).specSlug!;
+        const specs = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
+        delete specs[slug];
+        localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
+        const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 5000 });
+        expect(within(popup).getByText(`${READING_FAILED}: specs/${slug}/spec.md could not be read.`)).toBeTruthy();
+        expect(paused).toEqual([2_000, 4_000, 8_000]);
+        expect((await editingRead(plan.id)).drift?.open.length).toBeGreaterThan(0);
+        expect(footerOrder()).toEqual(WAY_BACK);
+        expect(screen.queryByRole("heading", { name: "Resolving the problem" })).toBeNull();
+        expect(screen.queryByRole("group", { name: /Criterion \d and R\d/ })).toBeNull();
+        fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+      } finally {
+        pause.mockRestore();
+      }
+    });
+
+    it("says in a pop-up why the reading after an answer could not start, with why behind the chat note's i", async () => {
+      const plan = await problems();
+      const refused = vi.spyOn(handlers, "driftCheck").mockRejectedValue(new Error("The reviewer could not be reached. Try again later."));
+      try {
+        answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+        const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+        expect(within(popup).getByText(`${READING_FAILED}: The reviewer could not be reached.`)).toBeTruthy();
+        expect(popup.textContent).toContain("The reviewer could not be reached. Try again later.");
+        const note = (await editingRead(plan.id)).conversation.find(
+          (entry) => entry.line.kind === "note" && entry.line.text.startsWith(REREAD_COULD_NOT_START),
+        )!.line;
+        expect(note).toEqual({ kind: "note", text: `${REREAD_COULD_NOT_START}.`, output: "The reviewer could not be reached. Try again later." });
+        fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+      } finally {
+        refused.mockRestore();
+      }
     });
 
     it("goes back to the plan's own pane", async () => {
@@ -5726,7 +5957,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
      * and the cut that named it. A folder of its own, apart from the dark mode
      * toggle other cases name, since the plan these draft stays on the board.
      */
-    async function namedByFirstMessage(): Promise<{ id: string; repoId: string; cut: string }> {
+    async function namedByFirstMessage(): Promise<{ id: string; repoId: string }> {
       const opened = await openFresh();
       location.hash = `planning/${opened.id}/spec`;
       mount();
@@ -5739,7 +5970,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         return named!;
       });
       await screen.findByText(`specs/${slug}/spec.md`, {}, { timeout: 5000 });
-      return { id: opened.id, repoId: opened.repoId, cut: (await editingRead(opened.id)).specCut! };
+      return { id: opened.id, repoId: opened.repoId };
     }
     /** Writes the spec through the chat, then drafts the plan from it with the pane's press. */
     async function generate(id: string): Promise<string> {
@@ -5756,14 +5987,13 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       return (await editingRead(id)).key!;
     }
 
-    it("leaves the field empty while the file's title is only the cut, and a section saved meanwhile keeps it", async () => {
-      const { id, cut } = await namedByFirstMessage();
-      // The file carries the cut, which names the folder and is no title.
-      expect(cut.length).toBeGreaterThan(0);
-      expect((await read(id)).title).toBe(cut);
+    it("leaves the field empty while the file has no title line, and a section saved meanwhile keeps none", async () => {
+      const { id } = await namedByFirstMessage();
+      // The cut names the folder and is no title: the file has no title line.
+      expect((await read(id)).title).toBe("");
       expect(field().value).toBe("");
-      // A section saved with the field empty is saved, and the title line is
-      // left as it was.
+      // A section saved with the field empty is saved, and the file still has
+      // no title line.
       fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
       // The section reads until it is opened for writing.
     fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
@@ -5771,7 +6001,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       fireEvent.change(outcome, { target: { value: "Dark mode follows the system." } });
       fireEvent.blur(outcome);
       await waitFor(async () => expect((await read(id)).sections.outcome).toBe("Dark mode follows the system."));
-      expect((await read(id)).title).toBe(cut);
+      expect((await read(id)).title).toBe("");
+      expect(storedSpec((await editingRead(id)).specSlug!)).not.toMatch(/^# |Untitled/m);
       expect(field().value).toBe("");
     });
 
@@ -5789,7 +6020,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       await waitFor(async () =>
         expect((await read(id)).sections.outcome).toBe("Text is as large as the person asks."),
       );
-      expect((await read(id)).title).toBe((await editingRead(id)).specCut);
+      expect((await read(id)).title).toBe("");
       expect(field().value.trim()).toBe("");
     });
 
@@ -7407,9 +7638,10 @@ describe("the one piece of work a page is about: its name, its row in the picker
     // The first turn named the spec's folder from its cut, which is no name
     // for the work: the title line says Untitled, and the cut's words never
     // show as the title, in the file, the pane, the bar or the picker.
-    expect(await editingRead(id)).toMatchObject({ specSlug: "dark-mode-toggle", specCut: "Untitled" });
+    expect(await editingRead(id)).toMatchObject({ specSlug: "dark-mode-toggle", named: null });
     const spec = await sampleBridge.request({ kind: "specRead", id });
-    expect(spec.title).toBe("Untitled");
+    expect(spec.title).toBe("");
+    expect(storedSpec("dark-mode-toggle")).not.toMatch(/^# |Untitled/m);
     expect(JSON.stringify(spec)).not.toContain("Dark mode toggle");
     expect((screen.getByLabelText("Spec title") as HTMLInputElement).value).toBe("");
     await waitFor(() => expect(barName()).toBe("Untitled"));

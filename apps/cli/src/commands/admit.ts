@@ -49,13 +49,13 @@ import {
   PlanningError,
   type SourceIssue,
   type Spec,
-  UNTITLED_SPEC,
   assertNoSymlink,
   assertNodePagesWritable,
   contractDifferences,
   contractEditCount,
   draftContract,
   fetchGitHubIssue,
+  firstSentence,
   readIssueFile,
   readSpecFile,
   readSpecText,
@@ -586,7 +586,8 @@ function sourceOf(args: AdmissionInput, issue: SourceIssue | null, path: string 
       kind: "file",
       reference: path,
       url: args.sourceUrl,
-      title_at_admission: issue.title,
+      // None for a spec nobody has named, which has no title line (D-118).
+      title_at_admission: issue.title || null,
     };
   }
   if (issue) {
@@ -1215,7 +1216,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
       .filter((ticket) => ticket.key !== args.startOver)
       .map((ticket) => ticket.title);
     diagnostics.stderr(
-      `read ${issue.reference}: ${issue.title}\ndrafting the contract with ${model.provider} ` +
+      `read ${issue.reference}${issue.title ? `: ${issue.title}` : ""}\ndrafting the contract with ${model.provider} ` +
         `${model.model_id}; nothing runs until you approve it\n`,
     );
     drafted = await draftContract({
@@ -1484,42 +1485,53 @@ function assertNotAlreadyDrafted(input: Admitting): void {
 }
 
 /**
- * What a ticket is called (D-127).
+ * What a ticket is called (D-127): never more than {@link TICKET_NAME_CAP}
+ * characters, and never a cut.
  *
  * A ticket the drafter named is called that: the fewest words that tell it
  * apart from every other ticket in the store, which the drafter was shown. It
  * read the source and the repository before saying that, so it names what the
  * plan turned out to be rather than what somebody asked for before any of it
  * was known. Where another ticket already carries it, a spec's own title
- * stands in: it is what the work was called while its spec was written.
- * Failing both, or where nothing was drafted, the outcome — the only sentence
- * a typed ticket has to be called by.
+ * stands in: it is what the work was called while its spec was written. After
+ * those, or where nothing was drafted, the outcome's first whole sentence —
+ * the only words a typed ticket has to be called by.
  *
- * A drafted name or a spec title another ticket already carries is passed
- * over for the next; the outcome, the last, stands whatever it is. The draft
- * is kept either way: the run that produced it is paid for, and a name is a
- * label a person can change.
+ * A candidate another ticket already carries is passed over for the next, and
+ * so is one past the cap, whole: a title or a sentence is a person's or a
+ * model's words, and only they can say which of them go. Where every
+ * candidate is passed over, the first that fits with a number after it that
+ * no ticket carries — "Dark mode toggle 2" — names this one, and failing even
+ * that the ticket's key does, which is its own and short. The draft is kept
+ * either way: the run that produced it is paid for, and a name is a label a
+ * person can change.
  *
  * With `--keep-title` the spec's title is a name a person gave the work, and
  * the ticket takes it as it stands, whatever the drafter proposed and whatever
- * another ticket is called: the person chose it (D-127). The outcome stands in
- * only for a spec with no title.
+ * another ticket is called: the person chose it, and {@link assertKeepableTitle}
+ * refused it before a model was asked if it runs past the cap (D-127). A spec
+ * with no title is named as any other.
  *
  * Display only: the branch is named from the outcome, and so is the pull
  * request, never from this (ADR-0023 §4). An edit never renames a ticket.
  */
-function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean): string {
+function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean, key: string): string {
   const specTitle = resolved.spec === null ? "" : oneLine(resolved.issue?.title ?? "");
-  if (keepTitle) return specTitle.length > 0 ? specTitle : outcome;
+  if (keepTitle && specTitle.length > 0) return specTitle;
   // Flattened because it is a model's words shown as a title (ADR-0023 §4).
   const drafted = oneLine(resolved.drafted?.draft.name ?? "");
-  // A spec still Untitled names nothing: its folder was named from the
+  // A spec with no title line names nothing: its folder was named from the
   // person's first turn and the work was never titled (D-118).
-  const stated = specTitle === UNTITLED_SPEC ? "" : specTitle;
-  const named = [drafted, stated].find(
-    (name) => name.length > 0 && !resolved.names.some((taken) => sameName(name, taken)),
+  const fitting = [drafted, specTitle, firstSentence(oneLine(outcome))].filter(
+    (name) => name.length > 0 && name.length <= TICKET_NAME_CAP,
   );
-  return named ?? outcome;
+  const free = (name: string): boolean => !resolved.names.some((taken) => sameName(name, taken));
+  const named = fitting.find(free);
+  if (named !== undefined) return named;
+  for (const name of fitting)
+    for (let number = 2; `${name} ${number}`.length <= TICKET_NAME_CAP; number++)
+      if (free(`${name} ${number}`)) return `${name} ${number}`;
+  return key;
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
@@ -1609,7 +1621,7 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
     schema_version: TICKET_SCHEMA_VERSION,
     ticket_id,
     key,
-    title: ticketTitle(resolved, resolved.outcome, args.keepTitle),
+    title: ticketTitle(resolved, resolved.outcome, args.keepTitle, key),
     state: "plan_review",
     priority: args.priority,
     labels: args.labels,
@@ -1996,7 +2008,7 @@ function redraft(
   // spec folder, nodes folder or page that is a link refuses the re-draft
   // with the ticket, its contract and its snapshot as they were.
   assertPagesWritable(repositoryRoot, resolved, contract);
-  const title = ticketTitle(resolved, contract.outcome, args.keepTitle);
+  const title = ticketTitle(resolved, contract.outcome, args.keepTitle, key);
   const spec = args.keepTitle ? resolved.spec : nameSpecAfterTicket(repositoryRoot, resolved.spec, title);
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);

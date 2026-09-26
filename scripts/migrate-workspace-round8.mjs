@@ -1,20 +1,21 @@
 // Brings a desktop profile's `workspace.json` up to the records the desktop
-// reads (D-130, D-NEW-basic-and-epic-flows, D-128), from a profile written by
-// `main` or by the round before this one. A profile that fails the schema
-// stops Perbo from starting, so this runs before the first start of a build
-// that reads them. It:
+// reads (D-130, D-NEW-basic-and-epic-flows, D-128): a profile written without
+// these fields gains them. A profile that fails the schema stops Perbo from
+// starting, so this runs before the first start of a build that reads them.
+// It:
 //
 // - adds `lastOpened` as `{}` where the profile has none;
 // - for every editing session:
 //   - deletes `lastView`, which the contract tab's `confirmed` replaces;
-//   - adds `confirmed`, `read`, `impact`, `specCut` and `named` as null where
-//     the session has none;
-//   - sets a `lastPane` of "criteria", a pane planning no longer has, to null,
+//   - deletes `specCut`, a field the desktop does not read (D-118);
+//   - adds `confirmed`, `read`, `impact` and `named` as null where the session
+//     has none;
+//   - sets a `lastPane` of "criteria", a pane planning does not have, to null,
 //     so the planning reopens where it otherwise lands;
 //   - sets a recorded `change` that does not say who made it to null, since the
 //     panes mark only a change the chat made and this one cannot say;
-//   - deletes `offers` from each note in its conversation, which a note no
-//     longer carries.
+//   - deletes `offers` from each note in its conversation, which a note does
+//     not carry.
 //
 // The file is copied to `workspace.json.bak` before it is written, and each
 // change is printed. A profile that needs nothing is left as it is, with no
@@ -85,11 +86,12 @@ export function migrate(state) {
       if (!isRecord(session)) throw new Error(`it holds no profile: editing session ${index} is not an object`);
       const migrated = { ...session };
       const name = `session ${session.id}`;
-      if ("lastView" in migrated) {
-        delete migrated.lastView;
-        changes.push(`${name}: deleted lastView`);
-      }
-      for (const field of ["confirmed", "read", "impact", "specCut", "named"])
+      for (const field of ["lastView", "specCut"])
+        if (field in migrated) {
+          delete migrated[field];
+          changes.push(`${name}: deleted ${field}`);
+        }
+      for (const field of ["confirmed", "read", "impact", "named"])
         if (!(field in migrated)) {
           migrated[field] = null;
           changes.push(`${name}: added ${field}: null`);

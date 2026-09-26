@@ -35,8 +35,20 @@ const session = {
   conversation: [],
 } as unknown as EditingSession;
 
-function readings(options: { repository?: () => never; session?: EditingSession } = {}) {
+function readings(
+  options: {
+    repository?: () => never;
+    session?: EditingSession;
+    /** How each run of `perbo drift` ends, in turn; a run past the list succeeds. */
+    runs?: (Error | null)[];
+    /** What each run of `perbo drift` prints, in turn, in place of the answer; a run past the list prints the answer. */
+    prints?: unknown[];
+    signal?: AbortSignal;
+  } = {},
+) {
   const said: InterviewEntry["line"][] = [];
+  const paused: number[] = [];
+  let invoked = 0;
   const landed: DriftFinding[][] = [];
   const recorded: string[] = [];
   const asked: (string | null)[] = [];
@@ -62,9 +74,13 @@ function readings(options: { repository?: () => never; session?: EditingSession 
         const job = { id: "j-1", repoId: "r-1", key: meta.key, kind: meta.kind, state: "running" } as Job;
         operations.push(
           operation(job, {
-            signal: new AbortController().signal,
+            signal: options.signal ?? new AbortController().signal,
             invoke: async () => {
-              job.result = reply;
+              const failure = options.runs?.[invoked] ?? null;
+              const printed = options.prints?.[invoked];
+              invoked += 1;
+              if (failure !== null) throw failure;
+              job.result = printed === undefined ? reply : printed;
               return { code: 0, stdout: "", stderr: "", cancelled: false } as never;
             },
           }),
@@ -81,6 +97,9 @@ function readings(options: { repository?: () => never; session?: EditingSession 
     },
     cli: {} as DriftDeps["cli"],
     models: () => ({ draftingProvider: "claude-cli", executorModel: "claude-opus-5-5" }) as never,
+    pause: async (ms) => {
+      paused.push(ms);
+    },
     interview: {
       working: () => false,
       say: (_id, line) => {
@@ -93,6 +112,9 @@ function readings(options: { repository?: () => never; session?: EditingSession 
   return {
     drift: new DriftReadings(deps),
     said,
+    paused,
+    /** How many times `perbo drift` was run. */
+    invoked: () => invoked,
     landed,
     recorded,
     asked,
@@ -189,7 +211,56 @@ describe("a reading owed that could not be started", () => {
     });
     await drift.reread("s-1");
     expect(reason.length).toBeGreaterThan(2000);
-    expect(said).toEqual([{ kind: "note", text: `${REREAD_COULD_NOT_START}: ${reason}` }]);
+    // One sentence, and why behind its `i`, whole (D-NEW-nothing-shown-is-cut).
+    expect(said).toEqual([{ kind: "note", text: `${REREAD_COULD_NOT_START}.`, output: reason }]);
+  });
+});
+
+describe("a reading that does not run (D-NEW-basic-and-epic-flows)", () => {
+  const down = (): Error => new Error("perbo drift exited with code 1: No credential for Claude.");
+
+  it("is run again after 2, 4 and 8 seconds, and fails its job with the last error once all four tries have failed", async () => {
+    const { drift, answer, ran, landed, recorded, paused, invoked } = readings({ runs: [down(), down(), down(), down()] });
+    answer([]);
+    await drift.check("s-1", "state-read");
+    await expect(ran()).rejects.toThrow("No credential for Claude.");
+    expect(invoked()).toBe(4);
+    expect(paused).toEqual([2_000, 4_000, 8_000]);
+    // Nothing is landed or recorded as read, so the next confirm reads again.
+    expect(landed).toEqual([]);
+    expect(recorded).toEqual([]);
+  });
+
+  it("lands what a later try reads, as a reading that ran the first time does", async () => {
+    const { drift, answer, ran, landed, recorded, paused, invoked } = readings({ runs: [down()] });
+    answer([finding({})]);
+    await drift.check("s-1", "state-read");
+    await ran();
+    expect(invoked()).toBe(2);
+    expect(paused).toEqual([2_000]);
+    expect(landed).toHaveLength(1);
+    expect(recorded).toEqual(["state-read"]);
+  });
+
+  it("runs again after a print that is not a verdict", async () => {
+    const { drift, answer, ran, landed, paused, invoked } = readings({ prints: [{ findings: "not a verdict" }] });
+    answer([finding({})]);
+    await drift.check("s-1", null);
+    await ran();
+    expect(invoked()).toBe(2);
+    expect(paused).toEqual([2_000]);
+    expect(landed).toHaveLength(1);
+  });
+
+  it("is not run again once its job is cancelled", async () => {
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const { drift, answer, ran, paused, invoked } = readings({ runs: [down()], signal: cancelled.signal });
+    answer([]);
+    await drift.check("s-1", null);
+    await expect(ran()).rejects.toThrow("No credential for Claude.");
+    expect(invoked()).toBe(1);
+    expect(paused).toEqual([]);
   });
 });
 

@@ -62,7 +62,7 @@ describe("the counts a record holds", () => {
     }));
     const session = EditingSessionSchema.parse({
       version: 1, id: "80000000-0000-4000-8000-000000000002", repoId, key: null, digest: null, revision: 0,
-      resumeNew: false, lastPane: null, confirmed: null, read: null, impact: null, specCut: null, named: null, drift: null, change: null,
+      resumeNew: false, lastPane: null, confirmed: null, read: null, impact: null, named: null, drift: null, change: null,
       form: editingForm(TaskModelsSchema.strip().parse(SettingsSchema.parse({}))), phase: "editing", error: null,
       operation: null, interviewModel: null, history,
     });

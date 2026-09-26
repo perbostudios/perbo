@@ -5,7 +5,7 @@ import { logTail, redact } from "../process.js";
 import { readLatestDraftEdit } from "../records.js";
 import { ticketPath } from "../repository/layout.js";
 import { mintSpecFromTitle, specPath, specTitles } from "../plan/spec.js";
-import { UNTITLED_SPEC, specTitleFromMessage } from "@perbo/planning";
+import { specTitleFromMessage } from "@perbo/planning";
 import {
   INTERVIEW_NEEDS_A_TITLE,
   INTERVIEW_WROTE_THE_SPEC,
@@ -637,11 +637,11 @@ export class InterviewHost {
    *
    * The interview is started with `--spec`, so a planning with no slug has
    * nowhere to write. The person's own words name it: words are cut from the
-   * turn to name the folder, the spec is written titled Untitled, since the
+   * turn to name the folder, the spec is written with no title line, since the
    * cut is no title, and the slug it mints is recorded exactly as a save from
-   * the Spec pane records one, with the title the spec was written with. Nothing a model returned reaches the
-   * folder, so it stays the person's own parameter (ADR-0023 §4), and the slug
-   * still goes through `safePath` where the argv is built.
+   * the Spec pane records one. Nothing a model returned reaches the folder, so
+   * it stays the person's own parameter (ADR-0023 §4), and the slug still goes
+   * through `safePath` where the argv is built.
    *
    * A turn no folder name can come from falls through to the refusal, which
    * asks for the title the message could not give.
@@ -659,7 +659,7 @@ export class InterviewHost {
       throw new Error(INTERVIEW_NEEDS_A_TITLE, { cause: error });
     }
     const written = mintSpecFromTitle(repo, title);
-    this.deps.editing.recordSpec(id, written.slug, UNTITLED_SPEC);
+    this.deps.editing.recordSpec(id, written.slug);
     // The folder is minted once and never moves, so the person is told what it
     // was called while the spec is still empty enough to start again.
     // That the title can be changed is what an editable field says by being

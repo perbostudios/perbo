@@ -15,7 +15,7 @@ import { migrate } from "./migrate-workspace-round8.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./migrate-workspace-round8.mjs", import.meta.url));
 
-/** An editing session as a profile from before the planning records holds it. */
+/** An editing session as a profile without the planning records holds it. */
 function older(id, over = {}) {
   return {
     version: 1,
@@ -27,7 +27,6 @@ function older(id, over = {}) {
     revision: 3,
     resumeNew: false,
     specSlug: "a-spec",
-    specCut: null,
     named: null,
     asking: null,
     nodes: 0,
@@ -95,6 +94,13 @@ test("brings every editing session up to the records, backs the file up first an
   ]);
 });
 
+test("deletes a session's specCut, which the desktop does not read", () => {
+  const { lastView: _view, ...session } = older("s-1", { specCut: null, confirmed: null, read: null, impact: null, lastPane: null });
+  const { state, changes } = migrate({ version: 1, settings: {}, repositories: [], lastOpened: {}, editingSessions: [session] });
+  assert.equal("specCut" in state.editingSessions[0], false);
+  assert.deepEqual(changes, ["session s-1: deleted specCut"]);
+});
+
 test("takes the file itself as well as its directory, and changes nothing a second time", () => {
   const dir = profile([older("s-1")]);
   const file = join(dir, "workspace.json");
@@ -124,8 +130,8 @@ test("says how it is used when it is not given exactly one path, and fails on a 
   assert.equal(missing.stderr.trim(), `${absent} is missing, so nothing was changed.`);
 });
 
-test("brings a profile from main up too: lastOpened, specCut and named added, and a note's offers deleted", () => {
-  const { specCut: _cut, named: _named, ...fromMain } = older("s-1", {
+test("brings a profile from main up too: lastOpened and named added, and a note's offers deleted", () => {
+  const { named: _named, ...fromMain } = older("s-1", {
     conversation: [
       { n: 1, at: "2026-09-21T10:00:00.000Z", line: { kind: "turn", text: "Add a dark mode." } },
       { n: 2, at: "2026-09-21T10:01:00.000Z", line: { kind: "note", text: "Every problem is resolved.", offers: "contract" } },
@@ -134,7 +140,6 @@ test("brings a profile from main up too: lastOpened, specCut and named added, an
   const { state, changes } = migrate({ version: 1, settings: {}, repositories: [], jobs: [], asks: {}, archivedSeeded: true, editingSessions: [fromMain] });
   assert.deepEqual(state.lastOpened, {});
   const [session] = state.editingSessions;
-  assert.equal(session.specCut, null);
   assert.equal(session.named, null);
   assert.deepEqual(session.conversation[1].line, { kind: "note", text: "Every problem is resolved." });
   assert.deepEqual(session.conversation[0], fromMain.conversation[0]);
@@ -144,7 +149,6 @@ test("brings a profile from main up too: lastOpened, specCut and named added, an
     "session s-1: added confirmed: null",
     "session s-1: added read: null",
     "session s-1: added impact: null",
-    "session s-1: added specCut: null",
     "session s-1: added named: null",
     'session s-1: set lastPane "criteria" to null',
     "session s-1: deleted offers from conversation entry 2",

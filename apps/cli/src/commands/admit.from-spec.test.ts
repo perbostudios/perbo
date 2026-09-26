@@ -495,7 +495,7 @@ describe("perbo admit --from-spec", () => {
     expect(readTicket(storeDir(repo, null), "PRB-1").title).toBe("Activation email retries");
   });
 
-  it("passes over a drafted name another ticket carries, for the spec's title and then the outcome", async () => {
+  it("passes over a drafted name another ticket carries, for the spec's title and then a number after it", async () => {
     // The same name to a person scanning the board, whatever its case and
     // spacing. The draft is kept: only the name falls back.
     const { repo, specPath } = repository();
@@ -508,7 +508,8 @@ describe("perbo admit --from-spec", () => {
     expect(code).toBe(EXIT_CODES.approve);
     expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe("Activation email");
 
-    // With the spec's title taken too, the outcome is what is left.
+    // With the spec's title taken too, and an outcome whose one sentence is
+    // past the cap, the drafted name with a number after it is what is left.
     const other = repository();
     await admitTyped(other.repo, "Activation email retries");
     await admitTyped(other.repo, "Activation Email");
@@ -517,14 +518,64 @@ describe("perbo admit --from-spec", () => {
       other.specPath,
       scripted([submits({ ...drafted, name: "Activation email retries" })]),
     );
-    expect(readTicket(storeDir(other.repo, null), "PRB-3").title).toBe(drafted.outcome);
+    expect(drafted.outcome.length).toBeGreaterThan(60);
+    expect(readTicket(storeDir(other.repo, null), "PRB-3").title).toBe("Activation email retries 2");
   });
 
-  it("passes over a spec still Untitled for the outcome, where the drafted name is taken (D-118)", async () => {
+  describe("a spec nobody has named, with no title line (D-118)", () => {
+    const UNNAMED = SPEC.replace("# Activation email\n\n", "");
+
+    it("is drafted from, called by the drafted name, and given it as its title line", async () => {
+      const { repo, specPath } = repository(UNNAMED);
+      const { code, streams } = await admitFromSpec(
+        repo,
+        specPath,
+        scripted([submits({ ...drafted, name: "Activation email retries" })]),
+      );
+      expect(code).toBe(EXIT_CODES.approve);
+      const ticket = readTicket(storeDir(repo, null), "PRB-1");
+      expect(ticket.title).toBe("Activation email retries");
+      expect(ticket.source.title_at_admission).toBeNull();
+      expect(streams.err()).toContain("read spec:activation-email\n");
+      const named = readFileSync(specPath, "utf8");
+      expect(named.split("\n")[0]).toBe("# Activation email retries");
+      expect(named).not.toContain("Untitled");
+    });
+
+    it("is called by the outcome's first sentence where the drafted name is taken", async () => {
+      const { repo, specPath } = repository(UNNAMED);
+      await admitTyped(repo, "Activation email retries");
+      const outcome = "Activation emails arrive within a minute. They are retried three times.";
+      await admitFromSpec(
+        repo,
+        specPath,
+        scripted([submits({ ...drafted, name: "Activation email retries", outcome })]),
+      );
+      expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe("Activation emails arrive within a minute.");
+      expect(readFileSync(specPath, "utf8").split("\n")[0]).toBe("# Activation emails arrive within a minute.");
+    });
+
+    it("is called by the drafted name with --keep-title, having no title to keep", async () => {
+      const { repo, specPath } = repository(UNNAMED);
+      const { code } = await admitFromSpec(
+        repo,
+        specPath,
+        scripted([submits({ ...drafted, name: "Activation email retries" })]),
+        ["--keep-title"],
+      );
+      expect(code).toBe(EXIT_CODES.approve);
+      expect(readTicket(storeDir(repo, null), "PRB-1").title).toBe("Activation email retries");
+      expect(readFileSync(specPath, "utf8")).toBe(UNNAMED);
+    });
+  });
+
+  it("takes a spec titled Untitled at its word, as any other title", async () => {
+    // The word is what the app shows while a spec has no title line, never
+    // what the file says, so a title that happens to be it is a person's.
     const { repo, specPath } = repository(SPEC.replace("# Activation email", "# Untitled"));
     await admitTyped(repo, "Activation email retries");
     await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries" })]));
-    expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe(drafted.outcome);
+    expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe("Untitled");
   });
 
   it("keeps the drafted name when the outcome is edited", async () => {
@@ -879,6 +930,97 @@ describe("the files the loop commits with the spec", () => {
   });
 });
 
+describe("a ticket's name is never over 60 characters, and never cut (D-127)", () => {
+  // Each fallback past the drafted name is taken whole where it fits and
+  // passed over where it does not: a 600-character title or sentence is
+  // never the name, and never a cut of it.
+  const LONG_TITLE = "Activation email " + "and its retries ".repeat(36) + "x".repeat(7);
+  const LONG_SENTENCE = "New users receive an activation email " + "and a reminder ".repeat(37) + "anyway.";
+  const titled = (title: string) => SPEC.replace("# Activation email\n", `# ${title}\n`);
+  const name = (repo: string, key: string) => readTicket(storeDir(repo, null), key).title;
+  const specTitle = (specPath: string) => readFileSync(specPath, "utf8").split("\n")[0];
+
+  it("uses six-hundred-character stand-ins", () => {
+    expect(LONG_TITLE).toHaveLength(600);
+    expect(LONG_SENTENCE).toHaveLength(600);
+  });
+
+  it("passes over a spec title past the cap for the outcome's first sentence", async () => {
+    const { repo, specPath } = repository(titled(LONG_TITLE));
+    await admitTyped(repo, "Activation email retries");
+    const outcome = `Activation emails are retried. ${LONG_SENTENCE}`;
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries", outcome })]));
+    expect(name(repo, "PRB-2")).toBe("Activation emails are retried.");
+    expect(specTitle(specPath)).toBe("# Activation emails are retried.");
+  });
+
+  it("passes over a spec title and an outcome sentence past the cap for the drafted name numbered", async () => {
+    const { repo, specPath } = repository(titled(LONG_TITLE));
+    await admitTyped(repo, "Activation email retries");
+    await admitFromSpec(
+      repo,
+      specPath,
+      scripted([submits({ ...drafted, name: "Activation email retries", outcome: LONG_SENTENCE })]),
+    );
+    expect(name(repo, "PRB-2")).toBe("Activation email retries 2");
+    expect(specTitle(specPath)).toBe("# Activation email retries 2");
+  });
+
+  it("numbers past a number another ticket carries", async () => {
+    const { repo, specPath } = repository(titled(LONG_TITLE));
+    await admitTyped(repo, "Activation email retries");
+    await admitTyped(repo, "activation email  RETRIES 2");
+    await admitFromSpec(
+      repo,
+      specPath,
+      scripted([submits({ ...drafted, name: "Activation email retries", outcome: LONG_SENTENCE })]),
+    );
+    expect(name(repo, "PRB-3")).toBe("Activation email retries 3");
+  });
+
+  it("numbers the spec's title where the drafted name has no room for a number", async () => {
+    const full = "Activation email retries " + "y".repeat(35);
+    expect(full).toHaveLength(60);
+    const { repo, specPath } = repository();
+    await admitTyped(repo, full);
+    await admitTyped(repo, "Activation email");
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: full, outcome: LONG_SENTENCE })]));
+    expect(name(repo, "PRB-3")).toBe("Activation email 2");
+  });
+
+  it("is the ticket's key where nothing fits with a number", async () => {
+    const full = "Activation email retries " + "y".repeat(35);
+    const { repo, specPath } = repository(titled(LONG_TITLE));
+    await admitTyped(repo, full);
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: full, outcome: LONG_SENTENCE })]));
+    expect(name(repo, "PRB-2")).toBe("PRB-2");
+    expect(specTitle(specPath)).toBe("# PRB-2");
+  });
+
+  it("names a re-drafted ticket under the same rule", async () => {
+    const { repo, specPath } = repository(titled(LONG_TITLE));
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries" })]));
+    await admitTyped(repo, "Retried activation email");
+    writeFileSync(specPath, titled(LONG_TITLE));
+    const { code } = await admitFromSpec(
+      repo,
+      specPath,
+      scripted([submits({ ...drafted, name: "Retried activation email", outcome: LONG_SENTENCE })]),
+      ["--start-over", "PRB-1"],
+    );
+    expect(code).toBe(EXIT_CODES.approve);
+    expect(name(repo, "PRB-1")).toBe("Retried activation email 2");
+  });
+
+  it("calls a typed ticket by its outcome's first sentence, or by its key where that is past the cap", async () => {
+    const { repo } = repository();
+    await admitTyped(repo, `Activation emails are retried. ${LONG_SENTENCE}`);
+    await admitTyped(repo, LONG_SENTENCE);
+    expect(name(repo, "PRB-1")).toBe("Activation emails are retried.");
+    expect(name(repo, "PRB-2")).toBe("PRB-2");
+  });
+});
+
 describe("the spec takes the ticket's name", () => {
   // D-127: the Spec pane, the picker
   // and the contract's head show one name, so the spec's title line is
@@ -926,7 +1068,7 @@ describe("the spec takes the ticket's name", () => {
     expect(readdirSync(elsewhere)).toEqual([]);
   });
 
-  it("keeps its own title where that is the name, and takes the outcome where the outcome is", async () => {
+  it("keeps its own title where that is the name, and takes the numbered name where that is", async () => {
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
     expect(readFileSync(specPath, "utf8")).toBe(SPEC);
@@ -935,7 +1077,7 @@ describe("the spec takes the ticket's name", () => {
     await admitTyped(other.repo, "Activation email retries");
     await admitTyped(other.repo, "Activation Email");
     await admitFromSpec(other.repo, other.specPath, named("Activation email retries"));
-    expect(readFileSync(other.specPath, "utf8").split("\n")[0]).toBe(`# ${drafted.outcome}`);
+    expect(readFileSync(other.specPath, "utf8").split("\n")[0]).toBe("# Activation email retries 2");
   });
 });
 

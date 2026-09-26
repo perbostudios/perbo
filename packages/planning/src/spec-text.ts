@@ -28,7 +28,7 @@ export interface SpecRequirement {
 }
 
 export interface Spec {
-  /** The first `#` heading. */
+  /** The first `#` heading, or empty where the spec has none: nobody has named the work yet (D-118). */
   title: string;
   outcome: string;
   requirements: SpecRequirement[];
@@ -164,9 +164,10 @@ const HOLLOW =
  * "Fix Dr. Smith's login" is one sentence, and splitting it at `Dr.` would
  * name the folder `fix-dr` — a name minted once and never moved. Two letters
  * is the line: it keeps `Dr.`, `e.g.` and `vs.` whole and still ends a
- * sentence on any ordinary word.
+ * sentence on any ordinary word. `perbo admit` reads a ticket's name from an
+ * outcome with it too (D-127).
  */
-function firstSentence(text: string): string {
+export function firstSentence(text: string): string {
   for (let at = 0; at < text.length - 1; at++) {
     const mark = text[at]!;
     if (mark !== "." && mark !== "!" && mark !== "?") continue;
@@ -179,18 +180,10 @@ function firstSentence(text: string): string {
 }
 
 /**
- * The title line of a spec whose folder was named from the person's first
- * turn, until the Architect or the person names the work (D-118). The words
- * cut from the turn name the folder and nothing else: they are no title, and
- * never show as one.
- */
-export const UNTITLED_SPEC = "Untitled";
-
-/**
  * The words taken from the first thing a person said about the work that name
  * the folder of a planning that has to be named before any model has written
- * a word (D-118). They name the folder only; the spec's title line says
- * {@link UNTITLED_SPEC} until the work is named.
+ * a word (D-118). They name the folder only; the spec has no title line until
+ * the work is named.
  *
  * The person's own words, cut down deterministically: the first sentence, its
  * opening dropped, clipped to a whole word. Nothing a model returned reaches
@@ -328,7 +321,10 @@ export function requirementHighWater(markdown: string): number {
 }
 
 /**
- * The spec as Markdown, with an id on every requirement.
+ * The spec as Markdown, with an id on every requirement, and its title as the
+ * first `#` heading. A spec nobody has named has an empty title and is written
+ * with no title line: the file says what the work is called and nothing in its
+ * place (D-118).
  *
  * A requirement that arrives with an id keeps it, however its text was edited.
  * One that arrives without keeps the id of the requirement in `existing` whose
@@ -343,9 +339,6 @@ export function renderSpec(
   options: { highWater?: number; existing?: readonly SpecRequirementDraft[] } = {},
 ): { markdown: string; requirements: SpecRequirement[]; highWater: number } {
   const title = text.title.trim();
-  if (title.length === 0) {
-    throw new PlanningError("a spec's first heading is the title of the work it states");
-  }
   const lines = parseRequirementSection(text.requirements);
   const drafts = lines.flatMap((line) => ("draft" in line ? [line.draft] : []));
   let highWater = Math.max(
@@ -472,7 +465,7 @@ export function renderSpec(
     Notes: text.notes.trim(),
   };
   const markdown =
-    `# ${title}\n\n` +
+    (title.length === 0 ? "" : `# ${title}\n\n`) +
     SPEC_HEADINGS.map((heading) => `## ${heading}\n\n${body[heading]}\n`).join("\n");
   return { markdown, requirements, highWater };
 }

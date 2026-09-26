@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { TicketSchema } from "@perbo/contracts";
 import type {
@@ -82,6 +83,11 @@ export interface ServiceOptions {
    * provably after the ending they are asserting about.
    */
   specSettleMs?: number;
+  /**
+   * The wait between tries of a reading of the plan against its spec that
+   * did not run; injected by tests, which make it instant.
+   */
+  readingPause?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -183,7 +189,7 @@ export class DesktopService {
         converse: (id, line, at) => this.editing.converse(id, line, at),
         recordInterview: (id, session, provider, model) =>
           this.editing.recordInterview(id, session, provider, model),
-        recordSpec: (id, slug, cut) => this.editing.recordSpec(id, slug, cut),
+        recordSpec: (id, slug) => this.editing.recordSpec(id, slug),
         architectTitled: (id, title) => this.editing.architectTitled(id, title),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
@@ -220,6 +226,7 @@ export class DesktopService {
       jobs: this.jobs,
       cli: this.cli,
       models: (repoId, key) => this.state.taskModels[repoId + ":" + key] ?? this.state.settings,
+      pause: options.readingPause ?? (async (ms) => void (await delay(ms))),
       state: (id) => {
         try {
           return readingStateOf(this.editing.read(id), specTexts((repoId) => this.repository(repoId)));

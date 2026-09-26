@@ -154,8 +154,8 @@ export function writeSpecFile(args: {
   slug?: string | null | undefined;
   /**
    * The words a new spec's folder is named from where they are not its title:
-   * the cut of a person's first turn, which names the folder and is no title
-   * (D-118).
+   * the cut of a person's first turn, which names the folder and is no title,
+   * so the spec it mints has an empty title and no title line (D-118).
    */
   folderName?: string | undefined;
   text: SpecText;
