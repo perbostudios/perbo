@@ -1019,6 +1019,14 @@ describe("a ticket's name is never over 60 characters, and never cut (D-127)", (
     expect(name(repo, "PRB-1")).toBe("Activation emails are retried.");
     expect(name(repo, "PRB-2")).toBe("PRB-2");
   });
+
+  it("numbers a typed ticket whose first sentence another ticket already carries", async () => {
+    const { repo } = repository();
+    await admitTyped(repo, "Activation emails are retried. A failed send is retried once.");
+    await admitTyped(repo, "Activation emails are retried. A bounced address is never retried.");
+    expect(name(repo, "PRB-1")).toBe("Activation emails are retried.");
+    expect(name(repo, "PRB-2")).toBe("Activation emails are retried. 2");
+  });
 });
 
 describe("the spec takes the ticket's name", () => {

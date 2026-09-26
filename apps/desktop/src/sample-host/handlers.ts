@@ -32,6 +32,7 @@ import {
   principlesRecorded,
   detail,
   draftFromSpec,
+  keepsSpecTitle,
   driftEpoch,
   driftKeys,
   driftLanded,
@@ -346,13 +347,24 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // Whether the interview's turn is in flight as the reading starts, and the
     // last one sent, as the host takes them.
     const before = turnMark(editing.read(id), isWorking(id));
-    // The spec and the plan as the reading starts, which is when `perbo drift`
+    // The spec and the plan as a try starts, which is when `perbo drift`
     // reads them: a turn that moves either while it runs is not in what it
-    // finds.
+    // finds. The first try starts here; one made again after a pause reads
+    // them as they stand then.
     const slug = specOf.get(key);
-    const unreadable = slug !== undefined && specFiles()[slug] === undefined;
-    const keys = driftKeys(key);
-    const findings = unreadable ? [] : sampleDriftFindings(key);
+    const tryReading = () => {
+      sampleReadings.attempt(slug);
+      return { keys: driftKeys(key), findings: sampleDriftFindings(key) };
+    };
+    let first: (() => ReturnType<typeof tryReading>) | null;
+    try {
+      const read = tryReading();
+      first = () => read;
+    } catch (error) {
+      first = () => {
+        throw error;
+      };
+    }
     const reading = job(
       "drift",
       editing.read(id).repoId,
@@ -362,9 +374,14 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         // does not run — a spec that cannot be read, as `perbo drift` fails
         // on one — is made again after each pause, and only once every try
         // has failed does the job carry the error, which the page reads off
-        // the job. A job stopped meanwhile is not tried again.
-        await untilItRuns(
-          () => sampleReadings.attempt(slug),
+        // the job. A job stopped meanwhile is not tried again. What is
+        // recorded is what the try that ran found.
+        const { keys, findings } = await untilItRuns(
+          () => {
+            const made = first ?? tryReading;
+            first = null;
+            return made();
+          },
           (ms) => sampleReadings.pause(ms),
           () => job.state !== "running",
         );
@@ -512,6 +529,17 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // A fresh admission, not a move: the approved contract is frozen
     // (ADR-0016), so the plan is drafted again from the spec.
     const markdown = specFiles()[named] ?? "";
+    // A person's title past the cap is refused by the admission, which the
+    // host runs after the delete, in the host's words for that (D-127).
+    try {
+      keepsSpecTitle(markdown, planning);
+    } catch (error) {
+      throw new Error(
+        `${request.key} was deleted and its plan could not be drafted again: ${(error as Error).message}. ` +
+          "Its spec is in Create's picker; draft the plan from there.",
+        { cause: error },
+      );
+    }
     const drafted = newSampleTicket("", "plan_review");
     snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket: drafted });
     draftFromSpec(drafted.key, markdown, named, planning);
@@ -548,6 +576,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         stopSampleInterview(request.id);
         const markdown = specFiles()[session.specSlug] ?? "";
         refuseUnnumbered(markdown);
+        // A person's title past the cap is refused before the ticket is on
+        // the board, as `admit --keep-title` refuses it before writing one.
+        keepsSpecTitle(markdown, editing.read(request.id));
         const ticket = newSampleTicket("", "plan_review");
         // Admitted now, as `admit --from-spec` stamps it: the chat reads the
         // interview that came before the plan off this moment.

@@ -1,5 +1,5 @@
 // The part of this package a browser loads: the spec text, the impact report,
-// the graph edit path and the drift report's shape, none of which touch the
+// the graph edit path, the drift report's shape and a ticket's name, none of which touch the
 // filesystem, so the desktop's renderer computes what the command line
 // computes rather than asking the host for it. `browser.test.ts` holds the
 // property.
@@ -35,3 +35,5 @@ export {
   symbolOptions,
 } from "./spec-text.js";
 export type { Spec, SpecField } from "./spec-text.js";
+export { keptTitleRefusal, ticketName } from "./ticket-name.js";
+export type { TicketNaming } from "./ticket-name.js";

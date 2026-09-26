@@ -241,7 +241,8 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
  * epic's confirm as on its way ({@link confirmArrives}): the Problems pane
  * reads the plan only on the arrival a confirm made, and an arrival by the
  * rail or a reopened planning shows the last reading's problems and starts
- * none.
+ * none. A confirm whose route ends anywhere but that planning's Problems pane
+ * is over ({@link routeReached}), so it never stands for a later arrival.
  */
 export function confirmRoute(way: {
   repoId: string;
@@ -266,4 +267,15 @@ const confirmsOnTheWay = new Set<string>();
  */
 export function confirmArrives(sessionId: string, take = false): boolean {
   return take ? confirmsOnTheWay.delete(sessionId) : confirmsOnTheWay.has(sessionId);
+}
+
+/**
+ * The route the app is now at, from the shell on every move: a confirm on its
+ * way to any other planning's Problems pane, or to this planning's while this
+ * route is not it, is over, so an arrival there later by the rail or a
+ * reopened planning is not taken for it and reads nothing.
+ */
+export function routeReached(route: Route): void {
+  const kept = route.page === "planning" && route.pane === "drift" ? route.sessionId : null;
+  for (const sessionId of confirmsOnTheWay) if (sessionId !== kept) confirmsOnTheWay.delete(sessionId);
 }

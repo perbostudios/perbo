@@ -8,6 +8,7 @@ import { Onboarding } from "../settings/Onboarding.js";
 import { PlanningPaneSchema, type Settings } from "../../shared/protocol.js";
 import { AskPage } from "../planning/AskPage.js";
 import { PlanningMode } from "../planning/PlanningMode.js";
+import { routeReached } from "../planning/panes.js";
 import { CreateProvider, nameOfRoute } from "./create.js";
 import { Rail, RailToggle, SETTINGS_PAGES } from "./Rail.js";
 import { useRailSize } from "./rail-size.js";
@@ -143,6 +144,9 @@ export function App() {
     else location.hash = hash;
     setRoute(next);
   };
+  // A confirm on its way to a Problems pane the route did not end at is over
+  // (D-NEW-basic-and-epic-flows).
+  useEffect(() => routeReached(route), [route]);
   useEffect(() => {
     const changed = (): void => setRoute(readRoute());
     window.addEventListener("hashchange", changed);

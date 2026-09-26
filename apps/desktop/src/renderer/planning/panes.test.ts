@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkedLanding, confirmRoute, contractState, draftedLanding, flowFor, leftAt } from "./panes.js";
+import { checkedLanding, confirmArrives, confirmRoute, contractState, draftedLanding, flowFor, leftAt, routeReached } from "./panes.js";
 import type { OpenDraft, Snapshot } from "../../shared/protocol.js";
 
 /** One planning, as the drafts list carries it, with its ticket's row where it has one. */
@@ -131,5 +131,16 @@ describe("what a basic ticket's Confirm contract reads (D-NEW-basic-and-epic-flo
     expect(confirmRoute({ ...way, basic: true })).toEqual({ page: "planning", sessionId: "s-1", pane: "contract" });
     expect(confirmRoute({ ...way, basic: false })).toEqual({ page: "planning", sessionId: "s-1", pane: "drift" });
     expect(confirmRoute({ ...way, approved: true, basic: true })).toEqual({ page: "task", repoId: "repo-1", key: "PRB-1", view: "contract" });
+  });
+
+  it("keeps an epic's confirm while its route is that planning's Problems pane, and ends it once the route is anywhere else", () => {
+    const way = { repoId: "repo-1", key: "PRB-1", approved: false, basic: false };
+    confirmRoute({ ...way, sessionId: "s-2" });
+    confirmRoute({ ...way, sessionId: "s-3" });
+    routeReached({ page: "planning", sessionId: "s-2", pane: "drift" });
+    expect(confirmArrives("s-2")).toBe(true);
+    expect(confirmArrives("s-3")).toBe(false);
+    routeReached({ page: "planning", sessionId: "s-2", pane: "graph" });
+    expect(confirmArrives("s-2")).toBe(false);
   });
 });

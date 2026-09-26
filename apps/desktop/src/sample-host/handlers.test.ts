@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
 import { editing, job, sampleInterviews, sampleReadings, saveSpec, snapshot, specFiles, writeGraphEdit } from "./records.js";
 import { applyGraphEdit } from "@perbo/planning/browser";
@@ -143,20 +143,10 @@ it("deletes the ticket once nothing holds it, and every planning over it with it
 async function draftedUnder(
   byPerson: boolean,
   heading?: string | null,
-): Promise<{ ticket: string; spec: string }> {
-  const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
-  const title = heading === undefined ? taken : heading;
-  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
-  const slug = "confirmation-email";
-  editing.recordSpec(opened.id, slug);
-  saveSpec(
-    slug,
-    (title === null ? "" : `# ${title}\n\n`) +
-      "## Outcome\n\nNew users receive a confirmation email.\n\n" +
-      "## Requirements\n\n- R1: A signup queues exactly one email.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
-  );
-  if (byPerson) editing.personTitled(opened.id, taken);
-  await sampleBridge.request({ kind: "generatePlan", repoId, id: opened.id });
+  outcome = "New users receive a confirmation email.",
+): Promise<{ ticket: string; spec: string; key: string }> {
+  const { job: drafting, slug } = await generating(byPerson, heading, outcome);
+  await settledJob(drafting.id);
   const row = await vi.waitFor(
     () => {
       const found = snapshot.tasks.find((each) => each.ticket.admission.spec?.path === `specs/${slug}/spec.md`);
@@ -165,30 +155,92 @@ async function draftedUnder(
     },
     { timeout: 5000 },
   );
-  return { ticket: row.ticket.title, spec: specFiles()[slug]!.split("\n")[0]! };
+  return { ticket: row.ticket.title, spec: specFiles()[slug]!.split("\n")[0]!, key: row.ticket.key };
+}
+
+/** Generate plan pressed on that planning, and the drafting job it started. */
+async function generating(
+  byPerson: boolean,
+  heading: string | null | undefined,
+  outcome: string,
+): Promise<{ job: Job; slug: string }> {
+  const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+  const title = heading === undefined ? taken : heading;
+  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+  const slug = "confirmation-email";
+  editing.recordSpec(opened.id, slug);
+  saveSpec(
+    slug,
+    (title === null ? "" : `# ${title}\n\n`) +
+      `## Outcome\n\n${outcome}\n\n` +
+      "## Requirements\n\n- R1: A signup queues exactly one email.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  if (byPerson && title !== null) editing.personTitled(opened.id, title);
+  return { job: await sampleBridge.request({ kind: "generatePlan", repoId, id: opened.id }), slug };
 }
 
 it("drafts the plan under the name the person gave the spec, and the spec keeps it (D-127)", async () => {
   const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
-  expect(await draftedUnder(true)).toEqual({ ticket: taken, spec: `# ${taken}` });
+  expect(await draftedUnder(true)).toMatchObject({ ticket: taken, spec: `# ${taken}` });
 });
 
 it("names a plan whose spec nobody titled as admit does, and the spec takes that name (D-127)", async () => {
-  expect(await draftedUnder(false)).toEqual({
+  expect(await draftedUnder(false)).toMatchObject({
     ticket: "New users receive a confirmation email.",
     spec: "# New users receive a confirmation email.",
   });
 });
 
 it("names a plan whose spec has no title line by its outcome, and the spec takes that name (D-118, D-127)", async () => {
-  expect(await draftedUnder(false, null)).toEqual({
+  expect(await draftedUnder(false, null)).toMatchObject({
     ticket: "New users receive a confirmation email.",
     spec: "# New users receive a confirmation email.",
   });
 });
 
 it("names a plan whose spec is titled Untitled by that title, which is the app's display word and no mark in the file (D-118)", async () => {
-  expect(await draftedUnder(false, "Untitled")).toEqual({ ticket: "Untitled", spec: "# Untitled" });
+  expect(await draftedUnder(false, "Untitled")).toMatchObject({ ticket: "Untitled", spec: "# Untitled" });
+});
+
+describe("a sample ticket's name is never over 60 characters, and never cut, as admit names it (D-120, D-127)", () => {
+  const LONG_TITLE = "Confirmation email " + "and its retries ".repeat(36) + "x".repeat(5);
+  const LONG_SENTENCE = "New users receive a confirmation email " + "and a reminder ".repeat(37) + "anyway";
+
+  it("uses six-hundred-character stand-ins", () => {
+    expect(LONG_TITLE).toHaveLength(600);
+    expect(LONG_SENTENCE).toHaveLength(600);
+  });
+
+  it("passes over a spec title past the cap for the outcome's first sentence", async () => {
+    expect(await draftedUnder(false, LONG_TITLE, `Confirmation emails are sent. ${LONG_SENTENCE}`)).toMatchObject({
+      ticket: "Confirmation emails are sent.",
+      spec: "# Confirmation emails are sent.",
+    });
+  });
+
+  it("is the ticket's key where the title and the outcome's first sentence are both past the cap", async () => {
+    const { ticket, spec, key } = await draftedUnder(false, LONG_TITLE, LONG_SENTENCE);
+    expect(ticket).toBe(key);
+    expect(spec).toBe(`# ${key}`);
+  });
+
+  it("numbers the spec's title where another ticket carries it and the outcome's sentence too", async () => {
+    const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+    expect(await draftedUnder(false, taken, taken)).toMatchObject({ ticket: `${taken} 2`, spec: `# ${taken} 2` });
+  });
+
+  it("refuses a title the person gave past the cap, in admit's words, and puts nothing on the board", async () => {
+    const before = snapshot.tasks.length;
+    const { job: drafting } = await generating(true, LONG_TITLE, "New users receive a confirmation email.");
+    await vi.waitFor(
+      () => expect(snapshot.jobs.find((each) => each.id === drafting.id)!.state).toBe("failed"),
+      { timeout: 5000 },
+    );
+    expect(snapshot.jobs.find((each) => each.id === drafting.id)!.error).toBe(
+      "the spec's title is 600 characters, and a ticket's name is at most 60 (D-127): shorten the title, then draft the plan again",
+    );
+    expect(snapshot.tasks).toHaveLength(before);
+  });
 });
 
 it("moves a ticket on a principle with no finding answered, as the principle alone does, and publishes nothing (D-065)", async () => {
@@ -472,6 +524,30 @@ it("tries a reading again until it runs, and stops trying once it is cancelled, 
     expect(editing.read(id).read).not.toBe("0123456789abcdef");
   } finally {
     attempt.mockRestore();
+    pause.mockRestore();
+  }
+});
+
+it("records what the try that ran found, where the spec could not be read on the first (D-NEW-basic-and-epic-flows)", async () => {
+  const slug = "reading-readable-later";
+  const { id, key } = await draftedFromSpec(slug, [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  const spec = specFiles()[slug]!;
+  const others = specFiles();
+  delete others[slug];
+  localStorage.setItem("perbo:preview-specs", JSON.stringify(others));
+  const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(async () => saveSpec(slug, spec));
+  try {
+    const reading = await sampleBridge.request({ kind: "driftCheck", id, state: null });
+    await settledJob(reading.id);
+    expect(pause).toHaveBeenCalledTimes(1);
+    const verdict = snapshot.jobs.find((each) => each.id === reading.id)!.result as { findings: unknown[] };
+    expect(verdict.findings.length).toBeGreaterThan(0);
+    expect(editing.read(id).drift?.open.length).toBeGreaterThan(0);
+  } finally {
     pause.mockRestore();
   }
 });

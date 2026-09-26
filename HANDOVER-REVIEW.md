@@ -11,7 +11,7 @@ It is written for the agent the founder runs locally to check this work. It says
 | Branch | `home-loop-and-planning-care-package` | `home-loop-round8-wip` |
 | Base | `main` at `1e19a82` | `1e0de26` (the pull request's head before its fix commits) |
 | Head | `350a097` | this commit |
-| State | pushed, not merged; its D-073 review at `350a097` approved | on top of `fa02f17`, gated locally; its review found no code blocker and two doc defects, which are being fixed |
+| State | pushed, not merged; its D-073 review at `350a097` approved | gated locally; the round-8 review of `493bc10` found no code blocker, and its two doc defects are fixed |
 
 Round 8 does **not** carry the pull request's eight fix commits (`013d867`, `0b1b180`, `2256433`, `923a249`, `7e26a4b`, `e0f854b`, `c669777`, `350a097`). Reconcile the two branches before round 8 moves to the pull-request branch: the guard files (`packages/runner/src/shell/internal/*`, `pretool.ts`, `profile.ts`) and `docs/08`, D-105 and ADR-0038 changed on both. Round 8 removes every `.slice(0, 200)` from the guard's refusal details; #13 keeps them and adds `backup.ts:58`, `command.ts:360` and `sed.ts:347`: strip them all in the merge and rerun `packages/runner/src/shell/index.whole-detail.test.ts`. #13 already fixes the two wrapped D-NEW ids in `apps/desktop/src/host/routes.ts`.
 
@@ -37,7 +37,10 @@ Each fix commit answers an independent Claude Opus 5.5 D-073 review, posted as a
 
 ### Commits
 - `fa02f17`: wave 1. Section 3 items 1–8 of `HANDOFF-ROUND8.md`, independently reviewed once, the review's four blockers fixed, gated.
-- This commit: wave 2. Everything below, one independent review, one fix round for its findings, gated, then the round-8 review: no code blocker, two doc defects being fixed.
+- `cc77b23`: wave 2. Everything below, one independent review, one fix round for its findings, gated.
+- `493bc10`: the planning fixer's stopped work merged in, keeping the round's files. The round-8 review of it found no code blocker and two doc defects, which are fixed.
+- `93ca6ad`: the fix round applying the founder's five rulings. Among them, the drift reading's "could not start" note says one sentence with its error behind the "i" in both hosts.
+- This commit: closes the fix-round review's findings. A typed ticket is named apart from every ticket in the store, so two sharing a first sentence become "… 2". One chooser names a ticket in both hosts, `ticketName` in `@perbo/planning` (root and browser entries), and the sample host refuses a kept title over 60 characters in the CLI's words (D-127). The sample host's reading records what the try that ran found. The contract page's hold while the reading pop-up is up is tested. A confirm on its way to the Problems pane ends when the route ends anywhere else (`routeReached` in `renderer/planning/panes.ts`), so a later arrival by the rail reads nothing.
 
 ### What wave 2 does, by the founder's rulings
 **Planning flow** (D-NEW-basic-and-epic-flows, D-128, D-130):
@@ -65,11 +68,12 @@ These are known and not fixed:
 - **The interview's condense counter resets** on any line that fits, so a model alternating long and short messages can keep being asked again.
 - **`DraftEditSchema.summary` (300 characters) can overflow.** "Always prohibit ${glob} in this repository" exceeds it for a glob longer than about 265 characters. This predates the round.
 - **`ExplorerPane.tsx` shows 14 files, then "… K more".** This predates the round, and no decision states that number.
-- **The drift reading's "could not start" note** (`REREAD_COULD_NOT_START`) still quotes its error inline, not behind an "i".
+
+For the founder, not an agent (D-079): `packages/review/PROMPTS.md` names `executor_v11`, and the runner's executor prompt is `executor_v14`. It is a one-word fix.
 
 ## How the work was verified
 - Every behaviour has a test beside its module, and every test was proven by mutation (revert the fix, see the test fail, restore, see it pass). Each bundle had an independent Opus 5.5 reviewer who re-ran mutations itself; a surviving mutation was a blocker.
-- The gate: `pnpm check` (`scripts/check.mjs`), with the validators under a Python ≥ 3.10 carrying `yaml` (`PERBO_PYTHON=python3`). On this commit, every stage was run on its own, and the code stage with `turbo --continue` so one failure hides nothing. Install, build, runtime, corpus, validators, protected paths and the regression dry run (against the corpus `.github/corpus-pin.json` pins) pass. Every package's typecheck and lint pass. The tests pass apart from ten that are all on the environment list below:
+- The gate: `pnpm check` (`scripts/check.mjs`), with the validators under a Python ≥ 3.10 carrying `yaml` (`PERBO_PYTHON=python3`). On `cc77b23`, every stage was run on its own, and the code stage with `turbo --continue` so one failure hides nothing. Install, build, runtime, corpus, validators, protected paths and the regression dry run (against the corpus `.github/corpus-pin.json` pins) pass. Every package's typecheck and lint pass. The tests pass apart from ten that are all on the environment list below:
 - desktop: 1449 pass, 1 fails;
 - CLI: 1445 pass, 6 fail;
 - runner: 2689 pass, 2 fail;
@@ -78,7 +82,7 @@ These are known and not fixed:
 - Environment facts for anyone re-running in a cloud container: it runs as **root** (file modes are ignored), **`GH_TOKEN` is set** (skips `gh auth status`), `GIT_CONFIG_*` sets an `insteadOf`, and `ssh-keygen` must be installed. These tests fail there on the CI-green `1e0de26` exactly as on this branch: desktop e2e "refuses the rename whole…" (chmod); CLI `admit.from-spec` "cannot be read", `agent` "cannot write the launch file", `review/index.ticketless` ac_1/ac_4, `run/index.refused`, `run/local` "read through gh"; runner `pretool.subagent-guard-state` "cannot record", `loop/index.orphans` "survivor", `push-remote` "to an ssh remote"; evaluation `baseline.test.ts`; `workspace` `diagnostic.ignored-paths` times out under full parallel load only. As a non-root user without `GH_TOKEN`, the permission and `gh` ones pass.
 
 ## What to check first
-1. `git diff fa02f17 HEAD` (wave 2) and `git show fa02f17` (wave 1) against `AGENTS.md`, `packages/runner/AGENTS.md`, `packages/review/AGENTS.md` and `HANDOFF-ROUND8.md`'s rulings.
+1. `git show fa02f17` (wave 1), `git diff fa02f17 493bc10` (wave 2 and the merged fixer's work) and `git diff 493bc10 HEAD` (the fix round and this commit) against `AGENTS.md`, `packages/runner/AGENTS.md`, `packages/review/AGENTS.md` and `HANDOFF-ROUND8.md`'s rulings.
 2. That every route to a confirm holds on open problems.
 3. That `git diff origin/main -- packages/review` is empty.
 4. The merge with pull request #13: the `.slice(0, 200)` hazards above.

@@ -604,6 +604,19 @@ describe("interactive desktop flows", () => {
     expect(within(popup).getByRole("button", { name: "The whole error" })).toBeTruthy();
     expect(popup.textContent).toContain("No credential for Claude. Run `claude login`, then try again.");
     expect(within(popup).getAllByRole("button").map((button) => button.textContent)).toEqual(["i", "Got it"]);
+    // While it is up, nothing confirms under it: the approve button is held,
+    // and the approve binding reads nothing.
+    expect(screen.getByRole("button", { name: "Approve · start the loop" }).hasAttribute("disabled")).toBe(true);
+    const checks = (): number => sent.mock.calls.filter(([request]) => request.kind === "driftCheck").length;
+    const checked = checks();
+    setPlatformForTests(true);
+    try {
+      fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
+    } finally {
+      setPlatformForTests(null);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(checks()).toBe(checked);
     // Nothing is confirmed, and nothing offers a way past the reading.
     expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
     expect(screen.queryByText(/without the reading/)).toBeNull();

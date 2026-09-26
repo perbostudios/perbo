@@ -18,6 +18,8 @@ import {
   retitleSpec,
   specSlug,
   specTitleFromMessage,
+  keptTitleRefusal,
+  ticketName,
   undoGraphEdit,
   type GraphEditOutcome,
   type Spec,
@@ -31,7 +33,6 @@ import {
   isNeverReadPath,
   planNodes,
   planSizeCounts,
-  sameName,
   sizeEstimate,
   TICKET_TRANSITIONS,
   type ApproachRecord,
@@ -1668,22 +1669,40 @@ export function graphView(repoId: string, key: string): GraphView {
 }
 
 /**
- * What a ticket drafted from a spec is called, as `admit` calls it where
- * nothing drafted a name, which is always here because the sample has no
- * drafter: the spec's title, unless it has none (D-118) or another ticket in
- * the repository carries it, else the plan's outcome (D-127). With
- * `keepTitle`, as `admit --keep-title` calls it, the spec's title is the
- * person's name and stands whatever another ticket is called.
- * Read after the plan is drafted, which is where the outcome comes from.
+ * What a ticket drafted from a spec is called, by `ticketName` as `admit`
+ * calls it (D-127), where nothing drafted a name, which is always here
+ * because the sample has no drafter: the spec's title, then the plan's
+ * outcome's first sentence, each passed over where another ticket in the
+ * repository carries it or it runs past the cap, then numbered, then the key.
+ * With `keepTitle` the spec's title stands as the person gave it. Read after
+ * the plan is drafted, which is where the outcome comes from.
  */
 function specTicketName(repo: string, key: string, markdown: string, keepTitle: boolean): string {
-  const title = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
-  const taken =
-    !keepTitle &&
-    snapshot.tasks.some(
-      (row) => row.repoId === repo && row.ticket.key !== key && sameName(row.ticket.title, title),
-    );
-  return title.length > 0 && !taken ? title : plans.get(key)!.outcome;
+  return ticketName({
+    drafted: "",
+    specTitle: readSpecSections(markdown).text.title,
+    outcome: plans.get(key)!.outcome,
+    taken: snapshot.tasks
+      .filter((row) => row.repoId === repo && row.ticket.key !== key)
+      .map((row) => row.ticket.title),
+    key,
+    keepTitle,
+  });
+}
+
+/**
+ * Whether a plan drafted from this spec keeps the person's title, as the host
+ * adds `--keep-title` (D-127): where `planning` records the person titling the
+ * spec and it still states that title. One past the cap is refused in
+ * `admit`'s words, before anything is drafted, as `admit` refuses it before a
+ * model is asked.
+ */
+export function keepsSpecTitle(markdown: string, planning: EditingSession | undefined): boolean {
+  const title = readSpecSections(markdown).text.title;
+  const keep = planning !== undefined && keepsPersonsTitle(planning, title);
+  const refusal = keep ? keptTitleRefusal(title) : null;
+  if (refusal !== null) throw new Error(refusal);
+  return keep;
 }
 
 /**
@@ -1691,11 +1710,12 @@ function specTicketName(repo: string, key: string, markdown: string, keepTitle: 
  * requirement, each citing it, grouped into two nodes so a requirement's node
  * is something to look at. Where `planning` records the person titling the
  * spec and it still states that title, it is `--keep-title`: the ticket takes
- * the spec's title and the spec is left as it is (D-127).
+ * the spec's title and the spec is left as it is, and a title past the cap is
+ * refused before anything is drafted (D-127).
  */
 export function draftFromSpec(key: string, markdown: string, slug: string, planning: EditingSession | undefined): void {
+  const keepTitle = keepsSpecTitle(markdown, planning);
   const read = readSpecSections(markdown);
-  const keepTitle = planning !== undefined && keepsPersonsTitle(planning, read.text.title);
   const plan = plans.get(key)!;
   // The spec this plan was drafted from, as the CLI records it on admission.
   // Written here because the picker reads it: a ticket is what says a spec has

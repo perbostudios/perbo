@@ -3233,6 +3233,23 @@ describe("the Graph pane (SCP-316)", () => {
       return plan;
     }
 
+    it("reads nothing on a later arrival at Problems where a confirm's route ended elsewhere (D-NEW-basic-and-epic-flows)", async () => {
+      const plan = await parted();
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      const before = await readings();
+      // A confirm on its way to Problems, whose route ends on the Graph instead.
+      confirmRoute({ repoId: plan.repoId, key: plan.key, sessionId: plan.id, approved: false, basic: false });
+      location.hash = `planning/${plan.id}/graph`;
+      mount();
+      await screen.findByRole("heading", { name: "Execution graph" });
+      // Arrived at later, as by the rail: the last reading's problems, and no reading.
+      location.hash = `planning/${plan.id}/drift`;
+      await waitFor(() => expect(document.querySelector('[data-screen="drift"]')).not.toBeNull(), { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await readings()).toBe(before);
+    });
+
     it("moves the person back to the Graph once every problem is resolved, the tab gone, and confirms from there without reading again (D-130)", async () => {
       const plan = await confirmedIntoProblems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
@@ -7011,6 +7028,50 @@ describe("the name of a ticket drafted again from its spec (D-127)", () => {
     // ticket carries the spec's title and the new plan is called by it.
     expect(after.tasks.some((task) => task.ticket.key === "PRB-415")).toBe(false);
     expect(drafted.ticket.title).toBe(stopped.ticket.title);
+  });
+
+  it("is refused where the person's title for the spec runs past the cap, in the host's words once the stopped ticket is gone", async () => {
+    vi.resetModules();
+    const { sampleBridge: sample } = await import("../../sample-host/bridge.js");
+    const { editing } = await import("../../sample-host/records.js");
+    const before = await sample.request({ kind: "snapshot" });
+    const stopped = before.tasks.find((task) => task.ticket.key === "PRB-415")!;
+    const title = "Retire the legacy CSV importer and every path it reads and every path it reads";
+    expect(title.length).toBeGreaterThan(60);
+    localStorage.setItem(
+      "perbo:preview-specs",
+      JSON.stringify({
+        "retire-the-legacy-csv-importer": [
+          `# ${title}`,
+          "",
+          "## Outcome",
+          "",
+          "Every import goes through the current parser, and the legacy path is gone.",
+          "",
+          "## Requirements",
+          "",
+          "- An upload of either dialect is read by the current parser.",
+          "",
+        ].join("\n"),
+      }),
+    );
+    // A planning over it that records the person giving the spec that title.
+    const planning = await sample.request({ kind: "editingOpen", target: { kind: "fresh", repoId: stopped.repoId } });
+    const records = JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]") as { id: string }[];
+    localStorage.setItem(
+      "perbo:preview-editing",
+      JSON.stringify(records.map((each) => (each.id === planning.id ? { ...each, key: "PRB-415" } : each))),
+    );
+    editing.personTitled(planning.id, title);
+    await expect(sample.request({ kind: "replan", repoId: stopped.repoId, key: "PRB-415" })).rejects.toThrow(
+      `PRB-415 was deleted and its plan could not be drafted again: the spec's title is ${title.length} characters, ` +
+        "and a ticket's name is at most 60 (D-127): shorten the title, then draft the plan again. " +
+        "Its spec is in Create's picker; draft the plan from there.",
+    );
+    const after = await sample.request({ kind: "snapshot" });
+    expect(after.tasks.map((task) => task.ticket.key)).toEqual(
+      before.tasks.map((task) => task.ticket.key).filter((key) => key !== "PRB-415"),
+    );
   });
 });
 
