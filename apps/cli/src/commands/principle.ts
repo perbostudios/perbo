@@ -72,7 +72,15 @@ export function principle(input: PrincipleInput, context: CommandContext): Princ
     return { verb: "list", path, text: existsSync(path) ? readFileSync(path, "utf8") : null };
   }
   mkdirSync(dirname(path), { recursive: true });
-  if (!existsSync(path)) writeFileSync(path, HEADER);
+  // The header is written only by the add that creates the file, in one
+  // exclusive create: decisions on different tickets record their principles
+  // at the same time (D-049), and a check followed by a write would let the
+  // second add truncate what the first had appended.
+  try {
+    writeFileSync(path, HEADER, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
   const date = context.now.toISOString().slice(0, 10);
   appendFileSync(path, `\n- (${date}) ${input.text.trim().replace(/\n+/g, " ")}\n`);
   return { verb: "add", path };

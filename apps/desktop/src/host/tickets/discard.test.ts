@@ -40,6 +40,7 @@ function state(): ProfileState {
     jobs: [],
     asks: {},
     lastOpened: {},
+    calledOff: [],
     titles: { [repoId + ":PRB-1"]: "Renamed" },
     archived: [repoId + ":PRB-1"],
   });
@@ -111,12 +112,38 @@ describe("discardTicket", () => {
     expect(profile.archived).toEqual([]);
   });
 
-  it("waits for the repository's own commands to finish", async () => {
+  it("waits for a command running for this ticket, in the words it always said", async () => {
+    for (const own of [
+      running({ key: "PRB-1" }),
+      running({ key: "PRB-1", kind: "decide" }),
+      running({ key: "PRB-1", kind: "publish", state: "stopping" }),
+      // A command that produced this ticket names it by the key it produced.
+      running({ key: null, kind: "admit", resultKey: "PRB-1" }),
+    ]) {
+      const repo = repository();
+      await expect(discardTicket(deps({ jobs: [own] }), repo, "PRB-1")).resolves.toBe(
+        "Wait for the commands running in this repository to finish before deleting a contract.",
+      );
+      expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
+    }
+  });
+
+  it("deletes at once while another ticket's run is under way in the same repository", async () => {
     const repo = repository();
-    await expect(discardTicket(deps({ jobs: [running()] }), repo, "PRB-1")).resolves.toBe(
-      "Wait for the commands running in this repository to finish before deleting a contract.",
-    );
-    expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
+    const profile = state();
+    await expect(
+      discardTicket(deps({ jobs: [running(), running({ key: "PRB-3", kind: "decide" })], profile }), repo, "PRB-1"),
+    ).resolves.toBeNull();
+    expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(false);
+    expect(profile.archived).toEqual([]);
+  });
+
+  it("does not wait for this ticket's command once it has ended", async () => {
+    const repo = repository();
+    await expect(
+      discardTicket(deps({ jobs: [running({ key: "PRB-1", state: "completed" })] }), repo, "PRB-1"),
+    ).resolves.toBeNull();
+    expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(false);
   });
 
   it("does not wait for a command in another repository", async () => {
@@ -233,6 +260,7 @@ describe("discardTicket", () => {
       jobs: [],
       asks: {},
       lastOpened: {},
+      calledOff: [],
       editingSessions: [planning("PRB-1"), planning("PRB-2")],
     }).editingSessions;
     await discardTicket(deps({ profile }), repo, "PRB-1");
@@ -252,6 +280,7 @@ describe("discardTicket", () => {
       jobs: [],
       asks: {},
       lastOpened: {},
+      calledOff: [],
       editingSessions: [planning("PRB-1"), planning("PRB-2")],
     }).editingSessions;
     const stopped: string[][] = [];

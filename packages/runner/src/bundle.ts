@@ -10,6 +10,7 @@ import {
   computeReplayability,
   type ArtifactRef,
   type ContextItem,
+  type ExecutionAttempt,
   type RunBundle,
   type RunBundleKind,
   type SecretIndex,
@@ -85,6 +86,13 @@ export class BundleStore {
   readObject(sha256: string): string | null {
     const path = join(this.root, BUNDLE_OBJECTS_DIR, sha256);
     return existsSync(path) ? readFileSync(path, "utf8") : null;
+  }
+
+  /** The bytes a bundle's artifact names, or null where it names none by that name or did not retain them. */
+  artifact(bundle: RunBundle, name: string): string | null {
+    const ref = bundle.artifacts.find((artifact) => artifact.name === name);
+    if (ref === undefined || !ref.retained) return null;
+    return this.readObject(ref.sha256);
   }
 
   /**
@@ -176,4 +184,44 @@ export class BundleStore {
   forTicket(ticketId: string): RunBundle[] {
     return this.list().filter((bundle) => bundle.ticket_id === ticketId);
   }
+}
+
+/**
+ * The bundles one attempt wrote. The execution bundle is keyed by the attempt
+ * id; the review by the change set it judged; a verification by the
+ * `cv_<attempt>` subject the loop gives it.
+ *
+ * One join, read by everything that needs it: `perbo inspect`'s report and
+ * its `--verify`, which re-hashes what these name, and the tally a run prints
+ * of what it has spent (`tally.ts`), which has to come to what that report
+ * says. A second copy of the rule would be a second answer to "which bundles
+ * are this attempt's".
+ */
+export interface AttemptBundles {
+  execution: RunBundle | undefined;
+  review: RunBundle | undefined;
+  verification: RunBundle | undefined;
+}
+
+export function attemptBundles(
+  attempt: Pick<ExecutionAttempt, "attempt_id" | "changeset_id">,
+  bundles: readonly RunBundle[],
+): AttemptBundles {
+  return {
+    execution: bundles.find(
+      (bundle) => bundle.kind === "execution" && bundle.subject_id === attempt.attempt_id,
+    ),
+    review:
+      attempt.changeset_id === null
+        ? undefined
+        : bundles.find(
+            (bundle) =>
+              bundle.kind === "review" &&
+              bundle.subject_id.startsWith("rev_") &&
+              bundle.inputs["changeset_id"] === attempt.changeset_id,
+          ),
+    verification: bundles.find(
+      (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.attempt_id}`,
+    ),
+  };
 }

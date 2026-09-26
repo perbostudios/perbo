@@ -8,7 +8,8 @@ export {
   readAttemptsRecord,
   runNumbers,
 } from "./attempts.js";
-export { BundleStore } from "./bundle.js";
+export { attemptBundles, BundleStore } from "./bundle.js";
+export type { AttemptBundles } from "./bundle.js";
 export { runsTurboWithoutForce, TURBO_FORCE_FLAG } from "./checks/index.js";
 export { parseDeclines } from "./declines.js";
 export type { Decline } from "./declines.js";
@@ -36,7 +37,7 @@ export type { PreflightRequest, PreflightResult } from "./preflight.js";
 export { judgePreToolCall } from "./pretool.js";
 export type { PreToolGuardState } from "./pretool.js";
 export { PRINCIPLES_FILENAME } from "./principles.js";
-export { DEFAULT_COMMAND_DENY_LIST } from "./profile.js";
+export { DEFAULT_COMMAND_DENY_LIST, NetworkAllowListSchema } from "./profile.js";
 export { inspectCommandWithCwd } from "./prohibited.js";
 export type { MergedTicketContext } from "./prompt.js";
 export { RunRefusedError } from "./refusal.js";

@@ -292,8 +292,9 @@ export const USAGE = `perbo — contract to pull request, locally
       .perbo/config.json sets merge to "loop", asks each in queue order to
       merge under sync --merge's conditions until one does), reconciles any ticket a dead
       run left mid-state, decides who waits, and starts perbo run --ticket as
-      a child process for each ready ticket up to concurrent_local_attempts,
-      counting a run a person started by hand. Queue order is a ticket's
+      a child process for every ready ticket not already running, in the same
+      tick — up to concurrent_local_attempts where the limits set it, counting
+      a run a person started by hand. Queue order is a ticket's
       dependencies first, then priority, then admission time. A ticket waits — state blocked, the reason on its record
       and in perbo list — while a depends_on key has not merged, or while a
       ticket ahead of it holds a scope this one's reaches: its globs until it

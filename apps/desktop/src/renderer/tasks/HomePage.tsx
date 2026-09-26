@@ -14,7 +14,7 @@ import {
 import { Rename } from "./Rename.js";
 import { timeAgo } from "../time-ago.js";
 import { errorMessage, useAction, useTaskSummary } from "../workspace/index.js";
-import { useCreate, withoutDeleting } from "../shell/create.js";
+import { ConfirmDelete, confirmDeleteFiled, useCreate, useDiscardTicket, withoutDeleting } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
@@ -128,7 +128,7 @@ function TaskCard({
 }) {
   const { stage, tone, description } = projectTicket(workspace, row);
   // Completed is a decided merge alone: a cancelled or rolled-back ticket is a stop, or work a run carries again.
-  const completed = isMergeDecided(row);
+  const completed = isMergeDecided(workspace, row);
   const stopped = tone === "red";
   const summary = useTaskSummary(row.repoId, row.ticket.key);
   const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
@@ -231,12 +231,18 @@ function ArchiveRow({
   open,
   rename,
   restore,
+  remove,
+  held,
   title,
 }: {
   row: TaskRow;
   open: (row: TaskRow) => void;
   rename: (row: TaskRow, title: string) => Promise<unknown>;
   restore: (row: TaskRow) => void;
+  /** Ask first, then delete the ticket for good. */
+  remove: (row: TaskRow) => void;
+  /** A command is running for this ticket, which holds its delete as the host does. */
+  held: boolean;
   title: string;
 }) {
   const summary = useTaskSummary(row.repoId, row.ticket.key);
@@ -282,7 +288,20 @@ function ArchiveRow({
             ? "closed unmerged"
             : row.ticket.state}
       </span>
-      <span role="cell">
+      {/* Delete first and to Home at the right: the way back is the row's
+          own action, and a destructive one is never the one at the end. */}
+      <span role="cell" className="archive-actions">
+        <button
+          className="text-button small muted archive-delete"
+          aria-label={`Delete ticket: ${title}`}
+          disabled={held}
+          onClick={(event) => {
+            event.stopPropagation();
+            remove(row);
+          }}
+        >
+          Delete
+        </button>
         <button
           className="text-button small muted"
           aria-label="Return this ticket to Home"
@@ -316,7 +335,12 @@ export function HomePage({
     ),
     [sort, setSort] = useState<"recent" | "newest" | "oldest" | "title" | "stage">("recent"),
     [page, setPage] = useState(0),
-    [renaming, setRenaming] = useState<string | null>(null);
+    [renaming, setRenaming] = useState<string | null>(null),
+    // The archived ticket whose Delete was pressed and not yet answered.
+    [removing, setRemoving] = useState<TaskRow | null>(null);
+  // Deleted where it is listed: the row leaves the Archive at the click and
+  // the person stays on the Archive; a refusal puts it back and says why below.
+  const discard = useDiscardTicket(action.mutateAsync, () => undefined);
   const searchInput = useRef<HTMLInputElement>(null);
   useShortcut(archive ? "archiveSearch" : "search", () => searchInput.current?.focus());
   const all = homeRows(workspace);
@@ -586,6 +610,8 @@ export function HomePage({
                 open={open}
                 rename={rename}
                 restore={(target) => file([target], false)}
+                remove={setRemoving}
+                held={projectTicket(workspace, row).held}
                 title={titleOf(row)}
               />
             ))}
@@ -628,6 +654,21 @@ export function HomePage({
             Create a task
           </Button>
         </div>
+      )}
+      {removing !== null && (
+        // The picker's confirmation, in the words of the stage this ticket is
+        // at, asked here and not by the browser, so the row stays in view.
+        <ConfirmDelete
+          label="Delete ticket"
+          confirm={confirmDeleteFiled(titleOf(removing), removing.ticket)}
+          disabled={action.isPending}
+          keep={() => setRemoving(null)}
+          remove={() => {
+            const row = removing;
+            setRemoving(null);
+            discard(row.repoId, row.ticket.key, () => undefined);
+          }}
+        />
       )}
       {action.error && (
         <div className="workspace-errors">

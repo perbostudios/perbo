@@ -33,7 +33,11 @@ export const PLANNING_KINDS = [
   "interviewStop",
 ] as const;
 
-/** Runs, decisions and publishing: one at a time, whatever is being planned. */
+/**
+ * Runs, decisions and publishing: one at a time for each ticket, and any
+ * number across tickets, whatever is being planned (D-049, D-101). A readiness
+ * check names no ticket, so it takes its turn over its whole repository.
+ */
 export const EXCLUSIVE_KINDS = [
   "run",
   "decide",
@@ -58,15 +62,34 @@ export function lane(kind: string): Lane {
 export const isLive = (job: { state: string }): boolean =>
   job.state === "running" || job.state === "stopping";
 
-/**
- * The exclusive command in the way, if there is one. A run, a decision or a
- * publication waits for it; planning does not.
- */
+/** The first live command in the exclusive lane among these, if there is one. */
 export function exclusiveJob<T extends { kind: string; state: string }>(
   jobs: Iterable<T>,
 ): T | undefined {
   for (const job of jobs)
     if (lane(job.kind) === "exclusive" && isLive(job)) return job;
+  return undefined;
+}
+
+/**
+ * The command a new one waits for, if there is one: a live command in the
+ * exclusive lane over the same ticket, or over the same repository where
+ * either names no ticket. Another ticket's run is in nobody's way, and
+ * planning neither waits nor is waited for.
+ */
+export function inTheWay<T extends { repoId: string; key: string | null; kind: string; state: string }>(
+  jobs: Iterable<T>,
+  next: { repoId: string; key: string | null; kind: string },
+): T | undefined {
+  if (lane(next.kind) !== "exclusive") return undefined;
+  for (const job of jobs)
+    if (
+      lane(job.kind) === "exclusive" &&
+      isLive(job) &&
+      job.repoId === next.repoId &&
+      (job.key === null || next.key === null || job.key === next.key)
+    )
+      return job;
   return undefined;
 }
 
@@ -76,14 +99,31 @@ export const busyMessage = (label: string): string =>
 
 /**
  * Whether any command, in either lane, is still running in a repository.
- * Disconnecting it, deleting one of its contracts or changing its manifest
- * waits for that, since the command may be writing what would be removed.
+ * Disconnecting it or changing its manifest waits for that, since the command
+ * may be writing what would be removed.
  */
 export function heldRepository<T extends { repoId: string; state: string }>(
   jobs: Iterable<T>,
   repoId: string,
 ): boolean {
   for (const job of jobs) if (job.repoId === repoId && isLive(job)) return true;
+  return false;
+}
+
+/**
+ * Whether a command is still running for this one ticket: its run, a decision
+ * on it, its publication, or any other command naming it by key or by the key
+ * it produced. Deleting the ticket waits for that alone, since only that
+ * command writes the records the delete removes; another ticket's run holds
+ * nothing of this one's (D-129).
+ */
+export function heldTicket<T extends { repoId: string; key: string | null; resultKey?: string | null; state: string }>(
+  jobs: Iterable<T>,
+  repoId: string,
+  key: string,
+): boolean {
+  for (const job of jobs)
+    if (job.repoId === repoId && (job.key === key || job.resultKey === key) && isLive(job)) return true;
   return false;
 }
 

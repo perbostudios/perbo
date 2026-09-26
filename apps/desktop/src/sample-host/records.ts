@@ -57,7 +57,7 @@ import {
 } from "../shared/contract-editing.js";
 import { ChangeMarks } from "../shared/change-marks.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
-import { busyMessage, exclusiveJob, heldRepository, isLive, journal, lane } from "../shared/jobs.js";
+import { busyMessage, heldTicket, inTheWay, isLive, journal } from "../shared/jobs.js";
 import {
   DELETE_TICKET_GONE,
   DELETE_WAITS_FOR_COMMANDS,
@@ -380,6 +380,7 @@ export const initial: Snapshot = {
   lastOpened: {},
   // Every sample ticket that finished before today is filed; #409 stays on Home in green until it is archived by hand (S4).
   archived: archive.filter((row) => row.ticket.key !== "PRB-409").map((row) => row.repoId + ":" + row.ticket.key),
+  calledOff: [],
   power: { holding: false, detail: null, since: null },
 };
 /** The boards' branch and diff figures, per sample ticket; everything else gets a small deterministic diff. */
@@ -428,6 +429,7 @@ export const snapshot: Snapshot = new URLSearchParams(location.search).has("empt
       repositories: [],
       tasks: [],
       archived: [],
+      calledOff: [],
     }
   : initial;
 export const sampleManifests = new Map<
@@ -456,7 +458,7 @@ export const emit = (input: ChangeInput = { kind: "records", repoId: null, key: 
 };
 /** The preferences as they now stand, as the host announces them after any of them changes. */
 export const emitPreferences = (): void =>
-  emit({ kind: "preferences", settings: snapshot.settings, asks: snapshot.asks ?? {}, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [] });
+  emit({ kind: "preferences", settings: snapshot.settings, asks: snapshot.asks ?? {}, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [], calledOff: snapshot.calledOff ?? [] });
 export function ticketRow(key: string): TaskRow {
   const row = snapshot.tasks.find((row) => row.ticket.key === key);
   if (!row) throw new Error("Sample task not found.");
@@ -807,7 +809,7 @@ export function job(
   /** Called once the job has settled and been said, however it ended. */
   settled?: () => void,
 ): Job {
-  const blocking = lane(kind) === "exclusive" ? exclusiveJob(snapshot.jobs) : undefined;
+  const blocking = inTheWay(snapshot.jobs, { repoId: repository, key, kind });
   if (blocking) throw new Error(busyMessage(blocking.label));
   const job: Job = {
     id: crypto.randomUUID(),
@@ -2652,13 +2654,13 @@ export function answerSampleTurn(id: string, text: string): void {
  * Delete a sample ticket with everything kept beside it, as the host's
  * `discardTicket` deletes its files, and answer with the reason it stays where
  * it does, in the host's words and in the host's order (D-129): a command
- * running in the repository holds every delete, and a ticket whose pull
+ * running for this ticket holds its delete, and a ticket whose pull
  * request is open is the one stage a delete does not reach. The attempts and
  * the bundles they sealed are held beside the ticket here rather than in a
  * store of their own, so they go with it.
  */
 export function discardTicket(repoId: string, key: string): string | null {
-  if (heldRepository(snapshot.jobs, repoId)) return DELETE_WAITS_FOR_COMMANDS;
+  if (heldTicket(snapshot.jobs, repoId, key)) return DELETE_WAITS_FOR_COMMANDS;
   const row = snapshot.tasks.find((entry) => entry.repoId === repoId && entry.ticket.key === key);
   if (row === undefined) return DELETE_TICKET_GONE;
   if (row.ticket.state === "pr_open") return deletePullRequestOpen(key);
@@ -2681,6 +2683,7 @@ export function discardTicket(repoId: string, key: string): string | null {
   snapshot.titles = titles;
   snapshot.taskModels = taskModels;
   snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+  snapshot.calledOff = (snapshot.calledOff ?? []).filter((item) => item !== entry);
   snapshot.lastOpened = Object.fromEntries(Object.entries(snapshot.lastOpened ?? {}).filter(([item]) => item !== entry));
   // And every planning over it, as the host discards them, with their chats
   // (D-102): a planning over a ticket that is gone has nothing left to open.

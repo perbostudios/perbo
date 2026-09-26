@@ -1,7 +1,7 @@
-import { formatUsd } from "@perbo/contracts/browser";
+import { costOf, formatUsd, rollCosts, type Cost } from "@perbo/contracts/browser";
 import type { ProhibitedAction, ReviewError } from "@perbo/contracts";
-import { isRun } from "../../shared/jobs.js";
-import { spokenWords } from "../../shared/runner-progress.js";
+import { isLive, isRun } from "../../shared/jobs.js";
+import { runnerStages, runnerTally, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
 import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
@@ -62,6 +62,75 @@ export const costLabel = ({ cost }: Pick<Detail, "cost">): string =>
     : cost.partial && cost.micros > 0
       ? `at least ${formatUsd(cost.micros, 2)}`
       : formatUsd(cost.micros, 2);
+
+/** The loop page's strip, over every run of the ticket. */
+export interface LoopTally {
+  /** The commands every attempt asked for. */
+  commands: number;
+  /** The distinct paths every attempt's change set touched. */
+  files: number;
+  /** Input and output tokens, as each provider reported them (D-104). */
+  tokens: string;
+  /**
+   * Dollars where any provider gave them, in `costLabel`'s words; null where
+   * none did, which the tokens say alone.
+   */
+  dollars: string | null;
+}
+
+/**
+ * The loop page's strip: the commands, the files and the spend of the whole
+ * ticket, every run of it (D-104).
+ *
+ * Read from the records of every attempt: each attempt's commands, the paths
+ * its change set holds, and the usage its bundles record — the executor's, the
+ * review's and the closure verification's. While a run goes, what it has done
+ * so far comes from the runner's tally line in its log, added to the records
+ * of the attempts from before it; the last run's log stands in the same way
+ * while the records hold no attempt of it. The tally counts only paths the
+ * attempts before the run had not changed, so the sum is the distinct paths of
+ * every run, and once the records hold the run they come to the same figures
+ * its last tally did.
+ */
+export function loopTally(input: { jobs: readonly Job[]; active: Job | undefined; attempts: readonly AttemptView[] }): LoopTally {
+  const { jobs, active, attempts } = input;
+  const since = (job: Job) => (attempt: AttemptView) => Date.parse(attempt.startedAt) >= Date.parse(job.startedAt);
+  const last = jobs.filter(isRun).at(-1);
+  const logged =
+    active !== undefined && isRun(active)
+      ? active
+      : last !== undefined && !attempts.some(since(last))
+        ? last
+        : undefined;
+  const recorded = logged === undefined ? attempts : attempts.filter((attempt) => !since(logged)(attempt));
+  const running = logged === undefined ? null : runnerTally(logged.log);
+  const paths = new Set(recorded.flatMap((attempt) => attempt.changes.map((change) => change.path)));
+  const bundles = recorded.flatMap((attempt) => attempt.bundles);
+  const costs: Cost[] = bundles.map((bundle) =>
+    costOf({ micros: bundle.usage.cost_micros, basis: bundle.usage.cost_basis, partial: bundle.usage.cost_partial === true }),
+  );
+  const roll = rollCosts(costs);
+  const micros = roll.micros + (running?.micros ?? 0);
+  const unpriced = roll.unavailable + (running?.unpriced ?? 0);
+  const partial = roll.partial + (running?.partial ?? 0);
+  const tokens =
+    bundles.reduce((total, bundle) => total + bundle.usage.input_tokens + bundle.usage.output_tokens, 0) +
+    (running === null ? 0 : running.input_tokens + running.output_tokens);
+  return {
+    commands:
+      recorded.reduce(
+        (total, attempt) =>
+          total + (attempt.ceilings.find((ceiling) => ceiling.resource === "attempt_commands")?.used ?? 0),
+        0,
+      ) + (running?.commands ?? 0),
+    files: paths.size + (running?.files ?? 0),
+    tokens: `${tokens.toLocaleString("en-US")} ${tokens === 1 ? "token" : "tokens"}`,
+    dollars:
+      micros === 0 && unpriced > 0
+        ? null
+        : costLabel({ cost: { micros, partial: partial > 0 || unpriced > 0, unavailable: unpriced } }),
+  };
+}
 
 /**
  * The scope a saved editing session holds that this contract does not carry.
@@ -136,6 +205,208 @@ export function watchTranscript(
       .map((finding) => ({ author: "Reviewer", label: "finding", text: finding.statement })),
   ]);
   return spoken.some((entries) => entries.length > 0) || logged.length === 0 ? recorded : logged;
+}
+
+/** One entry of the loop page's steps. */
+export interface LoopStep {
+  /** What happened, in words. */
+  text: string;
+  /** The runner's own detail behind the `i`, or null where it recorded none. */
+  reason: string | null;
+  /** When, as an ISO time, or null where nothing says. */
+  at: string | null;
+}
+
+/** A stage in the words the loop page says it in. */
+export function stageWords(stage: RunnerStage): string {
+  switch (stage.kind) {
+    case "worktree":
+      return "Provisioning the worktree";
+    case "executing":
+      return "Executing";
+    case "remediation":
+      return `Refinement round ${stage.round}`;
+    case "conflict":
+      return "Resolving a conflict with the base";
+    case "seal":
+      return "Sealing the change set";
+    case "check":
+      return `Running check ${stage.name}`;
+    // The runner counts its rounds from 0; a person counts reviews from 1.
+    case "review":
+      return `Review round ${stage.round + 1}`;
+    case "verify":
+      return "Verifying closures";
+    case "delivery":
+      return "Opening the pull request";
+  }
+}
+
+/** What the `i` on a review round says: how many findings it left open. */
+const findingsLeft = (open: number): string =>
+  `The review left ${open === 0 ? "no findings" : open === 1 ? "one finding" : `${open} findings`} open.`;
+
+/**
+ * The stages a run's log announced, kept for as long as the loop page is open,
+ * with the time each was first read.
+ *
+ * The log is the CLI's output as it arrives, cut to its tail, and it carries no
+ * times: a stage's time is the moment the page first read it, and the stages a
+ * log already held when the page opened have none. A stage the tail has since
+ * cut stays listed.
+ */
+export class StageLog {
+  private readonly jobs = new Map<string, { stage: LoggedStage; at: string | null }[]>();
+
+  read(job: Job, now: string): readonly { stage: LoggedStage; at: string | null }[] {
+    const read = runnerStages(job.log);
+    const known = this.jobs.get(job.id);
+    if (known === undefined) {
+      const first = read.map((stage) => ({ stage, at: null }));
+      this.jobs.set(job.id, first);
+      return first;
+    }
+    // Where the log's tail now starts among the stages read before: the first
+    // place from which every stage known still leads what is read.
+    const same = (left: LoggedStage, right: LoggedStage | undefined): boolean =>
+      right !== undefined && JSON.stringify(left.stage) === JSON.stringify(right.stage);
+    let from = 0;
+    while (from < known.length && !known.slice(from).every((entry, at) => same(entry.stage, read[at]))) from += 1;
+    const kept = known.length - from;
+    for (let at = 0; at < kept; at += 1) known[from + at]!.stage = read[at]!;
+    for (const stage of read.slice(kept)) known.push({ stage, at: now });
+    return known;
+  }
+}
+
+/** The ticket states a run moves through, so a move from one of them to `pr_open` is the run's own delivery. */
+const RUN_STATES = new Set(["provisioning", "executing", "verifying", "independent_review"]);
+
+/**
+ * Every stage the attempts on record went through, oldest first, each at the
+ * time its record holds and with the runner's detail where the record has
+ * it: the check's result, and the findings a review left open.
+ *
+ * The same stages a run's log announces as it goes: a run provisions its
+ * worktree once, and each attempt is executed, sealed, checked, and then
+ * reviewed or has its closures verified.
+ */
+function recordedStages(attempts: readonly AttemptView[]): LoopStep[] {
+  const provisioned = new Set<number>();
+  const remediations = new Map<number, Set<number>>();
+  return attempts.flatMap((attempt) => {
+    const steps: { stage: RunnerStage; at: string; reason?: string }[] = [];
+    const execution = attempt.bundles.find((bundle) => bundle.kind === "execution");
+    const kind = execution?.inputs["round_kind"] ?? (attempt.round === 0 ? "execute" : "remediate");
+    if (!provisioned.has(attempt.run)) {
+      provisioned.add(attempt.run);
+      steps.push({ stage: { kind: "worktree" }, at: attempt.startedAt });
+    }
+    if (kind === "execute") steps.push({ stage: { kind: "executing" }, at: attempt.startedAt });
+    else if (kind === "resolve_conflict") steps.push({ stage: { kind: "conflict" }, at: attempt.startedAt });
+    else {
+      const rounds = remediations.get(attempt.run) ?? new Set<number>();
+      rounds.add(attempt.round);
+      remediations.set(attempt.run, rounds);
+      steps.push({ stage: { kind: "remediation", round: rounds.size }, at: attempt.startedAt });
+    }
+    const sealed =
+      execution === undefined
+        ? attempt.startedAt
+        : new Date(Date.parse(attempt.startedAt) + execution.usage.wall_clock_ms).toISOString();
+    steps.push({ stage: { kind: "seal" }, at: sealed });
+    for (const check of attempt.checks)
+      steps.push({
+        stage: { kind: "check", name: check.name },
+        at: sealed,
+        reason: `Result: ${check.status}.` + (check.detail ? `\n\n${check.detail}` : ""),
+      });
+    const reviewBundle = attempt.bundles.find(
+      (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
+    );
+    if (attempt.review !== null || reviewBundle !== undefined) {
+      const review = attempt.review;
+      steps.push({
+        stage: { kind: "review", round: attempt.round },
+        at: review?.created_at ?? reviewBundle!.created_at,
+        ...(review === null
+          ? {}
+          : { reason: findingsLeft(review.findings.filter((finding) => finding.status === "open").length) }),
+      });
+    }
+    const verification = attempt.bundles.find(
+      (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.id}`,
+    );
+    if (attempt.verification !== null || verification !== undefined)
+      steps.push({ stage: { kind: "verify", round: attempt.round }, at: verification?.created_at ?? sealed });
+    // Each stage no earlier than the one before it, as the attempt ran them.
+    let floor = steps[0]!.at;
+    return steps.map(({ stage, at, reason }) => {
+      floor = Date.parse(at) > Date.parse(floor) ? at : floor;
+      return { text: stageWords(stage), reason: reason ?? null, at: floor };
+    });
+  });
+}
+
+/**
+ * What the loop page's steps list, newest first: every stage the runner went
+ * through and every state the ticket was moved to, each where its time puts
+ * it.
+ *
+ * While a run is live, its stages are read from its log as the CLI announces
+ * them, beside the stages of the attempts on record from before it. Once none
+ * is, they are rebuilt from the records of every attempt, so a page opened
+ * again lists the same stages; the last run's log stands in where it recorded
+ * no attempt, as a run that ended before its first did. Only the runner's own
+ * stage lines are read: never the executor's or the reviewer's words, and
+ * never a tool call, which are the Watch page's.
+ */
+export function loopSteps(input: {
+  history: Detail["ticket"]["history"];
+  jobs: readonly Job[];
+  active: Job | undefined;
+  attempts: readonly AttemptView[];
+  log: StageLog;
+  now: string;
+}): LoopStep[] {
+  const { history, jobs, active, attempts, log, now } = input;
+  const last = jobs.filter(isRun).at(-1);
+  const since = (job: Job) => (attempt: AttemptView) => Date.parse(attempt.startedAt) >= Date.parse(job.startedAt);
+  const logged =
+    active !== undefined && isRun(active)
+      ? active
+      : last !== undefined && !attempts.some(since(last))
+        ? last
+        : undefined;
+  const recorded = recordedStages(logged === undefined ? attempts : attempts.filter((attempt) => !since(logged)(attempt)));
+  const stages = (job: Job): (LoopStep & { key: string })[] =>
+    log.read(job, now).map(({ stage, at }) => ({
+      text: stageWords(stage.stage),
+      // A review's count is the whole of it once a later stage followed, or the run ended.
+      reason: stage.stage.kind === "review" && (stage.settled || !isLive(job)) ? findingsLeft(stage.findings) : null,
+      at,
+      // A stage read before the page was open has no time, and was announced
+      // after the run started.
+      key: at ?? job.startedAt,
+    }));
+  const moves = history.flatMap((entry): LoopStep[] => [
+    // The run's delivery, where its log is not the one read.
+    ...(entry.to === "pr_open" &&
+    RUN_STATES.has(entry.from ?? "") &&
+    (logged === undefined || Date.parse(entry.at) < Date.parse(logged.startedAt))
+      ? [{ text: stageWords({ kind: "delivery" }), reason: null, at: entry.at }]
+      : []),
+    { text: entry.note || entry.to.replaceAll("_", " "), reason: null, at: entry.at },
+  ]);
+  return [
+    ...recorded.map((step) => ({ ...step, key: step.at! })),
+    ...(logged === undefined ? [] : stages(logged)),
+    ...moves.map((step) => ({ ...step, key: step.at! })),
+  ]
+    .map((step, order) => ({ step, time: Date.parse(step.key), order }))
+    .sort((left, right) => left.time - right.time || left.order - right.order)
+    .reverse()
+    .map(({ step: { text, reason, at } }) => ({ text, reason, at }));
 }
 
 /**

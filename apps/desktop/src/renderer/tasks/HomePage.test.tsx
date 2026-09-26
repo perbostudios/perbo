@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { TicketState } from "@perbo/contracts";
 import { HomePage } from "./HomePage.js";
+import { CreateProvider } from "../shell/create.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Route } from "../shell/route.js";
 import {
@@ -297,6 +298,26 @@ describe("a Home card", () => {
     );
   });
 
+  it("counts a merge called off as completed: below every colour, a check in its wheel and Archive to press", async () => {
+    const requests = asked();
+    const workspace = board([["pr_open", pr], ["executing", null], ["pr_open", pr]]);
+    workspace.jobs = [running(workspace, 1)];
+    // Don't merge on PRB-900, recorded; PRB-902 still waits on its merge decision.
+    workspace.calledOff = [workspace.tasks[0]!.repoId + ":PRB-900"];
+    home(workspace);
+    expect(cards()).toEqual(["Ticket 2 pr_open", "Ticket 1 executing", "Ticket 0 pr_open"]);
+    const ring = card("Ticket 0 pr_open").querySelector<HTMLElement>(".stage-ring")!;
+    expect(ring.getAttribute("aria-label")).toBe("Completed");
+    expect(card("Ticket 2 pr_open").querySelector(".stage-ring img")).toBeNull();
+    expect(within(card("Ticket 2 pr_open")).queryByRole("button", { name: "Archive" })).toBeNull();
+    fireEvent.click(within(card("Ticket 0 pr_open")).getByRole("button", { name: "Archive" }));
+    await waitFor(() =>
+      expect(requests.filter((request) => request.kind === "archive")).toEqual([
+        { kind: "archive", repoId: workspace.tasks[0]!.repoId, keys: ["PRB-900"], archived: true },
+      ]),
+    );
+  });
+
   it("marks a ticket that needs you with a blue circle until it is opened, and never a decided merge", () => {
     const workspace = board([
       ["changes_requested", null], ["failed", null], ["pr_open", pr], ["merged", pr], ["closed", pr], ["executing", null],
@@ -398,4 +419,111 @@ describe("a diff whose summary could not be read", () => {
       expect(screen.queryByText("no diff yet")).toBeNull();
     });
   }
+});
+
+describe("deleting from the Archive", () => {
+  beforeAll(() => {
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      };
+      HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      };
+    }
+  });
+  /**
+   * One filed ticket that ran on a branch and merged a pull request, beside a
+   * ticket on Home whose run is under way — or, with `own`, that run is the
+   * filed ticket's own command.
+   */
+  function besideARun(own = false): { filed: TaskRow; workspace: Snapshot } {
+    const { row: filed, workspace } = archived(null);
+    filed.ticket.title = "Retry the invoice webhook";
+    filed.ticket.delivery.branch = "perbo/409-webhook-retry";
+    filed.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/9";
+    const running = structuredClone(filed);
+    running.ticket.key = "PRB-950";
+    running.ticket.state = "executing";
+    const job = {
+      ...structuredClone(sample.jobs[0]!),
+      repoId: filed.repoId,
+      key: own ? filed.ticket.key : running.ticket.key,
+      kind: own ? "sync" : "run",
+      state: "running" as const,
+      endedAt: null,
+    };
+    return { filed, workspace: { ...workspace, tasks: [filed, running], jobs: [job], titles: {} } };
+  }
+  const archiveOf = (workspace: Snapshot) =>
+    render(
+      <QueryClientProvider client={client}>
+        <CreateProvider workspace={workspace} navigate={() => undefined} route={{ page: "archive" }}>
+          <HomePage workspace={workspace} navigate={() => undefined} archive />
+        </CreateProvider>
+      </QueryClientProvider>,
+    );
+  const listed = (): boolean =>
+    within(screen.getByRole("table", { name: "Archived tickets" })).queryByText("Retry the invoice webhook") !== null;
+
+  it("asks first in the picker's confirmation, saying what goes and what stays, and Keep it sends nothing", () => {
+    const { workspace } = besideARun();
+    const sent = vi.spyOn(bridge, "request");
+    archiveOf(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete ticket" });
+    expect(dialog.querySelector("p")?.textContent).toBe(
+      "Delete “Retry the invoice webhook”? It is archived: its ticket, contract and plan, every attempt it " +
+        "recorded and the evidence those attempts sealed all go, and nothing of this is kept. This leaves " +
+        "the branch perbo/409-webhook-retry in git and its pull request on GitHub.",
+    );
+    // Keep it first, and the delete, which is never the primary, beside it.
+    const actions = within(dialog).getAllByRole("button").map((button) => button.textContent);
+    expect(actions.slice(-2)).toEqual(["Keep it", "Delete ticket"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByRole("dialog", { name: "Delete ticket" })).toBeNull();
+    expect(sent.mock.calls.filter(([request]) => request.kind === "discard")).toEqual([]);
+    expect(listed()).toBe(true);
+  });
+
+  it("deletes while another ticket's run is under way, off the Archive at the click", async () => {
+    const { filed, workspace } = besideARun();
+    const sent: Request[] = [];
+    // The host has not answered yet: the row is gone all the same.
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) => {
+      sent.push(request);
+      return new Promise(() => undefined);
+    }) as typeof bridge.request);
+    archiveOf(workspace);
+    const remove = screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }) as HTMLButtonElement;
+    expect(remove.disabled, "another ticket's run holds nothing of this one").toBe(false);
+    fireEvent.click(remove);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Delete ticket" })).getByRole("button", { name: "Delete ticket" }));
+    expect(listed(), "off the Archive at the click").toBe(false);
+    await waitFor(() =>
+      expect(sent.filter((request) => request.kind === "discard")).toEqual([
+        { kind: "discard", repoId: filed.repoId, key: filed.ticket.key },
+      ]),
+    );
+  });
+
+  it("puts the row back and says why where the host refuses", async () => {
+    const { workspace } = besideARun();
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) =>
+      request.kind === "discard"
+        ? Promise.reject(new Error("PRB-409 has a pull request open"))
+        : Promise.resolve(null)) as typeof bridge.request);
+    archiveOf(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Delete ticket" })).getByRole("button", { name: "Delete ticket" }));
+    await screen.findByText("PRB-409 has a pull request open");
+    expect(listed()).toBe(true);
+  });
+
+  it("holds the delete while a command runs for this ticket itself", () => {
+    const { workspace } = besideARun(true);
+    archiveOf(workspace);
+    const remove = screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }) as HTMLButtonElement;
+    expect(remove.disabled).toBe(true);
+  });
 });

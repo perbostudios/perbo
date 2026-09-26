@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -77,17 +77,58 @@ describe("provision", () => {
     ).rejects.toMatchObject({ reason: "worktree_collision" });
   });
 
-  it("stops at concurrent_local_attempts rather than filling the laptop", async () => {
+  it("provisions another ticket's worktree beside a live one, with nothing set (D-049)", async () => {
     const repo = workspaceRepository(scratch);
     const root = scratch();
-    await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
+    const first = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
+    const second = await provision({
+      ...base(repo.dir, repo.head, root),
+      ticket_id: "ticket_OTHER",
+      outcome: "another ticket",
+      attempt_id: "att_2",
+    });
+    expect(second.path).not.toBe(first.path);
+    expect(listLeases(root)).toHaveLength(2);
+  });
+
+  it("stops at a concurrent_local_attempts the limits set", async () => {
+    const repo = workspaceRepository(scratch);
+    const root = scratch();
+    const limits = LimitsTableSchema.parse({
+      organisation: "test",
+      limits: { concurrent_local_attempts: 1 },
+    });
+    await provision({ ...base(repo.dir, repo.head, root), limits, attempt_id: "att_1" });
     await expect(
       provision({
         ...base(repo.dir, repo.head, root),
+        limits,
         ticket_id: "ticket_OTHER",
         attempt_id: "att_2",
       }),
     ).rejects.toBeInstanceOf(LimitExceededError);
+  });
+
+  /**
+   * A run of one ticket that has gone on past its lease's time still holds
+   * its worktree while its process lives: another ticket's provisioning,
+   * which reclaims stale leases first, leaves it where it is.
+   */
+  it("leaves a live run's worktree to it past its lease's time", async () => {
+    const repo = workspaceRepository(scratch);
+    const root = scratch();
+    const now = new Date();
+    const first = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1", now });
+    const later = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    await provision({
+      ...base(repo.dir, repo.head, root),
+      ticket_id: "ticket_OTHER",
+      outcome: "another ticket",
+      attempt_id: "att_2",
+      now: later,
+    });
+    expect(existsSync(first.path)).toBe(true);
+    expect(listLeases(root).map((lease) => lease.attempt_id).sort()).toEqual(["att_1", "att_2"]);
   });
 
   it("lets a continuation take over its predecessor's worktree and lease", async () => {
@@ -156,7 +197,7 @@ describe("provision", () => {
 });
 
 describe("leases", () => {
-  it("treats an expired lease as stale", () => {
+  it("treats an expired lease another host wrote as stale", () => {
     const lease = {
       attempt_id: "a",
       root_attempt_id: "a",
@@ -180,12 +221,11 @@ describe("leases", () => {
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
 
+    // A process that ran to completion and was reaped: certainly gone.
+    const departed = spawnSync(process.execPath, ["-e", ""], { stdio: "ignore" });
     const leaseFile = join(root, "att_1.lease.json");
     const lease = JSON.parse(readFileSync(leaseFile, "utf8"));
-    writeFileSync(
-      leaseFile,
-      JSON.stringify({ ...lease, expires_at: "2020-01-01T00:00:00.000Z" }, null, 2),
-    );
+    writeFileSync(leaseFile, JSON.stringify({ ...lease, pid: departed.pid }, null, 2));
 
     const reclaimed = await reclaimStaleWorktrees({ repository_root: repo.dir, root });
     expect(reclaimed).toHaveLength(1);

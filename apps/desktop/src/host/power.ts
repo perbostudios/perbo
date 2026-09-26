@@ -30,16 +30,20 @@ export class PowerHold {
   /** AFK mode (S6F): the machine is held awake only while a run or decision is live, and only as the settings allow. */
   update(): void {
     const afk = this.deps.settings().afk;
-    const running = this.deps.liveJobs().find(
+    // Every live run, since runs of different tickets go on at once (D-049).
+    const running = this.deps.liveJobs().filter(
       (job) => ["run", "decide"].includes(job.kind) && isLive(job),
     );
     const onBattery = this.deps.io.onBattery?.() ?? false;
     const hold = Boolean(
-      afk.holdSleep && running && !(afk.releaseOnBattery && onBattery),
+      afk.holdSleep && running.length > 0 && !(afk.releaseOnBattery && onBattery),
     );
+    const names = running.map((job) => job.key ?? "a run");
+    const named =
+      names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
     const detail = hold
-      ? `Holding sleep now — ${running?.key ?? "a run"} is running.`
-      : running && afk.holdSleep
+      ? `Holding sleep now — ${named} ${names.length === 1 ? "is" : "are"} running.`
+      : running.length > 0 && afk.holdSleep
         ? "Released on battery power."
         : null;
     if (hold === this.held.holding && detail === this.held.detail) return;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TICKET_STATES, TicketStateSchema } from "@perbo/contracts";
-import { isArchivable, isFiled, isPreLoop, notArchivable } from "./archive.js";
+import { isArchivable, isCalledOff, isFiled, isMergeDecided, isPreLoop, notArchivable, notCallable } from "./archive.js";
 import type { Job, TaskRow } from "./protocol.js";
 
 const row = (state: string): Pick<TaskRow, "repoId" | "ticket"> =>
@@ -53,7 +53,7 @@ describe("what may be archived", () => {
 
   it("names the merge decision when refusing an open pull request, and the loop otherwise", () => {
     expect(notArchivable("PRB-1", "pr_open")).toBe(
-      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed.",
+      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed, or its merge is called off.",
     );
     expect(notArchivable("PRB-1", "executing")).toBe(
       "PRB-1 is still in its loop. Archive it once it has finished or its run has stopped.",
@@ -65,6 +65,27 @@ describe("what may be archived", () => {
       expect(isArchivable({ jobs: [job("running", kind)] }, row("merged"))).toBe(true);
     expect(isArchivable({ jobs: [job("running", "run")] }, row("merged"))).toBe(false);
     expect(isArchivable({ jobs: [job("running", "decide")] }, row("merged"))).toBe(false);
+  });
+
+  it("counts a merge called off as decided, and files its pull request left open", () => {
+    // Home offers no Archive for a pull request whose merge is still to be decided.
+    expect(isMergeDecided({}, row("pr_open"))).toBe(false);
+    expect(isArchivable({ jobs: [] }, row("pr_open"))).toBe(false);
+    expect(isFiled({ archived: ["repo:PRB-1"], jobs: [] }, row("pr_open"))).toBe(false);
+    // Don't merge, recorded, is the decision.
+    const calledOff = { calledOff: ["repo:PRB-1"] };
+    expect(isCalledOff(calledOff, row("pr_open"))).toBe(true);
+    expect(isMergeDecided(calledOff, row("pr_open"))).toBe(true);
+    expect(isArchivable({ ...calledOff, jobs: [] }, row("pr_open"))).toBe(true);
+    expect(isFiled({ ...calledOff, archived: ["repo:PRB-1"], jobs: [] }, row("pr_open"))).toBe(true);
+    expect(isFiled({ ...calledOff, archived: [], jobs: [] }, row("pr_open"))).toBe(false);
+    // Another ticket's call-off decides nothing of this one.
+    expect(isMergeDecided({ calledOff: ["repo:PRB-2", "other:PRB-1"] }, row("pr_open"))).toBe(false);
+    // A loop that runs again has the merge to decide once more.
+    expect(isArchivable({ ...calledOff, jobs: [job("running")] }, row("pr_open"))).toBe(false);
+    // A call-off speaks only for a pull request left open.
+    expect(isCalledOff(calledOff, row("executing"))).toBe(false);
+    expect(notCallable("PRB-1")).toBe("PRB-1 has no open pull request, so there is no merge to call off.");
   });
 
   it("returns a filed ticket to Home while its loop runs again", () => {

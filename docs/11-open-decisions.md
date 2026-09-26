@@ -121,7 +121,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-101 — Create opens planning mode
 
 - Owner: Founder
-- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: a Spec and an Explorer pane while the spec is written, and the panes a plan needs once one is drafted — for a plan divided into nodes a Graph second, under Spec, then Impact — then the contract, with Problems below it while a problem is open (D-NEW-basic-and-epic-flows); the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run; runs, decisions and publishing still take one at a time, and while one is under way a contract's approval waits for it, the contract naming the one it waits for.
+- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: a Spec and an Explorer pane while the spec is written, and the panes a plan needs once one is drafted — for a plan divided into nodes a Graph second, under Spec, then Impact — then the contract, with Problems below it while a problem is open (D-NEW-basic-and-epic-flows); the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run, and so do other tickets' runs ([D-049](#d-049--local-host-resources)): a ticket's run starts as soon as its contract is confirmed, whatever another ticket's run is doing, never held or queued behind it. One ticket's run, decisions and publishing take one at a time, and while one is under way that ticket's approval waits for it, the contract naming the one it waits for.
 - Why: planning the next piece of work while the last one runs is what the queue is for.
 - Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and offers no second way to start a plan beside it, with the Explorer and Graph panes beside it and the chat docked beside whichever is open but the contract and the Problems pane, and planning alongside a run; the explorer's reads and the chat's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, which checks once when the planning first has a plan and by its button after that, because its answer is a fresh index of the whole tracked tree, with the count of what falls outside also on the contract page, which is the last screen where a scope can still be widened, answered outside the job list with the explorer's reads.
 
@@ -144,7 +144,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Owner: Founder
 - Decision: a plan shows a size, S to XL, derived by fixed thresholds from its nodes, its criteria, and the files and packages in scope, with the counts beside it. S is 1 node, at most 4 criteria, 10 files and 1 package, the size of a ticket before graphs; M at most 3 nodes, 10 criteria, 25 files and 2 packages; L at most 6, 20, 50 and 3; XL beyond. A plan takes the largest size any of its counts reaches. Runs show usage as each provider reports it: tokens always, dollars where given. Nothing forecasts cost or time.
 - Why: a description of the graph forecasts nothing, and nothing measures a forecast (D-097).
-- Built: `perbo inspect` derives the size and shows it with its counts, marking the ones that set it, and the desktop's Graph pane shows the same size beside the graph, recomputed after every edit. Not built: a run's usage as each provider reports it.
+- Built: `perbo inspect` derives the size and shows it with its counts, marking the ones that set it, and the desktop's Graph pane shows the same size beside the graph, recomputed after every edit. The loop page's strip shows a ticket's usage over every run, tokens always and dollars where a provider gave them, counting along while a run goes from the runner's `tally:` line and read from the records once it ends; nothing on it forecasts time. Not built: the review and merge screens, Home's cards and the Usage page show dollars alone.
 
 ### D-127 — A ticket's name is the fewest words that tell it apart
 
@@ -335,7 +335,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
   - reads every open pull request through `sync`, and merges in queue order where the repository opted into `merge: loop` (D-041);
   - decides which tickets wait by set arithmetic over approved records: `depends_on`, the intersection of `paths_allowed`, and a sealed branch's actual paths, with generated paths exempt. So `blocked` is reachable;
   - re-levels every open branch that fell behind the base before starting anything new;
-  - starts `perbo run --ticket` children up to `concurrent_local_attempts`;
+  - starts a `perbo run --ticket` child for every ready ticket not already running, in queue order and in the same tick, up to `concurrent_local_attempts` where the limits set one (D-049);
   - drafts open tracker issues carrying a configured label into `plan_review`, one per tick.
 
   A clean re-level keeps the review approval when the change's content hash is unchanged and the base touched nothing in scope. A conflict starts a reconciliation round, briefed with the base commit, the conflicting paths and the merged ticket's approved contract, and bounded as remediation rounds are (D-096). A re-level refuses a branch carrying a commit the loop did not make. Nothing in the queue approves.
@@ -360,9 +360,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-049 — Local host resources
 
 - Owner: Founder
-- Decision: `concurrent_local_attempts` defaults to 1. A `local_workspace_bytes` budget reclaims leases on total size as well as staleness. A suspended host is a disconnect: an attempt running across it ends with `host_suspended`, and ending it kills the agent's process group.
-- Why: the substrate is a developer's laptop.
-- Changes if: an attempt's peak disk use passes 10 GiB.
+- Decision: runs of different tickets go on at the same time, as many as are started. `concurrent_local_attempts` is unbounded unless a repository's limits set a number, which then holds this machine to it, hand-started runs included. One ticket takes one run, decision or publication at a time, held by its run lock. A worktree's lease holds while the run's process lives, so one ticket's provisioning never reclaims another's worktree mid-run. A `local_workspace_bytes` budget reclaims leases on total size as well as staleness. A suspended host is a disconnect: an attempt running across it ends with `host_suspended`, and ending it kills the agent's process group.
+- Why: the founder's ruling, "the user should be able to run them in parallel", and no caps on what the product does. The disk is still a developer's laptop, so its budget stays.
+- Changes if: an attempt's peak disk use passes 10 GiB, or runs side by side on one laptop fail where the same runs one at a time pass.
 - Decided, not built: reclaiming on total size. Until then only stale leases are reclaimed.
 
 ### D-012 — Materialized secrets never leave the machine
@@ -381,7 +381,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-035 — Untrusted context is data, never instruction
 
 - Owner: Founder
-- Decision: every context item carries a trust label: `system`, `user`, `repo` or `external`. Repository and external content never occupies an instruction position. The verdict is structured output over the plan's criteria, deterministic checks outrank any model claim about them, and no model output becomes an action parameter.
+- Decision: every context item carries a trust label: `system`, `user`, `repo` or `external`. Repository and external content never occupies an instruction position. The verdict is structured output over the plan's criteria, deterministic checks outrank any model claim about them, and no model output becomes an action parameter. The executor's egress allow-list is the model provider, GitHub and the package registries, plus the exact host names a repository lists under `network_allow_list` in `.perbo/config.json`.
 - Why: test output, documentation, dependency READMEs and issue bodies are attacker-controlled in any repository with contributors.
 - Changes if: a fixture flips a verdict or something is exfiltrated.
 - ADR: [ADR-0023](adr/0023-untrusted-context-boundary.md).
@@ -443,7 +443,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-097 — Perbo UI v2; the phone's surfaces follow pairing
 
 - Owner: Founder
-- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets — their merge decided, merged or closed without merge — and tickets whose run stopped, stay on Home until archived by hand, and nothing archives one on its own; a ticket the loop still carries, and one whose pull request still waits on the merge decision, cannot be archived, and archiving is a desktop preference, never a ticket state. A ticket whose merge is decided, merged or closed without merge, sits at the foot of Home under every colour, with a check mark in its progress wheel and Archive on its card as a stopped one has. The rail's Home badge counts only the tickets that need the person — a finding waiting on an answer, a stopped run, a pull request waiting on the merge decision — and have not been opened since they came to stand there, read from the ticket's own history and when its page was last opened; each such card carries a blue circle until it is opened, a page open as the ticket comes to need the person counting as that opening, and a ticket that comes to need the person again counts again. Completed names only a ticket whose merge is decided; a pull request waiting on that decision is counted and filtered in its own words. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
+- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets — their merge decided, merged, closed without merge or called off — and tickets whose run stopped, stay on Home until archived by hand, and nothing archives one on its own. Don't merge on the merge screen is the person's merge decision on a pull request left open: the press records it on this machine, and the ticket counts as completed from then on. The merge screen's two outcomes, merged and called off, each land on a page with an Archive ticket box, checked to begin with: leaving that page with the box checked is the person's hand, and files the ticket — a called-off one with its pull request still open — while unchecked it stays on Home among the completed. A ticket the loop still carries cannot be archived, nor one whose pull request still waits on the merge decision; archiving and a call-off are desktop preferences, never a ticket state. A ticket whose merge is decided, merged, closed without merge or called off, sits at the foot of Home under every colour, with a check mark in its progress wheel and Archive on its card as a stopped one has. The rail's Home badge counts only the tickets that need the person — a finding waiting on an answer, a stopped run, a pull request waiting on the merge decision — and have not been opened since they came to stand there, read from the ticket's own history and when its page was last opened; each such card carries a blue circle until it is opened, a page open as the ticket comes to need the person counting as that opening, and a ticket that comes to need the person again counts again. Completed names only a ticket whose merge is decided; a pull request waiting on that decision is counted and filtered in its own words. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
 - Why: nothing shown is invented; every number comes from a provider or the records.
 - Changes if: the desktop shows a number no provider reported, or a desktop preference changes a ticket's state.
 
@@ -853,13 +853,18 @@ This is the one home for the decisions that govern Perbo. Every other document c
   name, a spec written under one, a spec the repository holds that no planning and no ticket
   names, and a plan drafted and not yet approved. Home holds the tickets the loop is carrying.
   Approving is the line between them, because approving is what starts the loop. Every row the
-  picker lists can be deleted where it is listed, and each asks first, in the words of the stage it
-  is at. Deleting takes all of it: the planning, the ticket it drafted and the spec folder they
+  picker lists can be deleted where it is listed, and so can every ticket the Archive lists, and each
+  asks first, in the words of the stage it is at: the Archive's with the picker's confirmation,
+  saying what goes and that the branch the ticket ran on and its pull request on GitHub stay.
+  Deleting takes all of it: the planning, the ticket it drafted and the spec folder they
   came from, at every stage, the loop included, and the evidence goes with it: the attempts the
   ticket recorded and the bundles those attempts sealed. One stage holds: a ticket whose pull
   request is open is refused, because that pull request is a record outside this machine and
   deleting the ticket would leave it standing with nothing here to read it against; it is closed
-  or merged on GitHub first, and the delete is offered again after that. A run that has been
+  or merged on GitHub first, and the delete is offered again after that. A delete waits only for a
+  command running for that ticket itself — its run, a decision on it, its publication — and is
+  refused while one is, in the sentence that says so; another ticket's run in the same repository
+  holds nothing of it, and the work goes at once, off every list at the click. A run that has been
   stopped is deleted on its own page, which a stop lands on at once, which is the ticket's own for as
   long as it is stopped, and which holds its name, that the run was stopped, and its three ways out — **Delete
   this work**, **Plan it again** and **Continue the task** — as buttons named and nothing else,
@@ -890,8 +895,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the delete having made a copy of the thing it removed, and keeping the record of a run the person
   has said is over keeps a row on the board that stands for nothing, so a piece of work is one thing
   and is deleted as one. The split follows: a board that mixes work being planned with work being
-  run is two jobs on one screen, and the picker is already where planning is resumed.
-- Built: the host's reading of the spec folder, skipping an entry it cannot parse rather than
+  run is two jobs on one screen, and the picker is already where planning is resumed. A run writes
+  only its own ticket's records, so a delete held by another ticket's run would wait on nothing it
+  touches.
+- Built: `heldTicket` in `shared/jobs.ts`, the one hold on a delete, read by the host's
+  `discardTicket` and `editingDiscard`, the sample host and the pages that offer a delete; the
+  Archive's Delete on each row, which asks with the picker's `ConfirmDelete` in the words
+  `confirmDeleteFiled` gives an archived ticket and deletes through the same `discard` as the
+  ticket's own pages; the host's reading of the spec folder, skipping an entry it cannot parse rather than
   refusing the rest; `specs` on the snapshot and `specSlug` on each open draft, which
   `unclaimedSpecs` subtracts to find what nothing points at; the `spec` editing target, which
   reuses the planning already writing that spec; `specDelete`, which takes a slug and never a path

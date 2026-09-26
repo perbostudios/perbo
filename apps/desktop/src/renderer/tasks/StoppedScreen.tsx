@@ -38,7 +38,7 @@ export function StoppedScreen(context: TaskContext) {
   const [error, setError] = useState<string | null>(null);
   const create = useCreate();
   const settle = useSettle();
-  const discard = useDiscardTicket(action.mutateAsync, navigate);
+  const discard = useDiscardTicket(action.mutateAsync, () => navigate({ page: "home" }));
   // Plan it again takes this ticket off Home at the click. The mark is given
   // back once a read taken after the host answered has replaced every earlier
   // one: at once where the plan was drafted, and when the page is left where

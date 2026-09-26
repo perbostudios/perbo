@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
 import type { AcceptanceCriterion } from "@perbo/contracts";
 import { EditingSessionSchema, RequestSchema, TYPED_PATH_MAX_CHARS } from "../../shared/protocol.js";
 import { typeInto } from "../../test-support/typing.js";
-import type { ReplyMap, Request } from "../../shared/protocol.js";
+import type { Job, ReplyMap, Request } from "../../shared/protocol.js";
 import { editingForm } from "../../shared/contract-editing.js";
 import { bridge } from "../workspace/index.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
@@ -152,24 +152,52 @@ describe("what the scope does not cover, where it is approved", () => {
   });
 });
 
-describe("approving while another ticket's run is under way", () => {
-  // Runs take one at a time (D-101), so approving waits for the one under way
-  // elsewhere; a button held with nothing said reads as a contract that cannot
-  // be confirmed, so the page names the run it waits for.
-  it("holds the button and names the run it waits for", async () => {
+describe("approving while a run is under way", () => {
+  const running = (repoId: string, key: string): Job => ({
+    id: "run-" + key, repoId, key, kind: "run", label: "Run engineering loop",
+    state: "running", startedAt: new Date().toISOString(), endedAt: null, log: "", error: null, resultKey: null, result: null,
+  });
+
+  // Runs of different tickets go on at the same time (D-049, D-101): a
+  // ticket's run starts as soon as its contract is confirmed, whatever
+  // another ticket's run is doing, so nothing here holds or names it.
+  it("starts this ticket's run at once while another ticket's run is under way", async () => {
     const context = await contextFor([criterion()]);
     const other = context.workspace.tasks.find((task) => task.ticket.key !== context.detail.ticket.key)!;
-    context.workspace.jobs = [
-      {
-        id: "run-elsewhere", repoId: other.repoId, key: other.ticket.key, kind: "run", label: "Run engineering loop",
-        state: "running", startedAt: new Date().toISOString(), endedAt: null, log: "", error: null, resultKey: null, result: null,
-      },
-    ];
+    context.workspace.jobs = [running(other.repoId, other.ticket.key)];
+    const sent: Request[] = [];
+    const original = bridge.request.bind(bridge);
+    vi.spyOn(bridge, "request").mockImplementation(async <T extends Request>(request: T): Promise<ReplyMap[T["kind"]]> => {
+      sent.push(request);
+      if (request.kind === "run") return running(context.repoId, context.detail.ticket.key) as ReplyMap[T["kind"]];
+      return original(request);
+    });
+    mount(<ContractScreen {...context} />);
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByText(/is under way, and this ticket waits for it/)).toBeNull();
+    fireEvent.click(approve);
+    await waitFor(() =>
+      expect(sent.find((request) => request.kind === "run")).toMatchObject({
+        kind: "run",
+        key: context.detail.ticket.key,
+        approve: true,
+      }),
+    );
+  });
+
+  // This ticket's own run under way holds the button, and a button held with
+  // nothing said reads as a contract that cannot be confirmed, so the page
+  // names the run it waits for.
+  it("holds the button and names this ticket's own run while it is under way", async () => {
+    const context = await contextFor([criterion()]);
+    const own = running(context.repoId, context.detail.ticket.key);
+    context.workspace.jobs = [own];
     mount(<ContractScreen {...context} />);
     const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
     expect(approve.disabled).toBe(true);
-    expect(screen.getByText(turnHeld({ key: other.ticket.key, label: "Run engineering loop" }))).toBeTruthy();
-    expect(turnHeld({ key: other.ticket.key, label: "Run engineering loop" })).toContain("#" + other.ticket.key.replace(/^PRB-/, ""));
+    expect(screen.getByText(turnHeld(own))).toBeTruthy();
+    expect(turnHeld(own)).toContain("#" + context.detail.ticket.key.replace(/^PRB-/, ""));
   });
 
   it("says nothing of a turn once no run is under way", async () => {
@@ -177,7 +205,7 @@ describe("approving while another ticket's run is under way", () => {
     mount(<ContractScreen {...context} />);
     const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
     expect(approve.disabled).toBe(false);
-    expect(screen.queryByText(/take one at a time/)).toBeNull();
+    expect(screen.queryByText(/is under way, and this ticket waits for it/)).toBeNull();
   });
 });
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { exclusiveJob, heldRepository } from "../../shared/jobs.js";
+import { heldRepository, inTheWay } from "../../shared/jobs.js";
 import { ManifestDialog } from "./ManifestDialog.js";
 import {
   Button,
@@ -33,9 +33,11 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
     [limitsOpen, setLimitsOpen] = useState(false),
     [diagnostic, setDiagnostic] = useState<string | null>(null),
     [manifestRepo, setManifestRepo] = useState<string | null>(null);
-  // A readiness check is an exclusive command; disconnecting a repository
-  // waits for whatever is running in it, in either lane.
-  const active = Boolean(exclusiveJob(workspace.jobs));
+  // A readiness check takes its turn over the repository it checks;
+  // disconnecting a repository waits for whatever is running in it, in either
+  // lane.
+  const active = (repoId: string | null): boolean =>
+    repoId !== null && Boolean(inTheWay(workspace.jobs, { repoId, key: null, kind: "doctor" }));
   const held = (repoId: string): boolean => heldRepository(workspace.jobs, repoId);
   const save = async (): Promise<void> => {
     await action.mutateAsync({ kind: "saveSettings", settings });
@@ -259,7 +261,7 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                   <Button
                     className="small"
                     variant={repo.configured ? "secondary" : "primary"}
-                    disabled={active}
+                    disabled={active(repo.id)}
                     onClick={() => {
                       setDiagnostic(repo.id);
                       action.mutate({
@@ -401,7 +403,7 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
             ?.configured && (
             <div className="dialog-actions">
               <Button
-                disabled={active}
+                disabled={active(diagnostic)}
                 variant="primary"
                 onClick={() =>
                   action.mutate({

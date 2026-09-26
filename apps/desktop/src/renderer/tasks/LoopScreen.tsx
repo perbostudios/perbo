@@ -3,12 +3,12 @@ import { z } from "zod";
 import { DECISION_CHOICES, DECISION_WORDS, type DecisionChoice } from "@perbo/contracts/browser";
 import { Button, InfoHint, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
-import { exclusiveJob, isRun } from "../../shared/jobs.js";
+import { inTheWay, isRun } from "../../shared/jobs.js";
 import { decisionQuestions, settledFindings } from "../../shared/decisions.js";
 import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
-import { costLabel, runEnding, taskRecords } from "./task-context.js";
+import { loopSteps, loopTally, runEnding, StageLog, taskRecords } from "./task-context.js";
 import type { RunEnding, TaskContext } from "./task-context.js";
 import { TYPED_TEXT_MAX_CHARS, type DecisionQuestion } from "../../shared/protocol.js";
 
@@ -77,23 +77,27 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
         } as Record<string, string>
       )[ticket.state] ??
       "Ready to start the loop");
-  // Newest first: the step the loop is on, or what ended it, heads the list.
+  // Newest first: what ended the loop, or the step it is on, heads the list.
+  const [stageLog] = useState(() => new StageLog());
+  const recorded = loopSteps({
+    history: ticket.history,
+    jobs,
+    active,
+    attempts: detail.attempts,
+    log: stageLog,
+    now: new Date().toISOString(),
+  });
   const steps = [
     ...(ending !== null && acknowledged
-      ? [{ text: ending.sentence, reason: ending.reason, time: "", state: "ended" as const }]
+      ? [{ text: ending.sentence, reason: ending.reason, why: whyLabel, at: ending.job.endedAt, state: "ended" as const }]
       : []),
-    ...ticket.history
-      .map((entry, index) => ({
-        text: entry.note || entry.to.replaceAll("_", " "),
-        reason: null,
-        time: index === ticket.history.length - 1 && active ? "now" : "",
-        state: index === ticket.history.length - 1 && active ? ("current" as const) : ("complete" as const),
-      }))
-      .reverse(),
+    ...recorded.map((step, index) => ({
+      ...step,
+      why: "What the runner recorded",
+      state: index === 0 && active ? ("current" as const) : ("complete" as const),
+    })),
   ];
-  const commands = latest?.ceilings.find(
-    (ceiling) => ceiling.resource === "attempt_commands",
-  );
+  const tally = loopTally({ jobs, active, attempts: detail.attempts });
   // A stop lands on the stopped page at once, without waiting for the record
   // the stop leaves: the page holds while the host finishes it. Only the run
   // is what that page is about, so stopping any other command stays here.
@@ -198,7 +202,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           <div className="step-history" role="region" aria-label="Description of steps" tabIndex={0}>
             {steps.length ? (
               steps.map((step, index) => (
-                <div className={step.state} key={index}>
+                <div className={step.state} key={steps.length - index}>
                   {step.state === "complete" ? (
                     <InkIcon name="approve" size={16} />
                   ) : step.state === "ended" ? (
@@ -208,9 +212,15 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
                   )}
                   <span>
                     {step.text}
-                    {step.reason !== null && <InfoHint text={step.reason} label={whyLabel} />}
+                    {step.reason !== null && <InfoHint text={step.reason} label={step.why} />}
                   </span>
-                  <time>{step.time}</time>
+                  {step.at === null ? (
+                    <time />
+                  ) : (
+                    <time dateTime={step.at} title={new Date(step.at).toLocaleString()}>
+                      {new Date(step.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </time>
+                  )}
                 </div>
               ))
             ) : (
@@ -231,20 +241,23 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             <dt>Commands</dt>
             <dd>
               {/* No denominator: nothing bounds a run by commands (D-096). */}
-              <NumberPop value={commands?.used ?? "—"} />
+              <NumberPop value={tally.commands} />
             </dd>
           </div>
           <div>
             <dt>Spent</dt>
             <dd>
-              <NumberPop value={active ? "Pending" : costLabel(detail)} />{" "}
-              <small>stops after {detail.effective.stallMinutes} min idle</small>
+              {/* Tokens always, dollars where a provider gave them (D-104). */}
+              <NumberPop value={tally.dollars ?? tally.tokens} />{" "}
+              <small>
+                {tally.dollars !== null && `${tally.tokens} · `}stops after {detail.effective.stallMinutes} min idle
+              </small>
             </dd>
           </div>
           <div>
             <dt>Files touched</dt>
             <dd>
-              <NumberPop value={latest?.changes.length ?? "—"} />
+              <NumberPop value={tally.files} />
             </dd>
           </div>
           <div>
@@ -454,7 +467,7 @@ function DecisionOverlay(
         [question.id]: { text: "", custom: true, choice: "approach" },
       }).length,
   );
-  const busy = Boolean(exclusiveJob(workspace.jobs));
+  const busy = Boolean(inTheWay(workspace.jobs, { repoId, key: detail.ticket.key, kind: "decide" }));
   useEffect(() => {
     sessionStorage.setItem(storageKey, JSON.stringify(answers));
   }, [answers, storageKey]);

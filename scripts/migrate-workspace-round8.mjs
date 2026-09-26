@@ -1,10 +1,11 @@
 // Brings a desktop profile's `workspace.json` up to the records the desktop
-// reads (D-130, D-NEW-basic-and-epic-flows, D-128): a profile written without
+// reads (D-130, D-NEW-basic-and-epic-flows, D-128, D-097): a profile written without
 // these fields gains them. A profile that fails the schema stops Perbo from
 // starting, so this runs before the first start of a build that reads them.
 // It:
 //
 // - adds `lastOpened` as `{}` where the profile has none;
+// - adds `calledOff` as `[]` where the profile has none;
 // - for every editing session:
 //   - deletes `lastView`, which the contract tab's `confirmed` replaces;
 //   - deletes `specCut`, a field the desktop does not read (D-118);
@@ -80,6 +81,10 @@ export function migrate(state) {
   if (!("lastOpened" in next)) {
     next.lastOpened = {};
     changes.push("profile: added lastOpened: {}");
+  }
+  if (!("calledOff" in next)) {
+    next.calledOff = [];
+    changes.push("profile: added calledOff: []");
   }
   if (state.editingSessions !== undefined)
     next.editingSessions = state.editingSessions.map((session, index) => {

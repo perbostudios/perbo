@@ -345,6 +345,7 @@ export class DesktopService {
         taskModels: this.state.taskModels,
         sequence: this.changes.sequence,
         archived: this.state.archived,
+        calledOff: this.state.calledOff,
         asks: this.state.asks,
         lastOpened: this.state.lastOpened,
         power: this.power.state,

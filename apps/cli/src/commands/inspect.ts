@@ -53,7 +53,7 @@ import {
   type SizeEstimate,
   type TicketSource,
 } from "@perbo/contracts";
-import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
+import { attemptBundles, BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
 import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES, queueOrder } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
@@ -588,47 +588,7 @@ const scalar = (bundle: RunBundle, key: string): string | number | boolean | nul
   bundle.inputs[key] ?? null;
 
 function artifactBody(store: BundleStore | null, bundle: RunBundle, name: string): string | null {
-  const ref = bundle.artifacts.find((artifact) => artifact.name === name);
-  if (!ref || !ref.retained || !store) return null;
-  return store.readObject(ref.sha256);
-}
-
-/**
- * The bundles one attempt wrote. The execution bundle is keyed by the attempt
- * id; the review by the change set it judged; a verification by the
- * `cv_<attempt>` subject the loop gives it.
- *
- * One join, read by the two things that need it: the report a person reads,
- * and `--verify`, which re-hashes what these name. A second copy of the rule
- * would be a second answer to "which bundles are this attempt's".
- */
-export interface AttemptBundles {
-  execution: RunBundle | undefined;
-  review: RunBundle | undefined;
-  verification: RunBundle | undefined;
-}
-
-export function attemptBundles(
-  attempt: ExecutionAttempt,
-  bundles: readonly RunBundle[],
-): AttemptBundles {
-  return {
-    execution: bundles.find(
-      (bundle) => bundle.kind === "execution" && bundle.subject_id === attempt.attempt_id,
-    ),
-    review:
-      attempt.changeset_id === null
-        ? undefined
-        : bundles.find(
-            (bundle) =>
-              bundle.kind === "review" &&
-              bundle.subject_id.startsWith("rev_") &&
-              scalar(bundle, "changeset_id") === attempt.changeset_id,
-          ),
-    verification: bundles.find(
-      (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.attempt_id}`,
-    ),
-  };
+  return store?.artifact(bundle, name) ?? null;
 }
 
 /** One attempt joined to its bundles and read for a person. */

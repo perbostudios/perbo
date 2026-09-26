@@ -179,7 +179,7 @@ Enforced by the runner, never asked of the model. Overrides go in `.perbo/config
 
 | Key | Default | Bounds |
 |---|---|---|
-| `concurrent_local_attempts` | 1 | runs at once on this machine, hand-started ones included ([D-049](11-open-decisions.md)) |
+| `concurrent_local_attempts` | unbounded unless set | runs of different tickets at once on this machine, hand-started ones included; one ticket takes one run at a time whatever this says ([D-049](11-open-decisions.md)) |
 | `local_workspace_bytes` | 20 GiB | worktree disk |
 | `attempt_stall_ms` | 20 min | one attempt, from the last tool call or tool result on the executor's stream |
 | `attempt_wall_clock_ms`, `attempt_tokens`, `attempt_commands`, `attempt_iterations`, `round_iterations` | unset | nothing, unless the repository sets them |
@@ -361,10 +361,10 @@ Decided, not built: the merge trusts only the verdict comment the review run its
 1. fetches the base ref, the queue's only fetch;
 2. syncs every `pr_open` ticket and every stranded one no live run is inside, and under `merge: loop` asks each open pull request in queue order to merge until one does;
 3. decides who waits;
-4. re-levels every open branch behind the base, then starts `perbo run --ticket` as a child process for each `ready` ticket, up to `concurrent_local_attempts` counting every live run, including one a person started;
+4. re-levels every open branch behind the base, then starts `perbo run --ticket` as a child process for every `ready` ticket not already running, in queue order and in the same tick — up to `concurrent_local_attempts` where the limits set one, counting every live run, including one a person started;
 5. drafts one labelled tracker issue, where a tracker is configured.
 
-`--publish` is typed once and handed to every run the queue starts; without it nothing is re-levelled. `--once` runs one tick and waits for what it started; `--json` writes one document per tick with the queue's order, the waits, and what it synced, re-levelled, started and drafted. The next ticket starts when the previous run ends at `pr_open`, not when it merges.
+`--publish` is typed once and handed to every run the queue starts; without it nothing is re-levelled. `--once` runs one tick and waits for what it started; `--json` writes one document per tick with the queue's order, the waits, and what it synced, re-levelled, started and drafted. Runs of different tickets go side by side: a confirmed ticket starts on the next tick whatever else is running, unless it waits as below ([D-049](11-open-decisions.md)).
 
 ### Waiting and `blocked`
 

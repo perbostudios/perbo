@@ -4,6 +4,7 @@ import { AgentConfigurationPresentError, type AgentResult } from "../../adapter.
 import { AttemptCeilings } from "../../ceilings.js";
 import { buildAgentEnvironment } from "../../profile.js";
 import { quarantine, release } from "../../quarantine.js";
+import type { AttemptTally } from "../../tally.js";
 import type { Brief } from "./brief.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
@@ -41,6 +42,8 @@ export async function execute(args: {
   secrets: SecretIndex;
   agent: LoopPorts["agent"];
   progress: (message: string) => void;
+  /** What the attempt has done so far, as the adapter counts it, for the run's tally. */
+  tally?: (tally: AttemptTally) => void;
 }): Promise<{ executed: Executed } | Stop> {
   const { config, state, brief, secrets, progress } = args;
   // ADR-0030 requirement 2, around every handover including remediation.
@@ -84,6 +87,7 @@ export async function execute(args: {
       paths_prohibited: brief.pathsProhibited,
       spec_folder: config.specs,
       onProgress: progress,
+      ...(args.tally ? { onTally: args.tally } : {}),
       redact: (text) => secrets.redact(text).text,
     });
   } catch (error) {

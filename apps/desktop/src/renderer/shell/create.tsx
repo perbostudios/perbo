@@ -65,13 +65,15 @@ export function useSettle(): (release: () => void) => void {
   };
 }
 /**
- * Delete a ticket for good and go Home, with it off Home and the Archive from
- * the click until {@link useSettle} gives it back, so no read landing while
- * the delete finishes puts it back; a refusal puts it back at once.
+ * Delete a ticket for good, with it off Home, the Archive, the picker and the
+ * rail's counts from the click until {@link useSettle} gives it back, so no
+ * read landing while the delete finishes puts it back; a refusal puts it back
+ * at once. `deleted` is where the person goes once it has gone: Home from the
+ * ticket's own pages, and nowhere from the Archive, whose row it was.
  */
 export function useDiscardTicket(
   discard: (request: Extract<Request, { kind: "discard" }>) => Promise<unknown>,
-  navigate: (route: Route) => void,
+  deleted: () => void,
 ): (repoId: string, key: string, refused: () => void) => void {
   const { hide } = useCreate();
   const settle = useSettle();
@@ -79,7 +81,7 @@ export function useDiscardTicket(
     const release = hide([deletes.ticket(repoId, key)]);
     void discard({ kind: "discard", repoId, key })
       .then(() => {
-        navigate({ page: "home" });
+        deleted();
         settle(release);
       })
       .catch(() => {
@@ -391,13 +393,68 @@ const shortKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
  * is one thing and is deleted as one (D-101, D-103,
  * D-129).
  */
-function confirmDelete(stage: "name" | "spec" | "plan", title: string): string {
+export function confirmDelete(stage: "name" | "spec" | "plan", title: string): string {
   const named = title.trim().length > 0 ? `“${title.trim()}”` : "this planning";
   if (stage === "name")
     return `Delete ${named}? It has a name and nothing written under it yet.`;
   if (stage === "spec")
     return `Delete ${named}? A spec is written and no plan is drafted yet: the planning and the spec folder both go, and nothing of this is kept.`;
   return `Delete ${named}? A plan is drafted and not approved: the plan, its ticket and the spec folder they came from all go, and nothing of this is kept.`;
+}
+
+/**
+ * What to ask before an archived ticket is deleted, in the picker's words for
+ * the stage it is at: what the host's delete takes — the ticket, its contract
+ * and plan, the attempts it recorded, the evidence they sealed and, where it
+ * was drafted from one, the spec folder — and what it leaves, the branch it
+ * ran on and a pull request on GitHub, which are git's and GitHub's (D-129).
+ */
+export function confirmDeleteFiled(
+  title: string,
+  ticket: { admission: { spec?: { path?: string } | null }; delivery: { branch?: string | null; pull_request_url?: string | null } },
+): string {
+  const named = title.trim().length > 0 ? `“${title.trim()}”` : "this ticket";
+  const spec = ticket.admission.spec?.path ? ", and the spec folder it came from" : "";
+  const left = [
+    ...(ticket.delivery.branch ? [`the branch ${ticket.delivery.branch} in git`] : []),
+    ...(ticket.delivery.pull_request_url ? ["its pull request on GitHub"] : []),
+  ];
+  return (
+    `Delete ${named}? It is archived: its ticket, contract and plan, every attempt it recorded and ` +
+    `the evidence those attempts sealed${spec} all go, and nothing of this is kept.` +
+    (left.length > 0 ? ` This leaves ${left.join(" and ")}.` : "")
+  );
+}
+
+/**
+ * The confirmation a delete asks first: what goes, in the words of the stage
+ * the work is at, with Keep it beside the delete, which names what it takes.
+ * The picker's bins and the Archive's Delete both ask with it.
+ */
+export function ConfirmDelete({
+  label,
+  confirm,
+  disabled = false,
+  keep,
+  remove,
+}: {
+  label: string;
+  confirm: string;
+  disabled?: boolean;
+  keep: () => void;
+  remove: () => void;
+}) {
+  return (
+    <Dialog title={label} onClose={keep}>
+      <p>{confirm}</p>
+      <div className="dialog-actions">
+        <Button onClick={keep}>Keep it</Button>
+        <Button variant="danger" disabled={disabled} onClick={remove}>
+          {label}
+        </Button>
+      </div>
+    </Dialog>
+  );
 }
 
 function Picker({
@@ -739,26 +796,17 @@ function Picker({
         // Answered here and not by the browser, so the picker behind it stays
         // up: what was asked about is on that list, and a person who keeps it
         // should be looking at it still.
-        <Dialog
-          title={confirming.label}
-          onClose={() => setConfirming(null)}
-        >
-          <p>{confirming.confirm}</p>
-          <div className="dialog-actions">
-            <Button onClick={() => setConfirming(null)}>Keep it</Button>
-            <Button
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                const bin = confirming;
-                setConfirming(null);
-                void bin.remove();
-              }}
-            >
-              {confirming.label}
-            </Button>
-          </div>
-        </Dialog>
+        <ConfirmDelete
+          label={confirming.label}
+          confirm={confirming.confirm}
+          disabled={busy}
+          keep={() => setConfirming(null)}
+          remove={() => {
+            const bin = confirming;
+            setConfirming(null);
+            void bin.remove();
+          }}
+        />
       )}
     </>
   );

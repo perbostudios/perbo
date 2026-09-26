@@ -7,6 +7,7 @@ import {
   forgetRepository,
   forgetTicket,
   recordOpened,
+  recordCalledOff,
   setArchived,
 } from "./preferences.js";
 
@@ -46,6 +47,7 @@ function profile(over: Record<string, unknown> = {}): ProfileState {
     titles: { [alpha + ":PRB-1"]: "Renamed", [beta + ":PRB-9"]: "Another repository's" },
     taskModels: { [alpha + ":PRB-1"]: TaskModelsSchema.strip().parse(SettingsSchema.parse({})) },
     archived: [alpha + ":PRB-1", alpha + ":PRB-2", beta + ":PRB-9"],
+    calledOff: [alpha + ":PRB-1", beta + ":PRB-9"],
     lastOpened: { [alpha + ":PRB-1"]: "2026-09-20T09:00:00.000Z", [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" },
     ...over,
   });
@@ -59,6 +61,7 @@ describe("forgetRepository", () => {
     expect(state.titles).toEqual({ [beta + ":PRB-9"]: "Another repository's" });
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([beta + ":PRB-9"]);
+    expect(state.calledOff).toEqual([beta + ":PRB-9"]);
     expect(state.lastOpened).toEqual({ [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" });
   });
 
@@ -71,12 +74,13 @@ describe("forgetRepository", () => {
 });
 
 describe("forgetTicket", () => {
-  it("drops that one ticket's title, models, archive mark and last opening", () => {
+  it("drops that one ticket's title, models, archive mark, call-off and last opening", () => {
     const state = profile();
     forgetTicket(state, alpha, "PRB-1");
     expect(state.titles).toEqual({ [beta + ":PRB-9"]: "Another repository's" });
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([alpha + ":PRB-2", beta + ":PRB-9"]);
+    expect(state.calledOff).toEqual([beta + ":PRB-9"]);
     expect(state.lastOpened).toEqual({ [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" });
   });
 
@@ -111,6 +115,15 @@ describe("setArchived", () => {
     const state = profile();
     setArchived(state, alpha, ["PRB-1"], false);
     expect(state.archived).toEqual([alpha + ":PRB-2", beta + ":PRB-9"]);
+  });
+});
+
+describe("recordCalledOff", () => {
+  it("records a merge called off once, keyed to its repository", () => {
+    const state = profile({ calledOff: [alpha + ":PRB-1"] });
+    recordCalledOff(state, alpha, "PRB-1");
+    recordCalledOff(state, beta, "PRB-1");
+    expect(state.calledOff).toEqual([alpha + ":PRB-1", beta + ":PRB-1"]);
   });
 });
 

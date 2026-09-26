@@ -57,6 +57,7 @@ import {
   ResumeRefusedError,
   RunRefusedError,
   TURBO_FORCE_FLAG,
+  NetworkAllowListSchema,
   TicketRunConfigSchema,
   preflight,
   readDeliveredChecks,
@@ -1077,6 +1078,11 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   // are not said for it.
   const runs = retained === null;
   if (runs) streams.stderr(`  ceilings  ${renderCeilingsLine(config.limits)}\n`);
+  // The hosts this repository adds to the executor's egress allow-list, named
+  // where a review of the run's log reads them.
+  if (runs && config.network_allow_list.length > 0) {
+    streams.stderr(`  egress    also allowed ${config.network_allow_list.join(", ")}\n`);
+  }
 
   // What is judging this attempt, where nobody has said (SCP-259). A repository
   // with no `.perbo/config.json` is run against the checks its own package
@@ -1878,6 +1884,11 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
   // with it.
   const installed = configuredInstall(repoConfig, checkout, configSource);
 
+  // The hosts this repository adds to the executor's egress allow-list, read
+  // by the schema a run reads them with, so an entry a run would refuse is
+  // named here first.
+  const egress = configuredEgress(repoConfig?.["network_allow_list"]);
+
   let written = false;
   if (options.args.writeConfig) {
     if (storedConfig !== null) {
@@ -1941,6 +1952,7 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
             delivery_checks_bound_ms: deliveryBoundMs,
           },
           base,
+          egress,
           corpus_cache: corpusCache,
           provider: {
             transport: reviewerProvider,
@@ -1998,6 +2010,7 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
             ? `none — this checkout is on no branch and its remote declares no default; set base_ref in ${configPath}`
             : describeBase(namedBase)
       }`,
+      `EGRESS    ${renderEgress(egress, configSource)}`,
       "",
       "PREFLIGHT",
       renderPreflight(machine),
@@ -2092,6 +2105,34 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
     options.streams.stdout(`${lines.join("\n")}\n`);
   }
   return result.materializable && machine.ok && !probeBlocking ? 0 : 1;
+}
+
+/** The hosts a configuration adds to the egress allow-list, or why a run would refuse them. */
+interface ConfiguredEgress {
+  also_allowed: string[];
+  /** The sentence a run here is refused with, or null where the list reads. */
+  invalid: string | null;
+}
+
+function configuredEgress(raw: unknown): ConfiguredEgress {
+  if (raw === undefined) return { also_allowed: [], invalid: null };
+  const parsed = NetworkAllowListSchema.safeParse(raw);
+  return parsed.success
+    ? { also_allowed: parsed.data, invalid: null }
+    : {
+        also_allowed: [],
+        invalid: parsed.error.issues
+          .map((issue) => `${["network_allow_list", ...issue.path].join(".")}: ${issue.message}`)
+          .join("; "),
+      };
+}
+
+/** The EGRESS line of `perbo doctor`. */
+function renderEgress(egress: ConfiguredEgress, configSource: string): string {
+  if (egress.invalid !== null) return `${egress.invalid} (in ${configSource}); a run here is refused until it is fixed`;
+  if (egress.also_allowed.length === 0)
+    return `the defaults only: the model provider, GitHub and the package registries`;
+  return `also allowed ${egress.also_allowed.join(", ")}  (network_allow_list in ${configSource})`;
 }
 
 /**

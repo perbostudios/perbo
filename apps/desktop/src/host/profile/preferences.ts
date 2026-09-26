@@ -2,8 +2,8 @@ import type { ProfileState } from "./store.js";
 
 /**
  * The preferences a person set beside a ticket, keyed `repoId:key`: its title,
- * the models it drafts and runs with, whether it has been filed and when its
- * page was last opened. They are this host's own, so they are dropped here
+ * the models it drafts and runs with, whether it has been filed, whether its
+ * merge was called off and when its page was last opened. They are this host's own, so they are dropped here
  * rather than written to a repository.
  */
 const entryKey = (repoId: string, key: string): string => repoId + ":" + key;
@@ -20,6 +20,7 @@ export function forgetRepository(state: ProfileState, repoId: string): void {
   for (const entry of Object.keys(state.taskModels))
     if (entry.startsWith(prefix)) delete state.taskModels[entry];
   state.archived = state.archived.filter((entry) => !entry.startsWith(prefix));
+  state.calledOff = state.calledOff.filter((entry) => !entry.startsWith(prefix));
   for (const entry of Object.keys(state.lastOpened))
     if (entry.startsWith(prefix)) delete state.lastOpened[entry];
   delete state.asks[repoId];
@@ -31,6 +32,7 @@ export function forgetTicket(state: ProfileState, repoId: string, key: string): 
   delete state.titles[entry];
   delete state.taskModels[entry];
   state.archived = state.archived.filter((item) => item !== entry);
+  state.calledOff = state.calledOff.filter((item) => item !== entry);
   delete state.lastOpened[entry];
 }
 
@@ -59,6 +61,11 @@ export function setArchived(
   state.archived = archived
     ? [...new Set([...state.archived, ...entries])]
     : state.archived.filter((entry) => !entries.includes(entry));
+}
+
+/** The person's Don't merge on this ticket, recorded once (D-097). */
+export function recordCalledOff(state: ProfileState, repoId: string, key: string): void {
+  state.calledOff = [...new Set([...state.calledOff, entryKey(repoId, key)])];
 }
 
 /**

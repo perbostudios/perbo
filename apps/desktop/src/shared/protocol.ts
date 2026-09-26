@@ -1302,6 +1302,13 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     keys: z.array(key).min(1),
     archived: z.boolean(),
   }),
+  /**
+   * The person's Don't merge on the merge screen: their merge decision on a
+   * ticket whose pull request stays open, which Home then lists as completed
+   * (D-097). A desktop preference, never a Ticket state; refused where the
+   * ticket has no open pull request.
+   */
+  z.strictObject({ kind: z.literal("callOff"), ...reference }),
   z.strictObject({
     kind: z.literal("doctor"),
     repoId: identifier,
@@ -1468,6 +1475,8 @@ export interface Snapshot {
   taskModels?: Record<string, TaskModels>;
   /** `repoId:key` of every completed ticket filed away by hand. */
   archived?: string[];
+  /** `repoId:key` of every ticket whose merge the person called off with Don't merge (D-097). */
+  calledOff?: string[];
   /** Each repository's unsent answer to "What do you want to build?", by repository id. */
   asks?: Record<string, string>;
   /** When each ticket's page was last opened, `repoId:key` to an ISO time. */
@@ -1522,7 +1531,7 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("preferences"), sequence: z.number().int().nonnegative(), settings: SettingsSchema, titles: z.record(z.string(), z.string()),
     taskModels: z.record(z.string(), TaskModelsSchema), archived: z.array(z.string()).default([]),
-    asks: z.record(z.string(), z.string()),
+    calledOff: z.array(z.string()), asks: z.record(z.string(), z.string()),
   }),
   z.object({ kind: z.literal("repositories"), sequence: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("editing"), sequence: z.number().int().nonnegative(), sessionId: identifier }),
@@ -1758,6 +1767,7 @@ export interface ReplyMap {
   saveManifest: null;
   rename: null;
   archive: null;
+  callOff: null;
   askSave: null;
   ticketOpened: null;
   discard: null;

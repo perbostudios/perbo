@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { exclusiveJob } from "../../shared/jobs.js";
+import { inTheWay } from "../../shared/jobs.js";
 import { useQuery } from "@tanstack/react-query";
 import {
   Button,
@@ -524,8 +524,9 @@ export function RepositoryScreen({
     [chooseError, setChooseError] = useState<string | null>(null),
     [manifestOpen, setManifestOpen] = useState(false);
   const action = useAction(),
-    // A readiness check and its configuration save are exclusive commands.
-    active = Boolean(exclusiveJob(workspace.jobs));
+    // A readiness check and its configuration save take their turn over the
+    // repository they check.
+    active = Boolean(inTheWay(workspace.jobs, { repoId: selected, key: null, kind: "doctor" }));
   useEffect(() => {
     if (!selected && workspace.repositories[0])
       setSelected(workspace.repositories[0].id);

@@ -59,7 +59,8 @@ describe("ticket workspace projection", () => {
     row.ticket.state = "pr_open";
     const other = { ...job, repoId: crypto.randomUUID(), state: "running" as const };
     workspace.jobs = [other];
-    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: true, active: undefined, resultReady: true });
+    // The same key in another repository is another ticket, whose run holds nothing of this one's.
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, active: undefined, resultReady: true });
     workspace.jobs.push({ ...job, key: null, resultKey: row.ticket.key, state: "stopping" });
     expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: true, resultReady: false, primary: { label: "See the stopped run" }, screen: "stopped" });
     expect(projectTicket(workspace, row, detail, "output").screen).toBe("output");
@@ -102,8 +103,11 @@ describe("ticket workspace projection", () => {
     const live = { ...job, state: "running" as const, error: null, endedAt: null };
     const planning = { ...live, id: crypto.randomUUID(), kind: "edit", label: "Update task contract" };
     const run = { ...live, id: crypto.randomUUID(), label: "Run engineering loop", log: "  worktree /tmp/w on ayo/task at 123\n  executing\n" };
-    // Planning on another ticket is not something this one waits for.
+    // Planning on another ticket is not something this one waits for, and
+    // neither is another ticket's run (D-049).
     workspace.jobs = [{ ...planning, key: "PRB-999" }];
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, active: undefined });
+    workspace.jobs = [{ ...run, key: "PRB-999" }];
     expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, active: undefined });
     // A run is, and the loop watches the run rather than the edit that started before it.
     workspace.jobs = [planning, run];
@@ -113,14 +117,19 @@ describe("ticket workspace projection", () => {
     expect(result.observed).not.toBeNull();
   });
 
-  it("holds a contract's deletion while any command runs in its repository, and not for another repository's (SCP-335)", async () => {
+  it("holds a contract's deletion while a command runs for this ticket, and not for another ticket's or another repository's (D-129)", async () => {
     const { workspace, row, detail, job } = await fixture();
     const live = { ...job, state: "running" as const, error: null, endedAt: null };
-    const planning = { ...live, id: crypto.randomUUID(), kind: "edit", label: "Update task contract", key: "PRB-999" };
+    const planning = { ...live, id: crypto.randomUUID(), kind: "edit", label: "Update task contract", key: row.ticket.key };
     workspace.jobs = [planning];
-    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, held: true });
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ held: true });
+    workspace.jobs = [{ ...planning, key: null, resultKey: row.ticket.key }];
+    expect(projectTicket(workspace, row, detail), "the command that produced it").toMatchObject({ held: true });
+    const other = { ...live, id: crypto.randomUUID(), kind: "run", label: "Run engineering loop", key: "PRB-999" };
+    workspace.jobs = [other, { ...planning, key: "PRB-998" }];
+    expect(projectTicket(workspace, row, detail), "another ticket's run").toMatchObject({ held: false });
     workspace.jobs = [{ ...planning, repoId: crypto.randomUUID() }];
-    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, held: false });
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ held: false });
   });
 
   /**

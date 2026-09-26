@@ -22,32 +22,45 @@ export const isPreLoop = (row: { ticket: { state: string } }): boolean =>
 /** Where a ticket's journey ends once its merge is decided: merged, or closed without merge, and what follows a merge. */
 const DECIDED_STATES: readonly string[] = ["merged", "closed", "done", "deployed", "observing"];
 /**
- * Whether the person has decided this ticket's merge: merged, or closed
- * without merge. Home lists such a ticket last, under every colour, with a
- * check mark for its progress, until it is archived by hand (S4).
+ * Whether the person called this ticket's merge off with Don't merge: its
+ * pull request stays open, and the call-off is recorded on this machine
+ * (D-097).
  */
-export const isMergeDecided = (row: { ticket: { state: string } }): boolean =>
-  DECIDED_STATES.includes(row.ticket.state);
+export const isCalledOff = (
+  snapshot: Pick<Snapshot, "calledOff">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
+): boolean =>
+  row.ticket.state === "pr_open" && (snapshot.calledOff?.includes(row.repoId + ":" + row.ticket.key) ?? false);
+/**
+ * Whether this ticket's merge is decided: merged, closed without merge, or
+ * called off with its pull request left open. Home lists such a ticket last,
+ * under every colour, with a check mark for its progress, until it is
+ * archived by hand (S4).
+ */
+export const isMergeDecided = (
+  snapshot: Pick<Snapshot, "calledOff">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
+): boolean => DECIDED_STATES.includes(row.ticket.state) || isCalledOff(snapshot, row);
 /** Where a ticket's journey ends: a pull request opened and waiting on the merge decision, or that decision made. */
 export const JOURNEY_END_STATES: readonly string[] = ["pr_open", ...DECIDED_STATES];
 /** The states from which the loop will not carry a ticket to that end unless a person starts it again. */
 export const GIVEN_UP_STATES: readonly string[] = ["failed", "cancelled", "inconclusive", "rolled_back", "plan_invalid"];
 
 /**
- * Whether a ticket may be filed in the archive: the person has decided its
- * merge, merged or closed without merge, or its run stopped. A ticket the loop
+ * Whether a ticket may be filed in the archive: its merge is decided — merged,
+ * closed without merge or called off — or its run stopped. A ticket the loop
  * still carries — running, waiting on a decision or the queue — and one whose
  * pull request still waits on the merge decision stay on Home, and the host
  * refuses to file them (S4). Nothing is filed but by hand.
  */
 export function isArchivable(
-  snapshot: Pick<Snapshot, "jobs">,
+  snapshot: Pick<Snapshot, "jobs" | "calledOff">,
   row: Pick<TaskRow, "repoId" | "ticket">,
 ): boolean {
   const { jobs, stoppedShort } = ticketRun(snapshot, row);
   return (
     !jobs.some((job) => isLive(job) && isRun(job)) &&
-    (DECIDED_STATES.includes(row.ticket.state) || GIVEN_UP_STATES.includes(row.ticket.state) || stoppedShort)
+    (isMergeDecided(snapshot, row) || GIVEN_UP_STATES.includes(row.ticket.state) || stoppedShort)
   );
 }
 /**
@@ -57,22 +70,27 @@ export function isArchivable(
  */
 export const notArchivable = (key: string, state: string): string =>
   state === "pr_open"
-    ? `${key} waits on the merge decision. Archive it once its pull request is merged or closed.`
+    ? `${key} waits on the merge decision. Archive it once its pull request is merged or closed, or its merge is called off.`
     : `${key} is still in its loop. Archive it once it has finished or its run has stopped.`;
+/**
+ * What the host and the sample host answer when asked to record Don't merge on
+ * a ticket with no open pull request to leave open.
+ */
+export const notCallable = (key: string): string =>
+  `${key} has no open pull request, so there is no merge to call off.`;
 
 /** Filed away from Home by hand (S4). A ticket that could be filed and is not stays on Home. */
 export const isFiled = (
-  snapshot: Pick<Snapshot, "archived" | "jobs">,
+  snapshot: Pick<Snapshot, "archived" | "jobs" | "calledOff">,
   row: Pick<TaskRow, "repoId" | "ticket">,
 ): boolean =>
-  (snapshot.archived?.includes(row.repoId + ":" + row.ticket.key) ?? false) &&
-  isArchivable(snapshot, row);
+  (snapshot.archived?.includes(row.repoId + ":" + row.ticket.key) ?? false) && isArchivable(snapshot, row);
 export const taskTitle = (row: TaskRow, titles: Snapshot["titles"]): string =>
   titles?.[row.repoId + ":" + row.ticket.key] ?? row.ticket.title;
 
 /** The visible archive and its export use the same filters, including all repositories. */
 export function archiveRows(
-  snapshot: Pick<Snapshot, "tasks" | "titles" | "archived" | "jobs">,
+  snapshot: Pick<Snapshot, "tasks" | "titles" | "archived" | "jobs" | "calledOff">,
   filter: ArchiveFilter,
 ): TaskRow[] {
   const search = filter.search.toLowerCase();

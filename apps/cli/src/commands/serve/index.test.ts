@@ -187,8 +187,26 @@ describe("perbo serve --once", () => {
     expect(streams.err()).toContain(`started ${second}`);
   });
 
-  it("starts one at a time by default, and counts a run it did not start", async () => {
+  /**
+   * D-049: runs of different tickets go side by side, so with nothing set
+   * every confirmed ticket starts in the same tick, whatever else is running;
+   * a number the repository sets is the ceiling, and a run the queue did not
+   * start counts against it.
+   */
+  it("starts every ready ticket in one tick by default, beside a run it did not start", async () => {
     const repo = repository();
+    const first = admitted(repo, { outcome: "Docs say what is true.", paths: ["docs/**"] });
+    const second = admitted(repo, { outcome: "The CLI prints a version.", paths: ["apps/cli/**"] });
+    const f = fakes({ liveRuns: () => [{ ticket_key: "AYO-99" }] });
+    const { streams } = await serveOnce(repo, f.deps);
+    expect(f.spawned).toEqual([first, second]);
+    expect(streams.err()).toContain("every ready ticket at once");
+    expect(streams.err()).toContain("2 started");
+    expect(streams.err()).toMatch(/; 3 running; /);
+  });
+
+  it("counts a run it did not start against a ceiling the repository sets", async () => {
+    const repo = repository({ limits: { organisation: "t", limits: { concurrent_local_attempts: 1 } } });
     const first = admitted(repo, { outcome: "Docs say what is true.", paths: ["docs/**"] });
     admitted(repo, { outcome: "The CLI prints a version.", paths: ["apps/cli/**"] });
     const alone = fakes();
@@ -531,7 +549,8 @@ describe("perbo serve --once", () => {
   });
 
   it("re-levels an open branch behind the base before starting new work, and only when it may push", async () => {
-    const repo = repository();
+    // One place, so the order is what decides who takes it.
+    const repo = repository({ limits: { organisation: "t", limits: { concurrent_local_attempts: 1 } } });
     const open = admitted(repo, { outcome: "Docs say what is true.", paths: ["docs/**"] });
     const next = admitted(repo, { outcome: "The CLI prints a version.", paths: ["apps/**"] });
     walk(repo, open, TO_PR_OPEN);
@@ -700,7 +719,7 @@ describe("perbo serve --once", () => {
       base_ref: "main",
       fetch: { ok: true },
       started: [first],
-      capacity: 1,
+      capacity: null,
       running: 1,
     });
     expect(tick.queue.map((entry) => [entry.key, entry.state])).toEqual([

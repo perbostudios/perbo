@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { retainedBranch } from "@perbo/contracts/browser";
 import { isLive } from "../../shared/jobs.js";
 import { TYPED_TEXT_MAX_CHARS, type Job } from "../../shared/protocol.js";
 import {
   Button,
+  Checkbox,
   Dialog,
   FactList,
   Field,
@@ -20,13 +21,31 @@ import {
 } from "../ui/index.js";
 import type { InkIconName } from "../ui/index.js";
 import type { CoverageStatus, VerificationStrength } from "@perbo/contracts";
-import { errorMessage, useAction, useOutputs } from "../workspace/index.js";
+import { bridge, errorMessage, useAction, useOutputs } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
+import { useCreate } from "../shell/create.js";
+import { useToast } from "../shell/Toast.js";
 import { TaskHeader } from "./LoopScreen.js";
 import { cliSentence, costLabel, reviewErrorSentence, taskRecords, watchTranscript } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 import { retainedOutput } from "./retained-output.js";
 import { displayKey } from "./ticket-workspace.js";
+
+/**
+ * While the browser is open on the pull request, the merge screen asks GitHub
+ * for its state this often, this many times, and lands on the merged page as
+ * soon as the merge is seen.
+ */
+export const SYNC_EVERY_MS = 5000;
+export const SYNC_POLLS = 36;
+
+/** The lines the latest attempt added and removed, summed over its changed files. */
+function diffTotals(latest: ReturnType<typeof taskRecords>["latest"]): { added: number; removed: number } {
+  return {
+    added: latest?.changes.reduce((sum, file) => sum + (file.additions ?? 0), 0) ?? 0,
+    removed: latest?.changes.reduce((sum, file) => sum + (file.deletions ?? 0), 0) ?? 0,
+  };
+}
 
 /** A criterion card's icon, by the outcome the review recorded for it. */
 const OUTCOME_ICON: Record<CoverageStatus, InkIconName> = {
@@ -641,8 +660,19 @@ export function MergeScreen(context: TaskContext) {
     } = taskRecords(context);
   const action = useAction(),
     [opened, setOpened] = useState(false),
+    // The checks the page still makes on its own while the browser is open
+    // on the pull request.
+    [polls, setPolls] = useState(0),
+    // Whether the person has come back to the app since it opened there.
+    [returned, setReturned] = useState(false),
     [pressed, setPressed] = useState<string | null>(null);
   const url = ticket.delivery.pull_request_url;
+  const merged = ticket.delivery.state === "merged";
+  const sync = (): void => action.mutate({ kind: "sync", repoId, key: ticket.key });
+  const open = (): void => {
+    setOpened(true);
+    setPolls(SYNC_POLLS);
+  };
   // No pull request yet: the branch the run retained, which the press
   // publishes first, or why there is none (D-NEW-publish-a-retained-branch-later).
   const retained = url ? null : retainedBranch(ticket);
@@ -654,7 +684,7 @@ export function MergeScreen(context: TaskContext) {
     if (url)
       void action
         .mutateAsync({ kind: "openPullRequest", repoId, key: ticket.key })
-        .then(() => setOpened(true))
+        .then(open)
         .catch(() => undefined);
     else
       void action
@@ -664,8 +694,9 @@ export function MergeScreen(context: TaskContext) {
   };
   // The host opens the pull request in the browser once it is published.
   useEffect(() => {
-    if (pressedState === "completed") setOpened(true);
+    if (pressedState === "completed") open();
   }, [pressedState]);
+  const diff = diffTotals(latest);
   const verified =
     review?.coverage.filter(
       (row) =>
@@ -673,8 +704,30 @@ export function MergeScreen(context: TaskContext) {
         row.verification_strength === "directly_verified",
     ).length ?? 0;
   useEffect(() => {
-    if (opened && ticket.delivery.state === "merged") show("complete");
-  }, [opened, ticket.delivery.state, show]);
+    if (opened && merged) show("complete");
+  }, [opened, merged, show]);
+  // Every few seconds while the browser is open on the pull request, a check
+  // of GitHub, one at a time, until the merge is seen or the checks run out.
+  useEffect(() => {
+    if (!opened || merged || busy || polls === 0) return;
+    const timer = setTimeout(() => {
+      setPolls((left) => left - 1);
+      sync();
+    }, SYNC_EVERY_MS);
+    return () => clearTimeout(timer);
+  }, [opened, merged, busy, polls]);
+  // Coming back to the app is a check of its own, and what it finds is said.
+  useEffect(() => {
+    if (!opened || merged) return;
+    const back = (): void => {
+      setReturned(true);
+      if (!busy) sync();
+    };
+    window.addEventListener("focus", back);
+    return () => window.removeEventListener("focus", back);
+  }, [opened, merged, busy]);
+  const checked = jobs.filter((job) => job.kind === "sync").at(-1);
+  const stillOpen = opened && !merged && (returned || polls === 0) && checked?.state === "completed";
   useShortcut("openPullRequest", mergeable ? merge : null);
   return (
     <section className="screen" data-screen="s16">
@@ -741,17 +794,7 @@ export function MergeScreen(context: TaskContext) {
           </div>
           <div className="merge-evidence-footer">
             <span className="mono spacer">
-              +
-              {latest?.changes.reduce(
-                (sum, file) => sum + (file.additions ?? 0),
-                0,
-              ) ?? 0}{" "}
-              −
-              {latest?.changes.reduce(
-                (sum, file) => sum + (file.deletions ?? 0),
-                0,
-              ) ?? 0}{" "}
-              · {latest?.changes.length ?? 0} files
+              +{diff.added} −{diff.removed} · {latest?.changes.length ?? 0} files
             </span>
             <span className="mono muted">
               {costLabel(detail)} · {elapsed} ·{" "}
@@ -770,7 +813,19 @@ export function MergeScreen(context: TaskContext) {
         {/* The highlighted action at the far right. */}
         <div className="merge-actions">
           <Button onClick={() => show("review")}>Back to review</Button>
-          {url && <Button onClick={() => show("called-off")}>Don’t merge</Button>}
+          {url && (
+            <Button
+              disabled={action.isPending}
+              onClick={() =>
+                void action
+                  .mutateAsync({ kind: "callOff", repoId, key: ticket.key })
+                  .then(() => show("called-off"))
+                  .catch(() => undefined)
+              }
+            >
+              Don’t merge
+            </Button>
+          )}
           <Button variant="primary" disabled={!mergeable} onClick={merge}>
             Merge on GitHub
           </Button>
@@ -785,22 +840,22 @@ export function MergeScreen(context: TaskContext) {
         {!url && publishing?.state === "failed" && (
           <Notice tone="danger">{cliSentence(publishing.error ?? publishing.log)}</Notice>
         )}
-        {opened && (
-          <div className="scope-message">
+        {opened && !merged && (
+          <div className="scope-message" role="status">
             <span className="spacer">
-              The pull request is open in your browser. Complete the merge
-              there, then refresh its status here.
+              {stillOpen
+                ? "The pull request is still open on GitHub. Merge it there, then refresh its status here."
+                : polls > 0
+                  ? "The pull request is open in your browser. Merge it there: Perbo checks GitHub every few seconds and moves on as soon as it sees the merge."
+                  : "The pull request is open in your browser. Complete the merge there, then refresh its status here."}
             </span>
-            <Button
-              className="small"
-              disabled={busy}
-              onClick={() =>
-                action.mutate({ kind: "sync", repoId, key: ticket.key })
-              }
-            >
+            <Button className="small" disabled={busy} onClick={sync}>
               Refresh merge status
             </Button>
           </div>
+        )}
+        {opened && checked?.state === "failed" && (
+          <Notice tone="danger">{cliSentence(checked.error ?? checked.log)}</Notice>
         )}
         {action.error && (
           <Notice tone="danger">{errorMessage(action.error)}</Notice>
@@ -809,25 +864,58 @@ export function MergeScreen(context: TaskContext) {
     </section>
   );
 }
+/**
+ * Where the merge decision lands: merged, or called off with the pull request
+ * left open. Leaving the page — Go now, Create another ticket's choice, the
+ * timed return, the Home key or the rail — files the ticket in the archive
+ * while Archive ticket is checked, as it is to begin with; unchecked, it stays
+ * on Home (D-097).
+ */
 export function CompletionScreen(context: TaskContext & { merged: boolean }) {
-  const { detail, navigate, merged } = context,
-    { repo, ticket } = taskRecords(context),
-    [seconds, setSeconds] = useState(3);
+  const { detail, navigate, repoId, merged } = context,
+    { repo, ticket, latest } = taskRecords(context),
+    create = useCreate(),
+    toast = useToast(),
+    [seconds, setSeconds] = useState(3),
+    [archiving, setArchiving] = useState(true),
+    // A person deciding on the page — the box, or Create — is not sent away
+    // mid-decision: the timed return stops.
+    [held, setHeld] = useState(false);
+  const filing = useRef(archiving);
+  filing.current = archiving;
   useEffect(() => {
+    if (held) return;
     const timer = setInterval(
       () => setSeconds((value) => Math.max(0, value - 1)),
       1000,
     );
     return () => clearInterval(timer);
-  }, []);
+  }, [held]);
   useEffect(() => {
-    if (seconds === 0) navigate({ page: "home" });
-  }, [seconds, navigate]);
+    if (!held && seconds === 0) navigate({ page: "home" });
+  }, [seconds, held, navigate]);
+  // The page is left when it unmounts, read a beat later so StrictMode's
+  // second mount, which cancels it, is not a leave.
+  const leaving = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const key = ticket.key;
+  useEffect(() => {
+    if (leaving.current !== null) clearTimeout(leaving.current);
+    return () => {
+      leaving.current = setTimeout(() => {
+        if (!filing.current) return;
+        void bridge
+          .request({ kind: "archive", repoId, keys: [key], archived: true })
+          .then(() => toast(`${displayKey(key)} filed in the archive`))
+          .catch((error: unknown) => toast(errorMessage(error)));
+      }, 0);
+    };
+  }, [repoId, key, toast]);
   const [shown, setShown] = useState(false);
   useEffect(() => {
     const frame = requestAnimationFrame(() => setShown(true));
     return () => cancelAnimationFrame(frame);
   }, []);
+  const diff = diffTotals(latest);
   return (
     <section className="screen" data-screen={merged ? "s17" : "s18"}>
       <PageHeader
@@ -840,8 +928,9 @@ export function CompletionScreen(context: TaskContext & { merged: boolean }) {
           </>
         }
       >
-        <span className="mono muted small">
-          {repo?.name} · {repo?.branch}
+        <span className="mono small completion-repo">
+          {repo?.name} <span className="added">+{diff.added}</span>{" "}
+          <span className="removed">−{diff.removed}</span>
         </span>
       </PageHeader>
       <div className="completion-body">
@@ -857,8 +946,12 @@ export function CompletionScreen(context: TaskContext & { merged: boolean }) {
           </h1>
           <p className="t-stagger-line t-stagger-line--2">
             {merged
-              ? "The ticket is closed, its observed status is updated, and the whole record — contract, findings and cost — stays with the ticket on Home until you archive it."
-              : "Nothing was merged and nothing was thrown away. The pull request stays open on its branch, and the ticket keeps the diff, the review findings and the cost."}
+              ? archiving
+                ? "The ticket is closed, its observed status is updated, and the whole record — contract, findings and cost — is filed in the archive as you leave."
+                : "The ticket is closed, its observed status is updated, and the whole record — contract, findings and cost — stays with the ticket on Home until you archive it."
+              : archiving
+                ? "Nothing was merged and nothing was thrown away. The pull request stays open on its branch, and the ticket is filed in the archive as you leave, with the diff, the review findings and the cost."
+                : "Nothing was merged and nothing was thrown away. The pull request stays open on its branch, and the ticket stays on Home with the diff, the review findings and the cost."}
           </p>
         </div>
         <dl className="completion-facts">
@@ -874,21 +967,39 @@ export function CompletionScreen(context: TaskContext & { merged: boolean }) {
           </div>
           <div>
             <dt>Filed in</dt>
-            <dd>{merged ? "Home · completed" : "Home · review"}</dd>
+            <dd>{archiving ? "Archive" : "Home"}</dd>
           </div>
         </dl>
         <div className="scope-message completion-return">
           <InkIcon name="dots" size={20} />
           <span className="small muted">
-            Returning you to the work list
-            {merged ? "." : " — the ticket will be waiting where you left it."}
+            {held ? "Staying here until you go." : "Returning you to the work list."}
           </span>
-          <span className="mono">{seconds}s</span>
+          {!held && <span className="mono">{seconds}s</span>}
         </div>
-        <Button onClick={() => navigate({ page: "home" })}>
-          <InkIcon name="home" size={18} />
-          Go now
-        </Button>
+        <Checkbox
+          checked={archiving}
+          onChange={(checked) => {
+            setHeld(true);
+            setArchiving(checked);
+          }}
+        >
+          Archive ticket
+        </Checkbox>
+        <div className="completion-actions">
+          <Button onClick={() => navigate({ page: "home" })}>
+            <InkIcon name="home" size={18} />
+            Go now
+          </Button>
+          <Button
+            onClick={() => {
+              setHeld(true);
+              create.open();
+            }}
+          >
+            Create another ticket
+          </Button>
+        </div>
       </div>
     </section>
   );

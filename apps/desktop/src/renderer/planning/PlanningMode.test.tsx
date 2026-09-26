@@ -4746,16 +4746,17 @@ describe("the Graph pane (SCP-316)", () => {
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
   });
 
-  it("keeps a planning deleted from the picker while a command runs, and says why in the host's words", async () => {
+  it("keeps a planning deleted from the picker while a command runs for its ticket, and says why in the host's words", async () => {
     // A planning that drafted its ticket takes the ticket with it, and a
-    // command running in the repository may be writing what that removes: the
+    // command running for that ticket may be writing what that removes: the
     // host refuses before anything goes, and the picker says so rather than
-    // letting the row come back with no reason.
+    // letting the row come back with no reason. Another ticket's command holds
+    // nothing of this one (D-129).
     const plan = await planned();
     expect((await editingRead(plan.id)).admitted).toBe(true);
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
-    const running = job("run", plan.repoId, "PRB-404", () => undefined, 60_000);
+    const running = job("run", plan.repoId, plan.key, () => undefined, 60_000);
     try {
       const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((each) => each.repoId === plan.repoId && each.ticket.key === plan.key)!;

@@ -49,7 +49,7 @@ function older(id, over = {}) {
 /** A profile directory holding `workspace.json` with these sessions. */
 function profile(sessions) {
   const dir = mkdtempSync(join(tmpdir(), "perbo-migrate-"));
-  const state = { version: 1, settings: { name: "Owen" }, repositories: [], jobs: [], asks: {}, lastOpened: {}, editingSessions: sessions };
+  const state = { version: 1, settings: { name: "Owen" }, repositories: [], jobs: [], asks: {}, lastOpened: {}, calledOff: [], editingSessions: sessions };
   writeFileSync(join(dir, "workspace.json"), `${JSON.stringify(state, null, 2)}\n`);
   return dir;
 }
@@ -96,7 +96,7 @@ test("brings every editing session up to the records, backs the file up first an
 
 test("deletes a session's specCut, which the desktop does not read", () => {
   const { lastView: _view, ...session } = older("s-1", { specCut: null, confirmed: null, read: null, impact: null, lastPane: null });
-  const { state, changes } = migrate({ version: 1, settings: {}, repositories: [], lastOpened: {}, editingSessions: [session] });
+  const { state, changes } = migrate({ version: 1, settings: {}, repositories: [], lastOpened: {}, calledOff: [], editingSessions: [session] });
   assert.equal("specCut" in state.editingSessions[0], false);
   assert.deepEqual(changes, ["session s-1: deleted specCut"]);
 });
@@ -130,7 +130,7 @@ test("says how it is used when it is not given exactly one path, and fails on a 
   assert.equal(missing.stderr.trim(), `${absent} is missing, so nothing was changed.`);
 });
 
-test("brings a profile from main up too: lastOpened and named added, and a note's offers deleted", () => {
+test("brings a profile from main up too: lastOpened, calledOff and named added, and a note's offers deleted", () => {
   const { named: _named, ...fromMain } = older("s-1", {
     conversation: [
       { n: 1, at: "2026-09-21T10:00:00.000Z", line: { kind: "turn", text: "Add a dark mode." } },
@@ -139,12 +139,14 @@ test("brings a profile from main up too: lastOpened and named added, and a note'
   });
   const { state, changes } = migrate({ version: 1, settings: {}, repositories: [], jobs: [], asks: {}, archivedSeeded: true, editingSessions: [fromMain] });
   assert.deepEqual(state.lastOpened, {});
+  assert.deepEqual(state.calledOff, []);
   const [session] = state.editingSessions;
   assert.equal(session.named, null);
   assert.deepEqual(session.conversation[1].line, { kind: "note", text: "Every problem is resolved." });
   assert.deepEqual(session.conversation[0], fromMain.conversation[0]);
   assert.deepEqual(changes, [
     "profile: added lastOpened: {}",
+    "profile: added calledOff: []",
     "session s-1: deleted lastView",
     "session s-1: added confirmed: null",
     "session s-1: added read: null",

@@ -14,6 +14,7 @@ import {
 import { cleanup, type Workspace } from "@perbo/workspace";
 import { PROMPT_VERSION } from "@perbo/review";
 import { Ledger } from "./internal/ledger.js";
+import { RunTally } from "../tally.js";
 import { acquireRunLock, type HeldRunLock } from "../lock.js";
 import { pathsWithConflictMarkers } from "./internal/merge-up.js";
 import { sweepWorktree } from "./internal/orphans.js";
@@ -253,7 +254,14 @@ async function runLockedTicket(
   const { config } = args;
   const clock = args.now ?? (() => new Date());
   const wait = args.sleep ?? ((ms: number) => setTimeout(ms));
-  const progress = args.onProgress ?? (() => undefined);
+  const onProgress = args.onProgress ?? (() => undefined);
+  /**
+   * Every message on one physical line. A message can carry text the run did
+   * not write — a refused command, a check's output — and a line break in it
+   * would print a line of its own that reads as one of the runner's stages or
+   * its tally (ADR-0023).
+   */
+  const progress = (message: string): void => onProgress(message.replace(/\r\n|[\n\r\u2028\u2029]/g, " "));
   const ports = resolvePorts(config, args.hooks);
   const agentRunner = ports.agent;
   const reviewRunner = ports.review;
@@ -285,6 +293,13 @@ async function runLockedTicket(
     previousRunAccount,
   } = started.record;
   const ledger = new Ledger({ path: attemptsPath, prior: priorAttempts, ticketId: contract.ticket_id });
+  /** What the run has done so far, printed as its `tally:` line whenever a figure moves (D-104). */
+  const tally = new RunTally({
+    bundles,
+    ticketId: contract.ticket_id,
+    before: priorAttempts?.attempts ?? [],
+    progress,
+  });
 
   const {
     workspace,
@@ -489,6 +504,7 @@ async function runLockedTicket(
         secrets,
         agent: agentRunner,
         progress,
+        tally: (running) => tally.attempt(running),
       });
       if ("next" in executed) {
         state = applyStep(state, executed);
@@ -559,6 +575,7 @@ async function runLockedTicket(
         progress,
       });
       state = recorded.state;
+      tally.recount(ledger.attempts);
       const { attempt, termination, declines, widened, scopeGiven, reset, park, parkMs } = recorded;
 
       /** This round's record where no review and no verification judged it. */
@@ -696,6 +713,7 @@ async function runLockedTicket(
           clock,
           progress,
         });
+        tally.recount(ledger.attempts);
         state = applyStep(state, verificationStep);
         if (verificationStep.next === "stop") {
           outcome = verificationStep.end.outcome;
@@ -724,6 +742,7 @@ async function runLockedTicket(
         clock,
         progress,
       });
+      tally.recount(ledger.attempts);
       state = reviewed.state;
       if (reviewed.escalated) outcome = "escalated";
       const reviewStep = reviewed.step;

@@ -1511,39 +1511,66 @@ describe("interactive desktop flows", () => {
     await running.stop();
   });
 
-  it("refuses a second run while one is going, and says which one is in the way (SCP-335)", async () => {
+  /**
+   * D-049, D-101: a ticket's run starts as soon as its contract is confirmed,
+   * whatever another ticket's run is doing; the running ticket's own second
+   * run is refused, saying which one is in the way.
+   */
+  it("starts another ticket's run at its approval while one is going, and refuses the running ticket's own second run (SCP-335)", async () => {
     const running = await runInProgress("PRB-404");
-    const workspace = await sampleBridge.request({ kind: "snapshot" });
-    const row = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
-    const detail = structuredClone(await sampleBridge.request({
-      kind: "detail", repoId: row.repoId, key: row.ticket.key,
-    }));
-    const state = row.ticket.state;
+    const repoId = running.row.repoId;
+    // A ticket of this test's own to approve, so the sample's others stay as they are.
+    const admit = await sampleBridge.request({
+      kind: "admit",
+      repoId,
+      draft: {
+        outcome: "Approve one contract while another ticket's run is going",
+        criteria: [{ text: "The run starts", assertion: "The run is listed", kind: "test" }],
+        paths: ["src/**"],
+        prohibited: [],
+      },
+    });
+    await gone(admit.id);
+    const key = (await sampleBridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === admit.id)!.resultKey!;
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    client.setQueryData(["detail", row.repoId, row.ticket.key], detail);
-    const contract = (snapshot: Snapshot) => render(
-      <TaskPage workspace={snapshot} navigate={() => undefined}
-        repoId={row.repoId} taskKey={row.ticket.key} view="contract" edit={false} />,
-      { wrapper },
-    );
-    // The run the person can see disables the button that would start another.
-    const aware = contract(workspace);
-    expect((screen.getByRole("button", { name: /start the loop/i }) as HTMLButtonElement).disabled).toBe(true);
-    aware.unmount();
-    // A view that has not caught up still asks, and reads the refusal.
-    contract({ ...workspace, jobs: [] });
-    const start = screen.getByRole("button", { name: /start the loop/i }) as HTMLButtonElement;
-    expect(start.disabled).toBe(false);
-    fireEvent.click(start);
+    const contract = async (snapshot: Snapshot, at: string) => {
+      client.setQueryData(
+        ["detail", repoId, at],
+        structuredClone(await sampleBridge.request({ kind: "detail", repoId, key: at })),
+      );
+      return render(
+        <TaskPage workspace={snapshot} navigate={() => undefined}
+          repoId={repoId} taskKey={at} view="contract" edit={false} />,
+        { wrapper },
+      );
+    };
+    // Another ticket's run holds nothing here: approving starts this one's at once.
+    const approving = await contract(await sampleBridge.request({ kind: "snapshot" }), key);
+    const approve = screen.getByRole("button", { name: /start the loop/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    fireEvent.click(approve);
+    await waitFor(async () => {
+      const live = (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((entry) => isLive(entry) && entry.kind === "run");
+      expect(live.map((entry) => entry.key).sort()).toEqual(["PRB-404", key].sort());
+    });
+    approving.unmount();
+    const beside = (await sampleBridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.key === key && entry.kind === "run")!;
+    await sampleBridge.request({ kind: "cancel", jobId: beside.id });
+    await gone(beside.id);
+
+    // The running ticket's own contract, in a view that has not caught up,
+    // still asks, and reads the refusal naming the run in the way.
+    const state = (await sampleBridge.request({ kind: "detail", repoId, key: "PRB-404" })).ticket.state;
+    await contract({ ...(await sampleBridge.request({ kind: "snapshot" })), jobs: [] }, "PRB-404");
+    const again = screen.getByRole("button", { name: /start the loop/i }) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    fireEvent.click(again);
     expect(await screen.findByText(
       "Run engineering loop is already running. Wait for it to finish or stop it before starting this one.",
     )).toBeTruthy();
-    // The refused run left the ticket where it was.
-    const after = (await sampleBridge.request({ kind: "snapshot" })).tasks
-      .find((task) => task.ticket.key === "PRB-421")!;
-    expect(after.ticket.state).toBe(state);
+    expect((await sampleBridge.request({ kind: "detail", repoId, key: "PRB-404" })).ticket.state).toBe(state);
     await running.stop();
   });
 });

@@ -230,19 +230,19 @@ describe("workspace refresh interface", () => {
     expect(f.requests).toEqual([]);
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.lastOpened).toEqual({ [entry]: "2026-09-24T10:00:00.000Z" });
     // A preferences change after it carries no openings, so it leaves this one standing.
-    f.emit({ kind: "preferences", sequence: 3, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], asks: {} });
+    f.emit({ kind: "preferences", sequence: 3, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], calledOff: [], asks: {} });
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.lastOpened).toEqual({ [entry]: "2026-09-24T10:00:00.000Z" });
   });
 
   it("refreshes per-task model choices together with a compiled contract", async () => {
     const f = await fixture();
     const taskModels = { [f.row.repoId + ":" + f.row.ticket.key]: TaskModelsSchema.strip().parse({ ...f.snapshot.settings, executorModel: "explicit-choice" }) };
-    f.emit({ kind: "preferences", sequence: 1, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], asks: {} });
-    f.emit({ kind: "preferences", sequence: 2, settings: f.snapshot.settings, titles: {}, taskModels, archived: [], asks: {} });
+    f.emit({ kind: "preferences", sequence: 1, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], calledOff: [], asks: {} });
+    f.emit({ kind: "preferences", sequence: 2, settings: f.snapshot.settings, titles: {}, taskModels, archived: [], calledOff: [], asks: {} });
     f.emit({ kind: "records", sequence: 3, repoId: f.row.repoId, key: f.row.ticket.key });
     await vi.waitFor(() => expect(f.client.getQueryData<Snapshot>(["workspace"])!.refreshingRepos).toEqual([]));
     await vi.waitFor(() => expect(f.client.getQueryData<Snapshot>(["workspace"])!.taskModels).toEqual(taskModels));
-    f.emit({ kind: "preferences", sequence: 1, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], asks: {} });
+    f.emit({ kind: "preferences", sequence: 1, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], calledOff: [], asks: {} });
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.taskModels).toEqual(taskModels);
   });
 });

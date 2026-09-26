@@ -14,16 +14,30 @@ import {
 describe("assertWithinLimits", () => {
   it("gates every countable resource through one call", () => {
     expect(() =>
-      assertWithinLimits(DEFAULT_LIMITS_TABLE, "concurrent_local_attempts", 1),
+      assertWithinLimits(DEFAULT_LIMITS_TABLE, "local_workspace_bytes", DEFAULT_LIMITS.local_workspace_bytes),
     ).not.toThrow();
-    expect(() => assertWithinLimits(DEFAULT_LIMITS_TABLE, "concurrent_local_attempts", 2)).toThrow(
-      LimitExceededError,
-    );
+    expect(() =>
+      assertWithinLimits(DEFAULT_LIMITS_TABLE, "local_workspace_bytes", DEFAULT_LIMITS.local_workspace_bytes + 1),
+    ).toThrow(LimitExceededError);
   });
 
-  it("defaults concurrent_local_attempts to 1 and states a workspace byte ceiling (D-049)", () => {
-    expect(DEFAULT_LIMITS.concurrent_local_attempts).toBe(1);
+  /**
+   * D-049: runs of different tickets go on at the same time, as many as are
+   * started, and a person who wants fewer on their machine names a number.
+   */
+  it("leaves concurrent_local_attempts unbounded unless set, and states a workspace byte ceiling (D-049)", () => {
+    const unset = LimitsTableSchema.parse({ organisation: "org" });
+    expect(DEFAULT_LIMITS.concurrent_local_attempts).toBeUndefined();
+    expect(limitFor(unset, "concurrent_local_attempts")).toBeNull();
+    expect(() => assertWithinLimits(unset, "concurrent_local_attempts", 64)).not.toThrow();
     expect(DEFAULT_LIMITS.local_workspace_bytes).toBeGreaterThan(0);
+  });
+
+  it("holds concurrent_local_attempts to a number a table sets", () => {
+    const set = LimitsTableSchema.parse({ organisation: "org", limits: { concurrent_local_attempts: 2 } });
+    expect(limitFor(set, "concurrent_local_attempts")).toBe(2);
+    expect(() => assertWithinLimits(set, "concurrent_local_attempts", 2)).not.toThrow();
+    expect(() => assertWithinLimits(set, "concurrent_local_attempts", 3)).toThrow(LimitExceededError);
   });
 
   it("carries the resource, the limit and the requested value on the refusal", () => {

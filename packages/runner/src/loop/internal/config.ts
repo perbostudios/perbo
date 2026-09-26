@@ -19,6 +19,7 @@ import {
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { PinnedCheckSchema } from "../../checks/index.js";
 import { DEFAULT_DELIVERED_CHECKS_BOUND_MS } from "../../delivery.js";
+import { NetworkAllowListSchema } from "../../profile.js";
 
 /**
  * What a run is configured with, and what the write guard refuses.
@@ -117,6 +118,13 @@ export const TicketRunConfigSchema = z.strictObject({
    * the intent the contract was drafted from, and an attempt that edited one
    * would be rewriting the statement it is judged against.
    */
+  /**
+   * Hosts this repository adds to the executor's egress allow-list, beside its
+   * provider's own, GitHub and the package registries. Exact host names only:
+   * a run whose list holds anything else is refused before it starts, naming
+   * the entry.
+   */
+  network_allow_list: NetworkAllowListSchema.default([]),
   specs: z
     .string()
     .min(1)

@@ -12,7 +12,16 @@ The half of execution that is not the agent.
   open the same way, and one the runner or the review's own checks state, such as a flaky check,
   as a `finding:` line of the runner's own, never marked as the reviewer's words; and the seal
   says when it starts. On Codex a subagent's items reach the attempt's transcript marked
-  `subagent`, so nothing reads them back as the executor's.
+  `subagent`, so nothing reads them back as the executor's. Each adapter also hands the loop what the attempt has
+  done so far whenever any of it moves (`onTally`): the commands its record holds, the usage the
+  provider reported, and the paths a file tool was let write.
+- `tally.ts` — the run's `tally:` progress line (`tallyLine` in `@perbo/contracts`, D-104), printed
+  whenever a figure moves: the running attempt's figures from its adapter, added to what the run's
+  recorded attempts hold — their commands, the usage of the bundles `attemptBundles` joins to them
+  and the paths their retained change sets hold, less every path an attempt before the run changed
+  — so once the run ends, the ticket's record less what it held before comes to the last line. Every
+  message the loop prints is one physical line, so no text a message carries prints a line of its
+  own.
 - `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
   the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
   the agent role files it writes.

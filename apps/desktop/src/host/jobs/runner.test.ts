@@ -108,15 +108,33 @@ function pending(): { operation: JobOperation; finish: () => void; started: Prom
 }
 
 describe("the lanes", () => {
-  it("refuses a second job in the exclusive lane, by the label of the one running", async () => {
+  it("refuses a second exclusive job over the same ticket, by the label of the one running", async () => {
     const w = runner();
     const first = pending();
     w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, first.operation);
     await first.started;
-    expect(() =>
-      w.jobs.start({ repo, key: "PRB-2", kind: "run", label: "Run engineering loop" }, first.operation),
-    ).toThrow(/Run engineering loop/);
+    for (const kind of ["run", "decide", "publish"])
+      expect(() =>
+        w.jobs.start({ repo, key: "PRB-1", kind, label: "Another" }, first.operation),
+      ).toThrow(/Run engineering loop is already running/);
     first.finish();
+  });
+
+  /** D-049: runs of different tickets go on at the same time. */
+  it("runs another ticket's run, decision or publication beside a run", async () => {
+    const w = runner();
+    const first = pending();
+    w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, first.operation);
+    await first.started;
+    const second = pending();
+    const beside = w.jobs.start({ repo, key: "PRB-2", kind: "run", label: "Run engineering loop" }, second.operation);
+    await second.started;
+    const decided = w.jobs.start({ repo, key: "PRB-3", kind: "decide", label: "Run engineering loop" }, () => Promise.resolve());
+    const elsewhere = w.jobs.start({ repo: other, key: "PRB-1", kind: "publish", label: "Open the pull request" }, () => Promise.resolve());
+    expect([beside.state, decided.state, elsewhere.state]).toEqual(["running", "running", "running"]);
+    expect(w.jobs.live().length).toBeGreaterThanOrEqual(2);
+    first.finish();
+    second.finish();
   });
 
   it("runs planning beside a run", async () => {

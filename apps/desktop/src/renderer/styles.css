@@ -2525,9 +2525,18 @@ textarea {
   font-size: calc(11.5px * var(--text-scale));
   color: var(--muted);
 }
-.completion-body > .button {
+.completion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.completion-actions > .button {
   padding: 11px 18px;
   font-size: calc(12.5px * var(--text-scale));
+}
+.page-header > .completion-repo {
+  flex: none;
 }
 .dialog {
   border: 1.5px solid rgba(var(--ink-rgb), 0.4);
@@ -3315,10 +3324,18 @@ textarea {
   font-size: calc(12px * var(--text-scale));
 }
 .archive-row {
-  grid-template-columns: 56px minmax(0, 1fr) 110px 118px 76px 70px 104px 60px;
+  grid-template-columns: 56px minmax(0, 1fr) 110px 118px 76px 70px 104px 116px;
 }
 .archive-row > span:last-child {
   text-align: right;
+}
+.archive-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.archive-delete:hover:not(:disabled) {
+  color: var(--danger);
 }
 .settings-identity .button {
   margin-left: 10px;
@@ -3521,7 +3538,7 @@ kbd {
 }
 @media (max-width: 1050px) {
   .archive-row {
-    grid-template-columns: 56px minmax(0, 1fr) 90px 100px 66px 60px 96px 52px;
+    grid-template-columns: 56px minmax(0, 1fr) 90px 100px 66px 60px 96px 108px;
     gap: 8px;
   }
   .home-controls {

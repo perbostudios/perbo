@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Detail, Snapshot, TaskRow } from "../../shared/protocol.js";
 import type { TaskView } from "../shell/route.js";
 import { runnerProgress } from "../../shared/runner-progress.js";
-import { exclusiveJob, heldRepository, isRun, ticketRun } from "../../shared/jobs.js";
+import { heldTicket, inTheWay, isRun, ticketRun } from "../../shared/jobs.js";
 import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isMergeDecided, isPreLoop } from "../../shared/archive.js";
 
 export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
@@ -62,19 +62,19 @@ export function homeTone(
  * Create picker, which is where every pre-loop thing lives — a name, a spec,
  * and a plan drafted and not yet approved (D-129).
  */
-export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs">): TaskRow[] =>
+export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs" | "calledOff">): TaskRow[] =>
   workspace.tasks.filter((row) => !isFiled(workspace, row) && !isPreLoop(row));
 
 /**
  * The group a Home ticket stands in: `decided` once its merge is decided,
- * merged or closed without merge, under every colour; otherwise its colour,
- * or none while the loop carries it.
+ * merged, closed without merge or called off, under every colour; otherwise
+ * its colour, or none while the loop carries it.
  */
 export type HomeGroup = HomeTone | "decided" | null;
 export const homeGroup = (
-  workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "calledOff">,
   row: Pick<TaskRow, "repoId" | "ticket">,
-): HomeGroup => (isMergeDecided(row) ? "decided" : homeTone(workspace, row));
+): HomeGroup => (isMergeDecided(workspace, row) ? "decided" : homeTone(workspace, row));
 
 /**
  * Home's order, top to bottom: a pull request waiting on the merge decision,
@@ -90,7 +90,7 @@ const HOME_ORDER: readonly HomeGroup[] = ["green", "yellow", "red", null, "decid
  * admitted first; `newest` or `oldest`, by when the ticket last moved.
  */
 export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
-  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened">,
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened" | "calledOff">,
   rows: readonly Row[],
   by: "opened" | "newest" | "oldest",
 ): Row[] {
@@ -114,7 +114,7 @@ export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
  * ticket whose merge is decided counts as completed and at no tone.
  */
 export function homeTally(
-  workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "calledOff">,
   rows: readonly Pick<TaskRow, "repoId" | "ticket">[],
 ): Record<HomeTone | "completed", number> {
   const tally = { yellow: 0, red: 0, green: 0, completed: 0 };
@@ -149,11 +149,11 @@ function attentionSince(
  * and a ticket that comes to need the person again counts again (S4).
  */
 export function unseenAttention(
-  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened">,
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened" | "calledOff">,
   row: Pick<TaskRow, "repoId" | "ticket">,
 ): boolean {
   const tone = homeTone(workspace, row);
-  if (tone === null || isMergeDecided(row)) return false;
+  if (tone === null || isMergeDecided(workspace, row)) return false;
   const opened = workspace.lastOpened?.[row.repoId + ":" + row.ticket.key];
   return opened === undefined || opened < attentionSince(workspace, row, tone);
 }
@@ -168,10 +168,12 @@ export function projectTicket(
 ) {
   const { ticket, repoId } = row;
   const { jobs, active, stoppedShort } = ticketRun(workspace, row);
-  // A run, a decision or a publication takes its turn; planning elsewhere does not hold it up (D-101).
-  const busy = Boolean(exclusiveJob(workspace.jobs));
-  // Deleting this contract waits for every command running in its repository, as the host does.
-  const held = heldRepository(workspace.jobs, repoId);
+  // This ticket's own run, decision or publication takes its turn; another
+  // ticket's run and planning anywhere do not hold it up (D-049, D-101).
+  const busy = Boolean(inTheWay(workspace.jobs, { repoId, key: ticket.key, kind: "run" }));
+  // Deleting this contract waits for a command running for this ticket, as
+  // the host does; another ticket's run does not hold it (D-129).
+  const held = heldTicket(workspace.jobs, repoId, ticket.key);
   const recoverable = stoppedShort && !refreshing;
   // A stop the host has taken for this ticket's run and not yet finished: the
   // person has said the run is over, so it reads as stopped while the process

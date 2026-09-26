@@ -4788,7 +4788,13 @@ describe("planning beside a run (SCP-335)", () => {
     });
   }
 
-  it("admits and edits beside a live run, and refuses another exclusive command by name", async () => {
+  /**
+   * D-049, D-101: planning runs beside a run, and so does another ticket's
+   * run, started at its approval; the running ticket's own run, decision,
+   * publication and delivery refresh, and a readiness check of its repository,
+   * wait for it and are refused naming it.
+   */
+  it("admits, edits and approves another ticket's run beside a live run, and refuses the running ticket's own commands by name", async () => {
     const holder = held();
     const { service, repo } = fixture(holder.runner);
     const registered = await service.registerRepository(repo);
@@ -4820,14 +4826,15 @@ describe("planning beside a run (SCP-335)", () => {
       ).id,
     );
     expect(edited.state).toBe("completed");
+    const first = await service.detail(registered.id, "PRB-1");
 
     for (const request of [
       {
         kind: "run" as const,
         repoId: registered.id,
-        key: "PRB-2",
-        digest: second.digest,
-        approve: true,
+        key: "PRB-1",
+        digest: first.digest,
+        approve: false,
         publish: false,
         resumeFrom: null,
       },
@@ -4835,10 +4842,11 @@ describe("planning beside a run (SCP-335)", () => {
         kind: "decide" as const,
         repoId: registered.id,
         key: "PRB-1",
-        digest: second.digest,
+        digest: first.digest,
         answer: "Take the smaller change.",
         decisions: [{ findingKey: "a".repeat(64), choice: "approach" as const, answer: "Take the smaller change." }],
       },
+      { kind: "publish" as const, repoId: registered.id, key: "PRB-1" },
       { kind: "sync" as const, repoId: registered.id, key: "PRB-1" },
       { kind: "doctor" as const, repoId: registered.id, writeConfig: false },
       {
@@ -4852,14 +4860,27 @@ describe("planning beside a run (SCP-335)", () => {
         "Run engineering loop is already running. Wait for it to finish or stop it before starting this one.",
       );
 
-    expect(
-      (await service.snapshot()).jobs.find((job) => job.id === run.id)?.state,
-    ).toBe("running");
+    // The second ticket's approval starts its run at once, beside the first.
+    const beside = await service.request({
+      kind: "run",
+      repoId: registered.id,
+      key: "PRB-2",
+      digest: (await service.detail(registered.id, "PRB-2")).digest,
+      approve: true,
+      publish: false,
+      resumeFrom: null,
+    });
+    expect(beside).toMatchObject({ kind: "run", key: "PRB-2", state: "running" });
+    const live = (await service.snapshot()).jobs.filter((job) => job.state === "running");
+    expect(live.map((job) => job.key).sort()).toEqual(["PRB-1", "PRB-2"]);
     holder.release();
     const ran = await finished(service, run.id);
     expect(ran.state).toBe("completed");
     expect(ran.error).toBeNull();
     expect(ran.key).toBe("PRB-1");
+    const alongside = await finished(service, beside.id);
+    expect(alongside.state).toBe("completed");
+    expect(alongside.error).toBeNull();
   });
 
   it("stops the job it is named and leaves the other lane running", async () => {
@@ -6836,11 +6857,35 @@ describe("what the host lets a person archive", () => {
     await archive(false);
     setTicketState(repo, "PRB-1", "pr_open");
     await expect(archive(true)).rejects.toThrow(
-      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed.",
+      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed, or its merge is called off.",
     );
     setTicketState(repo, "PRB-1", "failed");
     await archive(true);
     expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
+  });
+
+  it("records Don't merge only on an open pull request, and files it then", async () => {
+    const { service, repo, options } = fixture();
+    const registered = await service.registerRepository(repo);
+    const entry = registered.id + ":PRB-1";
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const callOff = () => service.request({ kind: "callOff", repoId: registered.id, key: "PRB-1" });
+    const noPullRequest = "PRB-1 has no open pull request, so there is no merge to call off.";
+    await expect(callOff()).rejects.toThrow(noPullRequest);
+    // At pr_open with no pull request recorded, there is still nothing to leave open.
+    setTicketState(repo, "PRB-1", "pr_open");
+    await expect(callOff()).rejects.toThrow(noPullRequest);
+    expect((await service.snapshot()).calledOff).toEqual([]);
+    const path = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(path, "utf8")) as { delivery: Record<string, unknown> };
+    ticket.delivery = { ...ticket.delivery, pull_request_url: "https://github.com/example/repo/pull/1", pull_request_number: 1, state: "open" };
+    writeFileSync(path, JSON.stringify(ticket, null, 2));
+    await callOff();
+    expect((await service.snapshot()).calledOff).toEqual([entry]);
+    // Kept with the profile, as every preference is.
+    expect(JSON.parse(readFileSync(join(options.dataDirectory, "workspace.json"), "utf8")).calledOff).toEqual([entry]);
+    await service.request({ kind: "archive", repoId: registered.id, keys: ["PRB-1"], archived: true });
+    expect((await service.snapshot()).archived).toEqual([entry]);
   });
 
   it("returns a filed ticket to Home for good once its loop starts again", async () => {

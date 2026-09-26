@@ -8,7 +8,8 @@
  */
 export { APPROACH_SCHEMA_VERSION, approachProblems, ApproachRecordSchema } from "./approach.js";
 export type { ApproachRecord, GraphEdge } from "./approach.js";
-export { formatUsd } from "./cost.js";
+export { costOf, formatUsd, rollCosts } from "./cost.js";
+export type { Cost, CostRoll } from "./cost.js";
 export {
   answersReview,
   DECISION_CHOICES,
@@ -64,6 +65,8 @@ export { readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
 export type { Speaker } from "./spoken.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";
+export { readTally, tallyLine } from "./tally.js";
+export type { Tally } from "./tally.js";
 export type { SymbolIndex, UnsupportedRepository } from "./symbol-index.js";
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
 export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";

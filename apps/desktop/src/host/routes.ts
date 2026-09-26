@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { planNodes } from "@perbo/contracts";
 import { keepsPersonsTitle, openDrafts, problemsHoldApproval, promiseOf } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
-import { heldRepository, isRun } from "../shared/jobs.js";
-import { isArchivable, notArchivable } from "../shared/archive.js";
+import { heldRepository, heldTicket, isRun } from "../shared/jobs.js";
+import { isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { specSlugOf } from "../shared/spec-slug.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
@@ -24,7 +24,7 @@ import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/op
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
 import { objectsPath } from "./repository/layout.js";
 import { findingsOnRecord } from "./records.js";
-import { recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
+import { recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
 import {
@@ -250,10 +250,11 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // made, holds that key from birth. Discarding on the key alone would
       // throw away work this planning did not do and cannot give back.
       const session = m.editing.read(request.id);
-      // A command running in the repository holds the delete of the ticket
-      // this planning drafted (D-129), so the discard is refused before
-      // anything goes, and the person finds the work as it was and why.
-      if (session.key !== null && session.admitted && heldRepository(m.jobs.live(), session.repoId))
+      // A command running for the ticket this planning drafted holds its
+      // delete (D-129), so the discard is refused before anything goes, and
+      // the person finds the work as it was and why. Another ticket's run in
+      // the same repository holds nothing of this one.
+      if (session.key !== null && session.admitted && heldTicket(m.jobs.live(), session.repoId, session.key))
         throw new Error(DELETE_WAITS_FOR_COMMANDS);
       const discarded = m.editing.discard(request.id, request.revision);
       // Waited out before anything is deleted: a session whose stdin has closed
@@ -446,10 +447,22 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         (ticket) =>
           request.archived &&
           keys.includes(ticket.key) &&
-          !isArchivable({ jobs: m.profile.state.jobs as Job[] }, { repoId: repo.id, ticket }),
+          !isArchivable(
+            { jobs: m.profile.state.jobs as Job[], calledOff: m.profile.state.calledOff },
+            { repoId: repo.id, ticket },
+          ),
       );
       if (carried !== undefined) throw new Error(notArchivable(carried.key, carried.state));
       setArchived(m.profile.state, repo.id, keys, request.archived);
+      m.changes.preferences(m.profile.state);
+      return null;
+    }),
+    callOff: scoped<"callOff">(async (repo, request) => {
+      const ticket = (await m.tickets.list(repo)).tickets.find((each) => each.key === request.key);
+      if (ticket === undefined) throw new Error("The ticket is not in the repository's ticket store.");
+      if (ticket.state !== "pr_open" || ticket.delivery.pull_request_url === null)
+        throw new Error(notCallable(request.key));
+      recordCalledOff(m.profile.state, repo.id, request.key);
       m.changes.preferences(m.profile.state);
       return null;
     }),

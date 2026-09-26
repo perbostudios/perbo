@@ -51,6 +51,7 @@ const stored = {
   jobs: [],
   asks: {},
   lastOpened: {},
+  calledOff: [],
 };
 
 describe("the profile's record", () => {
@@ -151,6 +152,7 @@ describe("opening the profile", () => {
       version: 1,
       asks: {},
       lastOpened: {},
+      calledOff: [],
       settings,
       repositories: [],
       jobs: [],
@@ -169,6 +171,7 @@ describe("opening the profile", () => {
       version: 1,
       asks: {},
       lastOpened: {},
+      calledOff: [],
       settings: { ...SettingsSchema.parse({}), notifications: false, notifyOn },
       repositories: [],
       jobs: [],
@@ -181,6 +184,7 @@ describe("opening the profile", () => {
       version: 1,
       asks: {},
       lastOpened: {},
+      calledOff: [],
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [job(), job({ id: "80000000-0000-4000-8000-000000000003", state: "stopping" })],
@@ -198,6 +202,7 @@ describe("opening the profile", () => {
       version: 1,
       asks: {},
       lastOpened: {},
+      calledOff: [],
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [job({ state: "completed", endedAt: "2026-09-19T09:01:00.000Z", error: null })],
@@ -227,6 +232,7 @@ describe("opening the profile", () => {
       version: 1,
       asks: {},
       lastOpened: {},
+      calledOff: [],
       settings: SettingsSchema.parse({}),
       repositories: [{ id: "80000000-0000-4000-8000-000000000002", name: "a", path: "/a" }],
       jobs: [],

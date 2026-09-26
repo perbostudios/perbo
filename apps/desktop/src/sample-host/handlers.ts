@@ -12,8 +12,8 @@ import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
 import { openDrafts, problemsHoldApproval, titleChanged, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
-import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
-import { heldRepository, isLive, isRun } from "../shared/jobs.js";
+import { archiveCsv, archiveRows, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
+import { heldTicket, isLive, isRun } from "../shared/jobs.js";
 import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
@@ -198,10 +198,10 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // way back to the plan, whatever stage it had reached (D-129). One this
     // planning was merely opened over was never its to throw away.
     const held = editing.read(request.id);
-    // A command running in the repository holds the delete of the ticket this
-    // planning drafted, so the discard is refused before anything goes, as the
-    // host refuses it.
-    if (held.key !== null && held.admitted && heldRepository(snapshot.jobs, held.repoId))
+    // A command running for the ticket this planning drafted holds its delete,
+    // so the discard is refused before anything goes, as the host refuses it;
+    // another ticket's run does not.
+    if (held.key !== null && held.admitted && heldTicket(snapshot.jobs, held.repoId, held.key))
       throw new Error(DELETE_WAITS_FOR_COMMANDS);
     const session = editing.discard(request.id, request.revision);
     endPlanningChat(request.id);
@@ -745,6 +745,14 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     snapshot.archived = request.archived
       ? [...new Set([...(snapshot.archived ?? []), ...entries])]
       : (snapshot.archived ?? []).filter((entry) => !entries.includes(entry));
+    emitPreferences();
+    return null;
+  },
+  callOff: (request) => {
+    const { ticket } = ticketRow(request.key);
+    if (ticket.state !== "pr_open" || ticket.delivery.pull_request_url === null)
+      throw new Error(notCallable(request.key));
+    snapshot.calledOff = [...new Set([...(snapshot.calledOff ?? []), request.repoId + ":" + request.key])];
     emitPreferences();
     return null;
   },

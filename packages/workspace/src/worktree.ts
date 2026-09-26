@@ -164,10 +164,18 @@ export function readLease(path: string): Lease | null {
   }
 }
 
-/** A lease is stale when it has expired, or when the process that held it is gone. */
+/**
+ * A lease is stale when the process that holds it is gone.
+ *
+ * On this host the process is asked, and its answer is the whole of it: runs
+ * of different tickets go on side by side (D-049), and a run that has worked
+ * or waited on a provider past its lease's time is still using its worktree,
+ * which the next ticket's provisioning must not take from under it. A lease
+ * another host wrote names a process this one cannot ask, so it is stale once
+ * its time is up.
+ */
 export function leaseIsStale(lease: Lease, now: Date): boolean {
-  if (new Date(lease.expires_at).getTime() <= now.getTime()) return true;
-  if (lease.host !== hostname()) return false;
+  if (lease.host !== hostname()) return new Date(lease.expires_at).getTime() <= now.getTime();
   try {
     process.kill(lease.pid, 0);
     return false;

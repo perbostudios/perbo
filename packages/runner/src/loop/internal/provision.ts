@@ -286,6 +286,7 @@ export async function provisionRun(args: {
   const profile = buildPermissionProfile({
     worktree: workspace.path,
     provider: config.agent_provider,
+    network: config.network_allow_list,
     lifecycle_scripts: started.manifest.install.lifecycle_scripts.policy,
   });
 

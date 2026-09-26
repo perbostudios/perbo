@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { hostname } from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -2726,6 +2726,116 @@ describe("a second run of a ticket that is already running", () => {
     // A run that ended leaves no lock behind.
     expect(existsSync(held.path)).toBe(false);
   }, 60_000);
+});
+
+/**
+ * D-049: runs of different tickets go on at the same time. One ticket's run
+ * holds that ticket's lock and its worktree's lease while it works, and a run
+ * of another ticket in the same repository starts beside it, with no ceiling
+ * on how many unless the limits name one.
+ */
+describe("a run of another ticket while one is running", () => {
+  const approving = (review_id: string) =>
+    (async () => ({
+      artifact: makeReview({ review_id, decision: "approve" }),
+      bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+    })) as never;
+  const writing = (file: string) =>
+    agentDouble((worktree) => {
+      mkdirSync(join(worktree, "src"), { recursive: true });
+      writeFileSync(join(worktree, "src", file), "export const total = (n) => n.length;\n");
+    });
+  /** The second ticket, in the first one's repository and under its roots. */
+  const other = (config: ReturnType<typeof makeConfig>, contract: PlanContract) => ({
+    config: TicketRunConfigSchema.parse({ ...config, ticket_key: "SCP095" }),
+    contract: PlanContractSchema.parse({
+      ...contract,
+      ticket_id: "ticket_SCP095",
+      plan_id: "plan_other",
+      outcome: "The other module exports a computed total",
+    }),
+  });
+
+  it("starts and finishes beside it, with nothing set", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = TicketRunConfigSchema.parse({
+      ...makeConfig(repo.dir),
+      limits: LimitsTableSchema.parse({ organisation: "test" }),
+    });
+    const second = other(config, contract);
+
+    // The first run's executor waits, holding its ticket's lock and lease,
+    // until the second run has finished.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const working = new Promise<void>((resolve) => (entered = resolve));
+    const held = writing("feature.ts");
+    const first = runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: (async (request: Parameters<typeof held.run>[0]) => {
+          entered();
+          await released;
+          return held.run(request);
+        }) as never,
+        review: approving("rev_0000000000000049"),
+      },
+    });
+    await working;
+    const locks = readdirSync(config.state_root).filter((name) => name.endsWith(".lock.json"));
+    expect(locks).toEqual([`${contract.ticket_id}.lock.json`]);
+
+    const beside = await runTicket({
+      config: second.config,
+      contract: second.contract,
+      hooks: { agent: writing("other.ts").run as never, review: approving("rev_0000000000000050") },
+    });
+    release();
+    expect(beside.outcome).toBe("approved");
+    expect((await first).outcome).toBe("approved");
+  }, 120_000);
+
+  it("waits for none, but a number the limits set holds the machine to it", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = TicketRunConfigSchema.parse({
+      ...makeConfig(repo.dir),
+      limits: LimitsTableSchema.parse({ organisation: "test", limits: { concurrent_local_attempts: 1 } }),
+    });
+    const second = other(config, contract);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const working = new Promise<void>((resolve) => (entered = resolve));
+    const held = writing("feature.ts");
+    const first = runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: (async (request: Parameters<typeof held.run>[0]) => {
+          entered();
+          await released;
+          return held.run(request);
+        }) as never,
+        review: approving("rev_0000000000000051"),
+      },
+    });
+    await working;
+    await expect(
+      runTicket({
+        config: second.config,
+        contract: second.contract,
+        hooks: { agent: writing("other.ts").run as never, review: approving("rev_0000000000000052") },
+      }),
+    ).rejects.toThrow(/concurrent_local_attempts would reach 2, above the limit of 1/);
+    release();
+    expect((await first).outcome).toBe("approved");
+  }, 120_000);
 });
 
 /**

@@ -71,17 +71,17 @@ it("keeps the ticket a discarded planning drafted once its pull request is open,
   expect(onBoard("PRB-421")).toBe(true);
 });
 
-it("waits for a command running in the repository, in the host's words", async () => {
-  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+it("waits for a command running for the ticket itself, in the host's words", async () => {
+  held.push(job("run", repoId, "PRB-412", () => undefined, 60_000));
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-412" })).rejects.toThrow(
     "Wait for the commands running in this repository to finish before deleting a contract.",
   );
   expect(onBoard("PRB-412")).toBe(true);
 });
 
-it("refuses to discard the planning that drafted its ticket while a command runs, before anything goes", async () => {
+it("refuses to discard the planning that drafted its ticket while that ticket's command runs, before anything goes", async () => {
   const planning = await drafted("executing");
-  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+  held.push(job("run", repoId, "PRB-421", () => undefined, 60_000));
   await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
     "Wait for the commands running in this repository to finish before deleting a contract.",
   );
@@ -124,13 +124,16 @@ it("refuses to read the plan of a planning thrown away against its spec, in the 
   );
 });
 
-it("deletes the ticket once nothing holds it, and every planning over it with its chat", async () => {
+it("deletes the ticket at once while another ticket's run is under way, and every planning over it with its chat", async () => {
   const planning = await drafted("executing");
   expect(planning.phase).not.toBe("discarded");
+  // Another ticket's run holds nothing of this one, as on the host (D-129).
+  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
   await sampleBridge.request({ kind: "interviewTurn", id: planning.id, text: "Split the settings page" });
   expect(sampleInterviews.has(planning.id), "the planning's chat is running").toBe(true);
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-421" })).resolves.toBeNull();
   expect(onBoard("PRB-421")).toBe(false);
+  expect(onBoard("PRB-404"), "the ticket running beside it").toBe(true);
   expect(stored().find((each) => each.id === planning.id)?.phase).toBe("discarded");
   expect(sampleInterviews.has(planning.id), "the chat went with it").toBe(false);
 });
@@ -284,6 +287,20 @@ it("moves a ticket as the CLI does, along the lifecycle's own rows with a row of
   await sampleBridge.request({ kind: "ticketOpened", repoId, key });
   const opened = await sampleBridge.request({ kind: "snapshot" });
   expect(unseenAttention(opened, opened.tasks.find((row) => row.ticket.key === key)!)).toBe(false);
+});
+
+it("forgets a merge called off with the ticket it was called off on, as the host does", async () => {
+  const key = "PRB-377";
+  try {
+    await sampleBridge.request({ kind: "callOff", repoId, key });
+    await sampleBridge.request({ kind: "callOff", repoId, key });
+    expect(snapshot.calledOff).toEqual([repoId + ":" + key]);
+    snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.state = "failed";
+    await sampleBridge.request({ kind: "discard", repoId, key });
+    expect(snapshot.calledOff).toEqual([]);
+  } finally {
+    snapshot.calledOff = [];
+  }
 });
 
 it("stops a run as the host does: the ticket stays where the run left it, with no row for the stop", async () => {
@@ -597,4 +614,23 @@ it("refuses to approve a ticket while a planning over it records problems open, 
   held.push(run);
   expect(runs()).toHaveLength(1);
   expect(ticket().approved_at).not.toBeNull();
+});
+
+it("throws away a planning and the ticket it drafted while another ticket's run is under way", async () => {
+  // Over a ticket nothing else here reads, since the delete takes it, put
+  // back in review as a plan a planning drafted is.
+  const row = snapshot.tasks.find((each) => each.ticket.key === "PRB-299")!;
+  row.ticket = { ...row.ticket, state: "plan_review" };
+  const opened = await sampleBridge.request({
+    kind: "editingOpen",
+    target: { kind: "planning", repoId, key: "PRB-299" },
+  });
+  localStorage.setItem(
+    "perbo:preview-editing",
+    JSON.stringify(stored().map((each) => (each.id === opened.id ? { ...each, admitted: true } : each))),
+  );
+  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+  await sampleBridge.request({ kind: "editingDiscard", id: opened.id });
+  expect(stored().find((each) => each.id === opened.id)?.phase).toBe("discarded");
+  expect(onBoard("PRB-299")).toBe(false);
 });

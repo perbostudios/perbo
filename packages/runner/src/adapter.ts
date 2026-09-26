@@ -39,10 +39,11 @@ import {
   prepareUnguardedSettings,
   readPreToolDecisions,
 } from "./pretool.js";
-import { inspectToolWrite, type ProhibitedHit, type ShellCwd } from "./prohibited.js";
+import { inspectToolWrite, toolWritePaths, type ProhibitedHit, type ShellCwd } from "./prohibited.js";
 import { UNKNOWN_CWD } from "./shell/index.js";
 import { DEFAULT_AGENT_TOOLS } from "./profile.js";
 import { prepareScratchDirectory, scratchEnvironment } from "./scratch.js";
+import { worktreePath, type AttemptTally } from "./tally.js";
 import { describeTransportFailure, transportExhaustion } from "./transport.js";
 
 /**
@@ -166,6 +167,12 @@ export interface AgentRequest {
   spec_folder?: string | null;
   tools?: readonly string[];
   onProgress?: (message: string) => void;
+  /**
+   * What the attempt has done so far, handed over whenever any of it may have
+   * moved: the commands its record holds, the provider's usage, and the paths a
+   * file tool was let write (D-104). The loop prints the run's tally from it.
+   */
+  onTally?: (tally: AttemptTally) => void;
   /** Redacts a line against the attempt's materialized secrets before recording it. */
   redact?: (text: string) => string;
   /** Injected by the test that proves a suspend terminates an attempt. */
@@ -663,6 +670,12 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
    * prevented and still ends the attempt.
    */
   const pendingHits: Array<{ hit: ProhibitedHit; at: string; toolUseId: string | undefined }> = [];
+  /**
+   * The worktree paths each file-tool call names, by the index of the command
+   * record it made: a path counts as written for as long as that record says
+   * the call was allowed, which the hook's answer can still change.
+   */
+  const writtenBy = new Map<number, string[]>();
   const prohibited: Array<ProhibitedHit & { at: string }> = [];
   const transcript: string[] = [];
   /** D-096: filled from the hook's own file as the guard directory is retired. */
@@ -1121,6 +1134,11 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
               ];
         decided(block.name, detail, commands.length);
         if (typeof block.id === "string") recordOfToolUse.set(block.id, commands.length);
+        const writes = toolWritePaths(block.name, block.input).flatMap((path) => {
+          const inside = worktreePath(request.worktree, scratch, path);
+          return inside === null ? [] : [inside];
+        });
+        if (writes.length > 0) writtenBy.set(commands.length, writes);
         commands.push({
           sequence: commands.length,
           tool: block.name,
@@ -1236,6 +1254,23 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     }
   };
 
+  /** The attempt's figures so far, to whoever tallies the run. */
+  const tell = (): void => {
+    if (request.onTally === undefined) return;
+    const written = new Set<string>();
+    for (const [index, paths] of writtenBy) {
+      if (commands[index]?.decision === "allowed") for (const path of paths) written.add(path);
+    }
+    request.onTally({
+      commands: commands.length,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cost_micros: costMicros,
+      cost_basis: costBasis,
+      written: [...written],
+    });
+  };
+
   try {
     await new Promise<void>((resolveDone, rejectDone) => {
     let partial = "";
@@ -1254,6 +1289,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           continue;
         }
         handleEvent(event, new Date());
+        tell();
       }
     });
     child.stderr.setEncoding("utf8");
@@ -1272,6 +1308,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
       // result envelope and its refusals are the ones a reader most needs.
       reconcile();
       settlePendingHits();
+      tell();
       /**
        * An exit the runner did not ask for. Two of them, and they mean
        * opposite things (SCP-172): an agent that ran and failed is evidence

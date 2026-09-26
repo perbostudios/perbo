@@ -18,6 +18,7 @@ import {
 } from "@perbo/workspace";
 import type { AgentRequest, AgentResult } from "../adapter.js";
 import type { AttemptCeilings } from "../ceilings.js";
+import { worktreePath } from "../tally.js";
 import { reinjectedBrief } from "../brief.js";
 import { CodexExecutorSession, CODEX_EXECUTOR_ARGV, type Usage } from "./internal/rpc.js";
 import { EgressLog } from "../egress.js";
@@ -366,6 +367,29 @@ export async function runCodexAgent(
   /** D-106: every role lookup made, so one still in flight as the turn ends is waited for before the records are read. */
   const lookups: Array<Promise<void>> = [];
   let countedTokens = 0;
+  /**
+   * The worktree paths each file change names, by the record it made: a path
+   * counts as written once the runner has admitted that change.
+   */
+  const writtenBy = new Map<CommandRecord, string[]>();
+  /** The attempt's figures so far, to whoever tallies the run (D-104). Codex reports no dollars. */
+  const tell = (): void => {
+    if (request.onTally === undefined) return;
+    const written = new Set<string>();
+    for (const [entry, paths] of writtenBy) {
+      if (entry.decided_by === "runner_admission" && entry.decision === "allowed")
+        for (const path of paths) written.add(path);
+    }
+    const total = usage.total();
+    request.onTally({
+      commands: commands.length,
+      input_tokens: total.inputTokens,
+      output_tokens: total.outputTokens,
+      cost_micros: 0,
+      cost_basis: "unavailable",
+      written: [...written],
+    });
+  };
   let finalMessage: string | null = null;
   let termination: { reason: TerminationReason; detail: string } = {
     reason: "agent_error",
@@ -450,6 +474,14 @@ export async function runCodexAgent(
     };
     commands.push(entry);
     records.set(item.id, entry);
+    const writes = (item.changes ?? []).flatMap((change) =>
+      [change.path, ...(change.kind.move_path ? [change.kind.move_path] : [])].flatMap((path) => {
+        const inside = worktreePath(request.worktree, guardStateBase.tmpdir, path);
+        return inside === null ? [] : [inside];
+      }),
+    );
+    if (item.type === "fileChange" && writes.length > 0) writtenBy.set(entry, writes);
+    tell();
     if (threadId) {
       const forThread = recordsByThread.get(threadId);
       if (forThread) forThread.push(entry);
@@ -471,6 +503,7 @@ export async function runCodexAgent(
         );
         countedTokens = fresh;
         if (breach) stop(breach.reason, breach.detail);
+        tell();
       },
       onEvent: codexNotificationHandler({
         ceilings: request.ceilings,
@@ -637,6 +670,7 @@ export async function runCodexAgent(
           ? null
           : (denial?.rule ?? "command_allow_list");
         entry.denial_target = denial?.target ? redact(denial.target) : null;
+        tell();
         return accepted;
       },
     });
@@ -689,6 +723,7 @@ export async function runCodexAgent(
     process.removeListener("SIGTERM", cancel);
     process.removeListener("SIGINT", cancel);
   }
+  tell();
   return {
     invocation: {
       adapter: "codex",
