@@ -1,6 +1,16 @@
-import { carries, suppliedAsOption, suppliedDestination, type Context } from "./command.js";
+import {
+  builtOption,
+  carries,
+  expansionLed,
+  keepAsOperand,
+  suppliedAsOption,
+  suppliedDestination,
+  type BuiltWords,
+  type Context,
+  type OptionReading,
+} from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
-import type { Word } from "./lexer.js";
+import { expandedPrefix, type Word } from "./lexer.js";
 import { anchorOf, normalise } from "./path.js";
 
 /**
@@ -42,6 +52,87 @@ const GIT_GLOBAL_DIRECTORIES = new Set(["-C", "--git-dir", "--work-tree"]);
 const GIT_GLOBAL_VALUES = new Set([
   "-c", "--exec-path", "--namespace", "--super-prefix", "--config-env", "--attr-source",
 ]);
+
+/**
+ * The read-only orientation verbs, whose options write nothing and run
+ * nothing, so a word a substitution builds may stand anywhere after them.
+ */
+const GIT_OPTIONS_INERT = new Set(["rev-parse", "merge-base", "ls-files"]);
+
+/**
+ * The revision walk's options that take the next word as their value, for the
+ * verbs that walk: `git log -n 5`, `--since <date>`, `--author <name>`.
+ */
+const GIT_REVISION_VERBS = new Set(["log", "show", "whatchanged"]);
+const GIT_REVISION_VALUES = new Set([
+  "-n", "--max-count", "--skip", "--since", "--after", "--until", "--before", "--author", "--committer",
+  "--grep", "--min-age", "--max-age",
+]);
+
+/** The diff options that take the next word as their value: the pickaxe's string, and `--output`'s file. */
+const GIT_DIFF_VALUES = new Set(["-S", "-G", "--output"]);
+
+/**
+ * The words the line builds where `git` still reads them as options: before
+ * the verb, where every word is a global option, its value or the verb
+ * itself, and after it until `--` — or `--end-of-options` for a verb that
+ * reads revisions, which keeps what follows a revision. A value the verb's
+ * option takes is a value, never an option: `git log --since "$(date +%F)"`.
+ * The read-only orientation verbs' options write nothing and run nothing, so
+ * nothing after one of them is read. Before the verb, a word that begins with
+ * an expansion — `$Y`, `"$Y"`, `$1`, or a variable the line assigns, which a
+ * subshell or a command in front of it can keep from reaching this one — can
+ * be empty, a global option or the verb, and so can a value the shell splits,
+ * so where the verb stands cannot be told: every word from there on is read
+ * as a global option.
+ */
+export function gitBuiltWords(
+  rest: readonly Word[],
+  context: Context,
+): { built: BuiltWords; label: string; keep: string } {
+  const global: OptionReading = { ends: "never", operands: false, named: false };
+  let i = 0;
+  while (i < rest.length) {
+    const value = rest[i]!.value;
+    const option = value.startsWith("-") && value !== "-";
+    const name = value.includes("=") ? value.slice(0, value.indexOf("=")) : value;
+    const takesNext =
+      option && !value.includes("=") && (GIT_GLOBAL_DIRECTORIES.has(name) || GIT_GLOBAL_VALUES.has(name));
+    const words = rest.slice(i, takesNext ? i + 2 : i + 1);
+    const built = builtOption(words, global, context.assigned, i);
+    if (built.unreadable !== undefined) return { built, label: "git", keep: keepAsOperand("git", global) };
+    const moves =
+      built.assigned.length > 0 ||
+      expansionLed(rest[i]!) ||
+      (takesNext && rest[i + 1] !== undefined && expandedPrefix(rest[i + 1]!.raw)?.splits === true);
+    if (moves) {
+      return {
+        built: builtOption(rest.slice(i), global, context.assigned, i),
+        label: "git",
+        keep: keepAsOperand("git", global),
+      };
+    }
+    if (!option) break;
+    i += words.length;
+  }
+  const verb = rest[i]?.value ?? "";
+  if (GIT_OPTIONS_INERT.has(verb)) return { built: { assigned: [] }, label: `git ${verb}`, keep: "" };
+  const reading: OptionReading = {
+    ends: GIT_DIFF_OUTPUT.has(verb) || verb === "format-patch" ? "revisions" : "dashes",
+    operands: true,
+    named: true,
+    values: (option) =>
+      (GIT_REVISION_VERBS.has(verb) && GIT_REVISION_VALUES.has(option)) ||
+      (GIT_DIFF_OUTPUT.has(verb) && GIT_DIFF_VALUES.has(option))
+        ? 1
+        : 0,
+  };
+  return {
+    built: builtOption(rest.slice(i + 1), reading, context.assigned, i + 1),
+    label: `git ${verb}`,
+    keep: keepAsOperand(`git ${verb}`, reading),
+  };
+}
 
 /**
  * Judge the directories a `git` command writes into.
@@ -86,13 +177,13 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
 
   const verb = rest[i]?.value ?? "";
   const supplied = context.supplied;
-  const judge = (word: Word, label: string): WriteFinding[] =>
+  const judge = (word: Word, label: string, reading: "whole" | "place" = "whole"): WriteFinding[] =>
     supplied !== undefined && carries(supplied, word.value)
       ? [suppliedDestination(label, supplied, context.segment)]
       : pathFinding(
           label,
           word,
-          judgeTarget(word.value, context.scope, context.cwd, true),
+          judgeTarget(word.value, context.scope, context.cwd, true, reading),
           context.segment,
         );
   /** Where the line leaves the destination to words a wrapper appends. */
@@ -152,7 +243,7 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
     .filter((word) => word.value.length > 0 && !word.value.startsWith("-"));
 
   const findings = directories.flatMap((directory) =>
-    judge(directory, `the directory git ${verb} works in`),
+    judge(directory, `the directory git ${verb} works in`, "place"),
   );
   // The verbs that name where a repository or a worktree lands. A `clone` with
   // one operand puts it under the directory the command runs in, which the

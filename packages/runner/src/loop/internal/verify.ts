@@ -77,7 +77,7 @@ export interface VerificationFacts {
   declines: number;
   /**
    * The findings a person handed to the executor
-   * (D-NEW-a-person-s-answer-closes-a-routed-finding): one still open when a
+   * (D-132): one still open when a
    * round stalls or exhausts its attempts goes back to that person.
    */
   handed: ReadonlySet<string>;
@@ -129,7 +129,7 @@ export function routeVerification(facts: VerificationFacts): Step {
   );
   // A round that stalls or exhausts its attempts with a finding a person
   // handed to the executor still open gives it back to them
-  // (D-NEW-a-person-s-answer-closes-a-routed-finding).
+  // (D-132).
   const backToPerson = (stop: Stop): Stop =>
     stillOpen.some((finding) => facts.handed.has(finding.key))
       ? {

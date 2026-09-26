@@ -662,14 +662,6 @@ function readInlineCode(
 }
 
 /**
- * A string that names a resource by its scheme — `https://registry.npmjs.org/x`,
- * `file:///etc/hosts` — rather than a file by its path. It is never a
- * destination this reading judges: read as a path, `https://host/x` resolves to
- * a directory called `https:` that nothing in the code writes to.
- */
-const SCHEME_URL = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
-
-/**
  * Which operands of a call name a file it writes. A list is those operands by
  * position; `each` is every operand (`File.delete(a, b)`); `mode` is an `open`,
  * which writes only where its mode is a literal that writes.
@@ -1094,7 +1086,7 @@ function writeSites(source: string, language: InlineLanguage): WriteSites {
 /** The directory a `cwd` option or a `chdir` names, judged from where the code starts. */
 function directoryAt(option: string | null | undefined, context: Context, cwd: Cwd): Cwd {
   if (option === undefined) return cwd;
-  const destination = option === null || SCHEME_URL.test(option) ? null : judgeTarget(option, context.scope, cwd, false);
+  const destination = option === null ? null : judgeTarget(option, context.scope, cwd, false);
   if (destination === null || destination.kind === "unresolvable" || destination.resolved === null) {
     return { path: cwd.path, unknown: true };
   }
@@ -1163,7 +1155,7 @@ export function inlineCodeFindings(
   // on disk, not shell text: a `~` or a `$` in it is a character the
   // interpreter reads literally.
   for (const literal of [...sites.targets, ...read.destinations]) {
-    if (judged.has(literal) || SCHEME_URL.test(literal)) continue;
+    if (judged.has(literal)) continue;
     judged.add(literal);
     const destination = judgeTarget(literal, context.scope, here, false);
     if (destination.kind === "inside") continue;

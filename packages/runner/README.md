@@ -35,7 +35,8 @@ The half of execution that is not the agent.
   because a file write is not a command.
 - `shell/` — how the guard reads a command line or a path to find where it writes: `index.ts` is the
   surface (`readCommandLine`, `inspectWritePath`, the scope types); `internal/` holds the lexer, the
-  writer, wrapper, git and interpreter tables, the inline-program reader and the line assembly.
+  writer, wrapper, git and interpreter tables, `date`'s clock-setting options, the `sed` script
+  reader, the inline-program reader and the line assembly.
 - `spec-commit.ts` — the spec the change is judged against, put on the branch as its first commit
   past the contract's base before the executor is invoked, from the files approval recorded and
   their hashes ([D-103](../../docs/11-open-decisions.md)). A file that has changed or gone since
@@ -47,7 +48,7 @@ The half of execution that is not the agent.
   and the pull request read one range and the review reads the diff after the spec.
 - `bundle.ts` — immutable, content-addressed run bundles with a computed replayability tier.
 - `decisions.ts` — a person's answer to a finding routed to them, and how it is recorded on the
-  finding (D-NEW-a-person-s-answer-closes-a-routed-finding); read by the loop and by the pull
+  finding (D-132); read by the loop and by the pull
   request body. The choices, and which findings take one, are in `@perbo/contracts`.
 - `delivery.ts` — push and pull request through `@perbo/workspace`'s repository module, which
   starts every `git` and `gh` this package runs. The runner holds the credential; the agent never
@@ -71,7 +72,7 @@ The half of execution that is not the agent.
   - `internal/start.ts` — everything a run can be refused for before it has cost anything.
   - `internal/provision.ts` — the worktree a round's attempt runs in.
   - `internal/continuation.ts` — the remediation a re-run continues, the delivery a person's answers
-    take without a round (D-NEW-a-person-s-answer-closes-a-routed-finding), and whether the branch
+    take without a round (D-132), and whether the branch
     is still the one that review judged.
   - `internal/relevel.ts` — a re-level: the branch put back to what the pull request has, and the
     judgement of the merged result where no executor ran.

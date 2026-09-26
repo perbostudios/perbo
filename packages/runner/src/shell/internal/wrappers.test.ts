@@ -56,7 +56,6 @@ const DESTINATION_ON_THE_LINE = [
   "xargs -i cp -- {} out",
   "xargs -J % cp -- % out",
   "xargs -0 -n1 cp -t out --",
-  "xargs --replace=% mv -- % out",
   // A substituting wrapper whose operands carry no placeholder runs the line as
   // it stands, once per word it reads.
   "xargs -I{} rm sub/generated",
@@ -195,6 +194,16 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "echo rm | xargs -J % % a /etc/x",
 ];
 
+/**
+ * A source `mv` moves is removed from where it was, so it is a write, and one
+ * the wrapper supplies is a write to a path the line never spells.
+ */
+const SUPPLIED_AS_A_MOVED_SOURCE = [
+  "xargs --replace=% mv -- % out",
+  "xargs -J % mv -- % out",
+  "xargs -0 -n1 mv -t out --",
+];
+
 /** Run `body` with the xargs entry no longer saying it appends operands. */
 const notAppending = (body: () => void) => {
   const held = WRAPPERS.get("xargs")!;
@@ -245,6 +254,14 @@ describe("a writer whose destination is on the line", () => {
   for (const command of SUPPLIED_AS_DD_INPUT) {
     it(`allows ${command}`, () => {
       expect(decision(command), command).toBe("allowed");
+    });
+  }
+
+  for (const command of SUPPLIED_AS_A_MOVED_SOURCE) {
+    it(`refuses ${command}, where the words xargs supplies are moved away`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("the mv source");
+      expect(sentence(command), command).toContain("xargs");
     });
   }
 });

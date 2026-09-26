@@ -70,7 +70,7 @@ import {
  * here: `--endorse`/`--override` for a stop, `--accept`/`--reject` for any
  * finding, and `--decide` with `--note` for the person's answer to a finding
  * routed to them, which closes it for the loop
- * (D-NEW-a-person-s-answer-closes-a-routed-finding) — written to
+ * (D-132) — written to
  * `<store>/verdicts.json` with who, when and why.
  *
  * Nothing in it leaves the machine, and nothing in it asks the network — the

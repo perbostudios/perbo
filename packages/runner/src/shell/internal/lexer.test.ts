@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
 import { everySegment, readCommandLine, resolveScope } from "../index.js";
 import { decision, sentence } from "../test-support/pins.js";
+import { expandedPrefix, leadingSubstitution, literalArithmetic } from "./lexer.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
@@ -130,7 +131,8 @@ const A_CHARACTER_INSIDE = [
   "cp a '#'b sub/x",
   "cp a \\# sub/x",
   "cp a ''#b sub/x",
-  "cp $(true)#b sub/x",
+  // After `--`, so what the substitution prints is a source rather than an option.
+  "cp -- $(true)#b sub/x",
   "echo $# > sub/x",
   "echo ${#x} ${x#a} ${x##*/} > sub/x",
   "cp a b\\\n#c sub/x",
@@ -412,5 +414,36 @@ describe("a # beside a substitution read as a command", () => {
     expect(decision(line), line).toBe("allowed");
     const programs = everySegment(readCommandLine(line, scope).segments).flatMap((segment) => segment.programs);
     expect(programs, line).toEqual(["cat"]);
+  });
+});
+
+describe("what a word begins with", () => {
+  it("finds the text ahead of a word's first expansion, and whether the shell splits it", () => {
+    expect(expandedPrefix("$Y")).toEqual({ prefix: "", splits: true });
+    expect(expandedPrefix('"${Y}"')).toEqual({ prefix: "", splits: false });
+    expect(expandedPrefix("$1")).toEqual({ prefix: "", splits: true });
+    expect(expandedPrefix('"$@"')).toEqual({ prefix: "", splits: false });
+    expect(expandedPrefix("src/$Y")).toEqual({ prefix: "src/", splits: true });
+    expect(expandedPrefix("src/a.ts")).toBeNull();
+    expect(expandedPrefix("'$Y'")).toBeNull();
+  });
+
+  it("reads the substitution a word begins with, and what follows it", () => {
+    expect(leadingSubstitution('"$(git rev-parse --show-toplevel)/src"')).toEqual({
+      body: "git rev-parse --show-toplevel",
+      after: '/src"',
+    });
+    expect(leadingSubstitution("$(pwd)")).toEqual({ body: "pwd", after: "" });
+    expect(leadingSubstitution("$((1+2))")).toBeNull();
+    expect(leadingSubstitution("x$(pwd)")).toBeNull();
+    expect(leadingSubstitution("$Y$(pwd)")).toBeNull();
+  });
+
+  it("writes an arithmetic expansion of numbers as a digit, and leaves one that names a variable", () => {
+    expect(literalArithmetic('"$((10-5)),$((10+5))p"', "1")).toBe('"1,1p"');
+    expect(literalArithmetic('"$((x))p"', "1")).toBeNull();
+    expect(literalArithmetic("'$((1))p'", "1")).toBeNull();
+    expect(literalArithmetic('"$((1) ; (2))"', "1")).toBeNull();
+    expect(literalArithmetic('"$(( $(echo 1) ))"', "1")).toBeNull();
   });
 });

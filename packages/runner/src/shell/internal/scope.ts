@@ -83,6 +83,12 @@ export interface ResolvedScope {
   paths_allowed: readonly string[];
   /** The contract's prohibited paths. Empty where it named none (D-105). */
   paths_prohibited: readonly string[];
+  /**
+   * The values the line being read gives `SIMPLE_BACKUP_SUFFIX`, the suffix a
+   * GNU backup takes where the line spells none: absent where the line does
+   * not name it, null where it names it in a way this guard cannot read.
+   */
+  simpleBackupSuffixes?: readonly string[] | null;
 }
 
 /**

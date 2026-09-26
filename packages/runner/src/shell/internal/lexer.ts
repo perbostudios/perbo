@@ -192,6 +192,146 @@ export function substitutionsIn(text: string): string[] {
   return bodies;
 }
 
+/**
+ * How the shell expands a word a `$(…)` or a backtick pair builds, or one of
+ * the variables in `built` whose value is built when the line runs: the text
+ * the line spells ahead of the first expansion, and whether a substitution or
+ * a variable stands outside double quotes, where the shell splits what it
+ * expands to into further words. A process substitution is the path the
+ * shell replaces it with, `/dev/fd/<n>`. Null for a word neither builds.
+ */
+export function substitutedShape(
+  raw: string,
+  built: ReadonlySet<string> = new Set(),
+): { prefix: string; splits: boolean } | null {
+  const shape = expansionShape(raw, built);
+  return shape.builds ? { prefix: shape.prefix, splits: shape.splits } : null;
+}
+
+/**
+ * The text a word spells ahead of its first expansion — a variable, a
+ * positional or special parameter, a `$(…)` or a backtick pair — and whether
+ * the shell splits what one expands to into further words, or null for a word
+ * with none. `$Y`, `"${Y}"`, `$1` and `$@` begin with one: what the word
+ * begins with is not on the line.
+ */
+export function expandedPrefix(raw: string): { prefix: string; splits: boolean } | null {
+  const shape = expansionShape(raw, new Set());
+  return shape.expanded ? { prefix: shape.prefix, splits: shape.splits } : null;
+}
+
+function expansionShape(
+  raw: string,
+  built: ReadonlySet<string>,
+): { prefix: string; splits: boolean; builds: boolean; expanded: boolean } {
+  if (raw.startsWith("<(") || raw.startsWith(">(")) {
+    return { prefix: "/dev/fd/", splits: false, builds: true, expanded: true };
+  }
+  let prefix = "";
+  let expanded = false;
+  let splits = false;
+  let builds = false;
+  let quote: string | null = null;
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else if (!expanded) prefix += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      if (!expanded) prefix += raw[i + 1] ?? "";
+      i += 2;
+      continue;
+    }
+    if (quote === null && (ch === '"' || ch === "'")) {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+    if (quote === '"' && ch === '"') {
+      quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && raw[i + 1] === "(")) {
+      builds = true;
+      expanded = true;
+      if (quote === null) splits = true;
+      const read = readSubstitution(raw, i);
+      if (read === null) break;
+      i = read.end;
+      continue;
+    }
+    if (ch === "$" && /[A-Za-z0-9_{@*#?$!-]/.test(raw[i + 1] ?? "")) {
+      expanded = true;
+      if (quote === null) splits = true;
+      const name = /^\{?[#!]?([A-Za-z_][A-Za-z0-9_]*)/.exec(raw.slice(i + 1))?.[1];
+      if (name !== undefined && built.has(name)) builds = true;
+    }
+    if (!expanded) prefix += ch;
+    i += 1;
+  }
+  return { prefix, splits, builds, expanded };
+}
+
+/**
+ * The command a word begins with the `$(…)` of — bare or inside double
+ * quotes, and not arithmetic — and the text the word goes on with after it,
+ * as written. Null where the word begins with anything else.
+ */
+export function leadingSubstitution(raw: string): { body: string; after: string } | null {
+  const at = raw.startsWith('"$(') ? 1 : raw.startsWith("$(") ? 0 : -1;
+  if (at === -1 || raw.startsWith("$((", at)) return null;
+  const read = readSubstitution(raw, at);
+  return read === null ? null : { body: read.body, after: raw.slice(read.end) };
+}
+
+/**
+ * A word with each `$((…))` whose arithmetic spells only numbers and
+ * operators written as `digit`, or null where it has none. Such an expansion
+ * prints a number and runs nothing; one that names a variable is left as it
+ * is, since bash evaluates a variable's value as arithmetic in turn, and a
+ * subscript in it can run a command.
+ */
+export function literalArithmetic(raw: string, digit: string): string | null {
+  let out = "";
+  let quote: string | null = null;
+  let changed = false;
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      out += raw.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (ch === "'" && quote === null) quote = "'";
+    else if (ch === '"') quote = quote === '"' ? null : '"';
+    else if (raw.startsWith("$((", i)) {
+      const read = readSubstitution(raw, i);
+      const arithmetic = read !== null && readSubstitution(raw, i + 1)?.end === read.end - 1;
+      if (arithmetic && /^[\d\s+\-*/%()]*$/.test(read.body.slice(1, -1))) {
+        out += digit;
+        changed = true;
+        i = read.end;
+        continue;
+      }
+    }
+    out += ch;
+    i += 1;
+  }
+  return changed ? out : null;
+}
+
 /** What a backslash inside double quotes escapes, as bash reads it. */
 const DOUBLE_QUOTED_ESCAPES = new Set(["$", "`", '"', "\\", "\n"]);
 

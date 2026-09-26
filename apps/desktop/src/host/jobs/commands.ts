@@ -126,7 +126,7 @@ export function principleArgs(answer: string): string[] {
 
 /**
  * A person's answer to one finding the review routed to them, recorded on the
- * finding (D-NEW-a-person-s-answer-closes-a-routed-finding). `--replace`
+ * finding (D-132). `--replace`
  * because answering again after a later review is a new answer to the same
  * key, and the earlier one stays on the record, superseded.
  */
@@ -245,7 +245,7 @@ export function assertResumable(detail: Detail, bundleId: string): void {
  * before any is recorded, so a refused one leaves nothing written: a finding
  * that review routed to a person, on a review that judged the whole change,
  * answered with a choice it takes
- * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ * (D-132).
  */
 export function assertDecidable(
   review: FindingsOnRecord | null,

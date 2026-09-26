@@ -192,7 +192,7 @@ describe("the three answers a question takes", () => {
     expect(screen.getByRole("dialog", { name: "Confirm your decisions" })).toBeTruthy();
   });
 
-  it("asks for a principle alone where the loop acts on no answer, as it always has", async () => {
+  it("asks for a principle alone where the loop acts on no answer", async () => {
     const lastReview = (detail: Detail) => detail.attempts.findLast((attempt) => attempt.review)!.review!;
     const cases: Record<string, (detail: Detail) => void> = {
       // A finding only its closer names a person.

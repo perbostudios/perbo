@@ -44,7 +44,7 @@ import type { RoundState } from "./state.js";
  *
  * A finding the review routed to a person joins the round where the person
  * decided it with an approach of their own or left the approach to the
- * executor (D-NEW-a-person-s-answer-closes-a-routed-finding): the executor is
+ * executor (D-132): the executor is
  * handed it with the person's words, and the closure verifier checks it
  * (D-061), until a verification records it closed. One in a family the
  * executor is never handed — `security.*`, `context.*` — stays with the person
@@ -248,7 +248,7 @@ export interface DecidedDelivery {
 /**
  * The delivery a re-run takes without executing or reviewing anything, or
  * null where anything is still open
- * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ * (D-132).
  *
  * The ticket's last review stopped on findings only a person can close, the
  * person answered them, and the branch — checked by the caller — is still the
@@ -393,8 +393,8 @@ export async function branchStillAt(worktree: string, base_commit: string, judge
  * The attempts of the run that sealed a commit: the change a decided delivery
  * publishes was made by them, and the pull request states what they cost. A
  * later run that sealed nothing — one that failed, or was stopped — made none
- * of it. An entry this version cannot read as an attempt is left out rather
- * than guessed.
+ * of it. An entry that is not an attempt record is left out rather than
+ * guessed.
  */
 export function attemptsThatSealed(record: AttemptsRecord | null, head_commit: string): ExecutionAttempt[] {
   const stored = record?.attempts ?? [];

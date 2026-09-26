@@ -1326,7 +1326,7 @@ export function renderInspect(
   // Only the decisions in force; a superseded one is on the record and in the
   // JSON, and printing it beside the live one would read as two answers. A
   // finding holds at most two: a judgement of it and a person's answer to it
-  // (D-NEW-a-person-s-answer-closes-a-routed-finding), each in its own slot.
+  // (D-132), each in its own slot.
   const decided = new Map<string, LocalVerdict[]>();
   for (const verdict of activeVerdicts(report.verdicts)) {
     decided.set(verdict.finding_key, [...(decided.get(verdict.finding_key) ?? []), verdict]);

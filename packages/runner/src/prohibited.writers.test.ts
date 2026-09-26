@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
 import { matchesListEntry } from "./admission.js";
-import { judgePreToolCall } from "./pretool.js";
+import { codexCommandDecision } from "./codex/index.js";
+import { judgePreToolCall, type PreToolGuardState } from "./pretool.js";
 import { inspectCommand, inspectCommandWithCwd } from "./prohibited.js";
 import { WRITERS } from "./shell/index.js";
 import { buildPermissionProfile } from "./profile.js";
@@ -678,7 +679,12 @@ describe("the control: a writer whose whole effect is the paths it names", () =>
 });
 
 /** A command through the hook, under the contract's two lists. */
-const judged = (command: string, paths_allowed: string[], paths_prohibited: string[] = []) =>
+const judged = (
+  command: string,
+  paths_allowed: string[],
+  paths_prohibited: string[] = [],
+  spec_folder_writable = false,
+) =>
   judgePreToolCall(
     { tool_name: "Bash", tool_use_id: "toolu_scoped", tool_input: { command } },
     {
@@ -687,6 +693,7 @@ const judged = (command: string, paths_allowed: string[], paths_prohibited: stri
       cwd: ROOT,
       paths_allowed,
       paths_prohibited,
+      spec_folder_writable,
       allow_list: [...profile.command_allow_list, "Bash(find:*)"],
       deny_list: [...profile.command_deny_list],
     },
@@ -719,24 +726,45 @@ describe("a write to a whole directory, through the hook", () => {
     "rm -rf src/..",
     "cd src && rm -rf ..",
     `cp -r ${OUTSIDE} .`,
-    "mv notes.md .",
+    `cp -rT ${OUTSIDE} .`,
     "find . -exec rm {} ;",
     "find . -delete",
   ];
 
   it("refuses the worktree root under a scope that does not admit all of it", () => {
     for (const command of ROOT_WRITES) {
-      expect(judged(command, ["src/**"]), command).toMatchObject({
+      expect(judged(command, ["src/**"], [], true), command).toMatchObject({
         answer: "deny",
         rule: "write_outside_scope",
       });
     }
   });
 
-  it("admits the worktree root under `**`", () => {
+  it("refuses the worktree root as prohibited wherever anything under it is, under `**` too", () => {
     for (const command of ROOT_WRITES) {
-      expect(judged(command, ["**"]).decision, command).toBe("allowed");
+      // The spec folder is prohibited whatever the contract names (D-103).
+      for (const [allowed, prohibited] of [
+        [["**"], []],
+        [["**"], [".perbo/**"]],
+        [["src/**"], []],
+      ] as const) {
+        expect(judged(command, [...allowed], [...prohibited]), `${command} ${allowed}`).toMatchObject({
+          answer: "deny",
+          rule: "write_prohibited_path",
+        });
+      }
     }
+  });
+
+  it("admits the worktree root under `**` where nothing is prohibited", () => {
+    for (const command of ROOT_WRITES) {
+      expect(judged(command, ["**"], [], true).decision, command).toBe("allowed");
+    }
+  });
+
+  it("judges a file moved into the root by the path it takes there", () => {
+    expect(judged("mv notes.md .", ["**"], []).decision).toBe("allowed");
+    expect(judged("mv notes.md .", ["src/**"], [], true)).toMatchObject({ answer: "deny", rule: "write_outside_scope" });
   });
 
   it("still moves into the root and reads it under a scope", () => {
@@ -765,5 +793,1094 @@ describe("a write to a whole directory, through the hook", () => {
   it("admits a directory the scope covers whole, and refuses one it covers in part", () => {
     expect(judged("rm -rf src", ["src/**"]).decision).toBe("allowed");
     expect(judged("rm -rf src", ["src/lib/**"])).toMatchObject({ answer: "deny", rule: "write_outside_scope" });
+  });
+});
+
+describe("a write to a directory with a prohibited path inside it (D-105)", () => {
+  const ALLOWED = ["src/**"];
+  const PROHIBITED = ["src/generated/**"];
+  const DIRECTORY_WRITES = [
+    "rm -rf src",
+    "rm -rf ./src",
+    "rm -rf src/",
+    `cp -r ${OUTSIDE} src`,
+    `cp -rT ${OUTSIDE} src`,
+    "find src -delete",
+  ];
+  const scoped = { root: ROOT, cwd: ROOT, home: HOME, paths_allowed: ALLOWED, paths_prohibited: PROHIBITED };
+  const refusals = (hits: Array<{ action: string }>) =>
+    hits.filter((hit) => hit.action === "write_prohibited_path" || hit.action === "write_outside_scope");
+
+  it("is refused by the reading", () => {
+    for (const command of DIRECTORY_WRITES) {
+      expect(refusals(inspectCommand(command, scoped)).length, command).toBeGreaterThan(0);
+      expect(refusals(inspectCommandWithCwd(command, scoped).hits).length, command).toBeGreaterThan(0);
+    }
+  });
+
+  it("is refused by the hook", () => {
+    for (const command of DIRECTORY_WRITES) {
+      expect(judged(command, ALLOWED, PROHIBITED), command).toMatchObject({
+        answer: "deny",
+        rule: "write_prohibited_path",
+      });
+    }
+  });
+
+  it("leaves a directory with nothing prohibited inside it admitted", () => {
+    for (const [command, prohibited] of [
+      ["rm -rf src", []],
+      ["rm -rf src", ["docs/generated/**"]],
+      ["rm -rf src/other", PROHIBITED],
+    ] as const) {
+      const lists = { ...scoped, paths_prohibited: [...prohibited] };
+      expect(refusals(inspectCommand(command, lists)), command).toEqual([]);
+      expect(refusals(inspectCommandWithCwd(command, lists).hits), command).toEqual([]);
+      expect(judged(command, ALLOWED, [...prohibited]).decision, command).toBe("allowed");
+    }
+  });
+
+  it("refuses the worktree root under a `**` scope with `.perbo/**` prohibited", () => {
+    const lists = { ...scoped, paths_allowed: ["**"], paths_prohibited: [".perbo/**"], spec_folder_writable: true };
+    for (const command of ["rm -rf .", "find . -delete"]) {
+      expect(inspectCommand(command, lists).map((hit) => hit.action), command).toContain("write_prohibited_path");
+      expect(inspectCommandWithCwd(command, lists).hits.map((hit) => hit.action), command).toContain(
+        "write_prohibited_path",
+      );
+      expect(judged(command, ["**"], [".perbo/**"], true), command).toMatchObject({
+        answer: "deny",
+        rule: "write_prohibited_path",
+      });
+    }
+  });
+});
+
+/**
+ * A directory on disk is read by what a prohibited glob can match under it,
+ * wherever the allowed globs put it: a wildcard reaches inside it where
+ * something on disk there matches, as a literal segment always does (D-105).
+ * Each line goes through both executors.
+ */
+describe("a write to a directory a wildcard prohibited glob can reach inside, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-wildcard-directory-"));
+  for (const directory of ["src/keys", "src/other", "src/generated", "packages/app/generated"]) {
+    mkdirSync(join(TREE, directory), { recursive: true });
+  }
+  writeFileSync(join(TREE, "src/keys/a.pem"), "key\n");
+  writeFileSync(join(TREE, "src/generated/a.ts"), "generated\n");
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+
+  const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed,
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list, "Bash(find:*)"],
+      deny_list: [...profile.command_deny_list],
+    };
+    const hook = judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_wildcard", tool_input: { command } },
+      state,
+      new Date("2026-09-04T00:00:00.000Z"),
+    ).decision;
+    return { hook, codex: codexCommandDecision(command, TREE, state) };
+  };
+
+  const refusedAsProhibited = (command: string, allowed: string[], prohibited: string[]) => {
+    const { hook, codex } = both(command, allowed, prohibited);
+    expect(hook, `${command} ${prohibited}`).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(codex, `${command} ${prohibited}`).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+  };
+
+  const admitted = (command: string, allowed: string[], prohibited: string[]) => {
+    const { hook, codex } = both(command, allowed, prohibited);
+    expect(hook.decision, `${command} ${prohibited}`).toBe("allowed");
+    expect(codex.decision, `${command} ${prohibited}`).toBe("allowed");
+  };
+
+  it("refuses the directory, inside the allowed globs or named by them", () => {
+    for (const [command, allowed, prohibited] of [
+      ["rm -rf src/keys", "src/**", "**/*.pem"],
+      ["rm -rf src", "**", "**/*.pem"],
+      ["rm -rf packages/app", "packages/**", "packages/*/generated/**"],
+      ["rm -rf src", "**", "*/generated/**"],
+    ] as const) {
+      refusedAsProhibited(command, [allowed], [prohibited]);
+    }
+  });
+
+  it("refuses it through every writer judged by where it writes", () => {
+    for (const command of [
+      "rm -r src/keys",
+      "cp -rT bin src/keys",
+      "mv src/keys bin",
+      "mv -T bin src/keys",
+      "rsync -a --delete bin/ src/keys/",
+      "tar -xzf archive.tgz -C src/keys",
+      "find src/keys -delete",
+      "cd src && rm -rf keys",
+      "sh -c 'rm -rf src/keys'",
+    ]) {
+      refusedAsProhibited(command, ["src/**", "bin/**"], ["**/*.pem"]);
+    }
+  });
+
+  it("admits a directory no prohibited glob can reach inside, and any directory where none is prohibited", () => {
+    admitted("rm -rf src/other", ["src/**"], ["src/generated/**"]);
+    admitted("rm -rf src/keys", ["src/**"], []);
+    admitted("rm -rf src", ["**"], []);
+    // A file is not a directory, so a wildcard glob reaches nothing through it.
+    admitted("rm src/a.ts", ["src/**"], ["**/*.pem"]);
+  });
+});
+
+/**
+ * `perbo admit`'s default state: `src/**` and `test/**` to write, and the
+ * prohibited paths every admitted ticket starts with (`DEFAULT_PROHIBITED` in
+ * `apps/cli/src/commands/admit.ts`). `**\/*.pem` reaches inside every
+ * directory through its wildcard, so a directory write is refused under it
+ * only where something on disk that the write reaches matches it, and
+ * `mkdir`, `rmdir`, `touch` and `mkfifo` write the directory itself and
+ * nothing below it (D-105). Each line goes through both executors.
+ */
+describe("a directory write under `perbo admit`'s default paths, on both executors", () => {
+  const DEFAULT_PROHIBITED = [".github/**", "infra/**", "**/*.pem", "**/.env*"];
+  const tree = (withKey: boolean) => {
+    const at = realpathSync(scratch("perbo-admit-defaults-"));
+    for (const directory of ["src/lib", "src/other", "src/components/button", "test/fixtures"]) {
+      mkdirSync(join(at, directory), { recursive: true });
+    }
+    writeFileSync(join(at, "src/a.ts"), "source\n");
+    writeFileSync(join(at, "src/lib/a.ts"), "source\n");
+    writeFileSync(join(at, "src/components/button/button.tsx"), "source\n");
+    writeFileSync(join(at, "test/fixtures/a.json"), "{}\n");
+    if (withKey) {
+      mkdirSync(join(at, "src/keys"), { recursive: true });
+      writeFileSync(join(at, "src/keys/k.pem"), "key\n");
+    }
+    return at;
+  };
+  const CLEAN = tree(false);
+  const KEYED = tree(true);
+
+  const both = (command: string, root: string, paths_prohibited = DEFAULT_PROHIBITED) => {
+    const state: PreToolGuardState = {
+      root,
+      tmpdir: null,
+      cwd: root,
+      paths_allowed: ["src/**", "test/**"],
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_defaults", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, root, state),
+    };
+  };
+  const admitted = (command: string, root: string) => {
+    const { hook, codex } = both(command, root);
+    expect(hook.decision, command).toBe("allowed");
+    expect(codex.decision, command).toBe("allowed");
+  };
+  const refused = (command: string, root: string, paths_prohibited = DEFAULT_PROHIBITED) => {
+    const { hook, codex } = both(command, root, paths_prohibited);
+    expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+  };
+
+  it("admits a directory write where nothing on disk under it matches", () => {
+    for (const command of [
+      "mkdir -p src/lib",
+      "mkdir -p src/lib && cat > src/lib/x.ts <<'EOF'\nexport const x = 1;\nEOF",
+      "rmdir src/other",
+      "touch src/lib",
+      "chmod -R u+w src/lib",
+      "rm -rf src/lib",
+      "rm -r src/components/button",
+      "rm -rf test/fixtures",
+      "mv src/lib src/utils",
+      "cp -r src/lib test/fixtures/",
+      "find src -name '*.orig' -delete",
+      "find src -type d -empty -delete",
+    ]) {
+      admitted(command, CLEAN);
+    }
+  });
+
+  it("admits a directory made, touched or removed as itself where a key sits under it", () => {
+    for (const command of ["mkdir -p src/keys", "touch src/keys", "rmdir src/keys"]) admitted(command, KEYED);
+  });
+
+  it("refuses a directory write that reaches a prohibited path on disk, one a glob names a place inside, and the root", () => {
+    for (const command of [
+      "rm -rf src/keys",
+      "rm -rf src",
+      "chmod -R u+w src/keys",
+      "find src -name '*.orig' -delete",
+      "cp -r src/keys test/fixtures/",
+      "cp -r src/keys src/new",
+      "mv src/keys src/other",
+      "rsync -a src/keys/ src/other/",
+      "cp -r /tmp/y .",
+    ]) {
+      refused(command, KEYED);
+    }
+    refused("rm -rf src", CLEAN, [...DEFAULT_PROHIBITED, "src/generated/**"]);
+    refused("cp -r /tmp/y .", CLEAN);
+  });
+});
+
+/** A source `mv` moves is removed from where it was, so it is judged as a write. */
+describe("an `mv` source, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-mv-source-"));
+  mkdirSync(join(TREE, "src/generated"), { recursive: true });
+  writeFileSync(join(TREE, "src/generated/a.ts"), "generated\n");
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+
+  const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed,
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_mv", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, TREE, state),
+    };
+  };
+
+  it("refuses moving a prohibited path, or a directory holding one, out", () => {
+    for (const command of [
+      "mv src/generated x",
+      "mv src/generated/a.ts x.ts",
+      "mv -t out src/generated/a.ts",
+      "mv src/a.ts src/generated/a.ts out",
+    ]) {
+      const { hook, codex } = both(command, ["**"], ["src/generated/**"]);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    }
+  });
+
+  it("refuses moving a path out of the scope, or out of the worktree, in", () => {
+    const scoped = both("mv notes.md src/notes.md", ["src/**"], []);
+    expect(scoped.hook, "scope").toMatchObject({ answer: "deny", rule: "write_outside_scope" });
+    const outside = both(`mv ${OUTSIDE}/x src/x`, ["src/**"], []);
+    expect(outside.hook, "outside").toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(outside.codex, "outside").toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+  });
+
+  it("admits a move inside the scope with nothing prohibited", () => {
+    for (const command of ["mv src/a.ts src/b.ts", "mv -t src/lib src/a.ts"]) {
+      const { hook, codex } = both(command, ["src/**"], []);
+      expect(hook.decision, command).toBe("allowed");
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});
+
+/**
+ * A `cp`, `mv`, `install` or `ln` into a directory on disk writes each source
+ * under its own name there and nothing else in it, so that path is what is
+ * judged (D-105). Each line goes through both executors.
+ */
+describe("a copy, move or link into a directory on disk, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-into-directory-"));
+  for (const directory of ["src/keys", "src/other", "src/generated", "bin"]) {
+    mkdirSync(join(TREE, directory), { recursive: true });
+  }
+  writeFileSync(join(TREE, "src/keys/a.pem"), "key\n");
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+  writeFileSync(join(TREE, "x.pem"), "key\n");
+  writeFileSync(join(TREE, "bin/b.pem"), "key\n");
+
+  const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed,
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list, "Bash(cp:*)", "Bash(mv:*)", "Bash(ln:*)", "Bash(install:*)"],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_into", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, TREE, state),
+    };
+  };
+
+  it("admits a file copied, moved or linked into a directory a wildcard glob reaches inside", () => {
+    for (const command of [
+      "cp src/a.ts src/other/",
+      "mv src/a.ts src/other/",
+      "cp -t src/other src/a.ts",
+      "cp src/a.ts src/other",
+      "mv -t src/other src/a.ts",
+      "install src/a.ts src/other",
+      "ln src/a.ts src/other",
+      "ln -s ../a.ts src/other",
+      // Into the directory holding a prohibited file, the write is still `src/keys/a.ts`.
+      "mv src/a.ts src/keys",
+    ]) {
+      const { hook, codex } = both(command, ["src/**"], ["**/*.pem"]);
+      expect(hook.decision, command).toBe("allowed");
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+
+  it("refuses a source whose name there is prohibited, and a directory copied or moved in", () => {
+    for (const [command, prohibited] of [
+      ["cp x.pem src/other/", "**/*.pem"],
+      ["cp -t src/other x.pem", "**/*.pem"],
+      ["ln -s ../x.pem src/other", "**/*.pem"],
+      ["cp -r src/keys src/other", "**/*.pem"],
+      ["cp -r bin src/other", "**/*.pem"],
+      ["mv bin src/other", "**/*.pem"],
+      ["cp -r bin src/generated", "src/generated/**"],
+      ["cp src/a.ts src/generated", "src/generated/**"],
+    ] as const) {
+      const { hook, codex } = both(command, ["**"], [prohibited]);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    }
+  });
+
+  it("judges the directory whole where the line does not say what lands in it, holding what a source holds", () => {
+    for (const command of [
+      // `-T` writes the source over the directory itself, and `ln -n` replaces it.
+      "cp -rT bin src/other",
+      "cp --no-t src/a.ts src/keys",
+      "ln -sfn /tmp src/keys",
+      "ln -sfn ../a.ts src/keys",
+      // A trailing `/` is the directory's contents to BSD `cp -R`; a glob is any name.
+      "cp -r src/keys/ src/other",
+      "cp src/* src/keys",
+      'cp "$F" src/keys',
+      // A directory copied to a name not on disk takes that name.
+      "cp -r bin src/new",
+    ]) {
+      const { hook, codex } = both(command, ["**"], ["**/*.pem"]);
+      expect(hook, command).toMatchObject({ answer: "deny" });
+      expect(codex.decision, command).toBe("denied");
+    }
+  });
+});
+
+/**
+ * GNU reads a long option by any unambiguous prefix, and a writer given `-b`,
+ * `--backup` or a suffix keeps what it replaces under `<dest><suffix>`: both are
+ * read as GNU reads them, on both executors.
+ */
+describe("an abbreviated long option and a backup suffix, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-prefix-backup-"));
+  for (const directory of ["src/other", "src/generated"]) {
+    mkdirSync(join(TREE, directory), { recursive: true });
+  }
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+  writeFileSync(join(TREE, "src/other/a.ts"), "other\n");
+
+  const both = (command: string) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed: ["src/**"],
+      paths_prohibited: ["**/*.pem", "src/generated/**"],
+      spec_folder_writable: true,
+      allow_list: [
+        ...profile.command_allow_list,
+        "Bash(cp:*)",
+        "Bash(mv:*)",
+        "Bash(ln:*)",
+        "Bash(sed:*)",
+        "Bash(tee:*)",
+      ],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_prefix", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, TREE, state),
+    };
+  };
+
+  const refusedAs = (command: string, rule: string) => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "deny", rule });
+    expect(codex, command).toMatchObject({ decision: "denied", rule });
+  };
+
+  it("refuses `--target-directory` by any prefix", () => {
+    for (const command of [
+      "cp --target=/tmp src/a.ts",
+      "cp --t=/tmp src/a.ts",
+      "cp --target /tmp src/a.ts",
+      "mv --target=/tmp src/a.ts",
+      "ln -s --target=/tmp src/a.ts",
+    ]) {
+      refusedAs(command, "write_outside_worktree");
+    }
+    refusedAs("mv --targ=src/generated src/a.ts", "write_prohibited_path");
+  });
+
+  it("refuses the other options a writer is judged by, by prefix", () => {
+    for (const command of ["sed --in s/a/b/ /etc/hosts", "echo x | tee --output-e ~/x"]) {
+      refusedAs(command, "write_outside_worktree");
+    }
+  });
+
+  it("refuses a backup a suffix makes a prohibited path", () => {
+    for (const command of [
+      "cp -b --suffix=.pem src/a.ts src/other/",
+      "mv -b --suffix=.pem src/a.ts src/other/",
+      "ln -f -b --suffix=.pem src/a.ts src/other/",
+      "cp --backup=simple --suffix=.pem src/a.ts src/other/a.ts",
+      "cp --back --suf=.pem src/a.ts src/other/",
+      "SIMPLE_BACKUP_SUFFIX=.pem cp -b src/a.ts src/other/",
+      "sed -i.pem s/a/b/ src/a.ts",
+    ]) {
+      refusedAs(command, "write_prohibited_path");
+    }
+    refusedAs('cp -b --suffix="$S" src/a.ts src/other/', "write_outside_worktree");
+  });
+
+  it("admits a backup with the default suffix, and the copies, moves and edits it sits beside", () => {
+    for (const command of [
+      "cp -b src/a.ts src/other/",
+      "cp src/a.ts src/other/",
+      "mv src/a.ts src/other/",
+      "mv src/a.ts src/b.ts",
+      "ln -fb src/a.ts src/other/",
+      "sed -i s/a/b/ src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook.decision, command).toBe("allowed");
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});
+
+/**
+ * The state the D-073 review probed both executors with: the profile's own
+ * lists, `src/**` to write, and a prohibited key on disk under it.
+ */
+function reviewTree(
+  prefix: string,
+  paths_allowed = ["src/**"],
+  paths_prohibited = ["**/*.pem", "src/generated/**", "src/secret/**"],
+) {
+  const tree = realpathSync(scratch(prefix));
+  for (const directory of ["src/keys", "src/generated", "src/secret", "src/other"]) {
+    mkdirSync(join(tree, directory), { recursive: true });
+  }
+  writeFileSync(join(tree, "src/keys/k.pem"), "key\n");
+  writeFileSync(join(tree, "src/a.ts"), "source\n");
+  writeFileSync(join(tree, "README.md"), "readme\n");
+  const state: PreToolGuardState = {
+    root: tree,
+    tmpdir: null,
+    cwd: tree,
+    paths_allowed,
+    paths_prohibited,
+    spec_folder_writable: true,
+    allow_list: [...profile.command_allow_list],
+    deny_list: [...profile.command_deny_list],
+  };
+  return (command: string) => ({
+    hook: judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_review", tool_input: { command } },
+      state,
+      new Date("2026-09-26T00:00:00.000Z"),
+    ).decision,
+    codex: codexCommandDecision(command, tree, state),
+  });
+}
+
+/**
+ * A word a `$(…)` or a backtick pair builds is not read as an operand where
+ * the command still reads options: what it prints can be an option that
+ * writes or runs a program. A command whose options the guard reads refuses
+ * it on both executors; one it does not read is left to the agent's own layer
+ * on Claude and refused on Codex; one whose options write nothing and run
+ * nothing admits it anywhere.
+ */
+describe("a word a substitution builds where a command reads options, on both executors", () => {
+  const both = reviewTree("perbo-built-option-");
+
+  it("refuses one fed to a command whose options write or run a program", () => {
+    for (const command of [
+      "find src $(echo -delete)",
+      "find -- $(echo -delete)",
+      "git diff $(printf -- --output=/tmp/x)",
+      'git diff "$(printf -- --output=/tmp/x)"',
+      'git log --output"$(echo =/tmp/x)"',
+      "git log $(echo --output=/tmp/x)",
+      "git show `echo --output=/tmp/x`",
+      "git log HEAD$(echo ' --output=/tmp/x')",
+      "git diff $(git merge-base HEAD main)",
+      "git diff $(git merge-base HEAD main) -- src",
+      "git $(echo diff) --output=/tmp/x",
+      'git -c "$(echo core.pager=touch /tmp/x)" log',
+      `node $(printf -- -e) "require('fs').writeFileSync('/tmp/x','y')"`,
+      "node -- $(echo x.js)",
+      'node "src/$(echo x).js"',
+      `python3 $(echo -c) "open('/tmp/x','w')"`,
+      "rg $(echo --pre=sh) x",
+      "cp $(echo --target-directory=/tmp) src/a.ts",
+      "cp --end-of-options $(echo --target-directory=/tmp) src/a.ts",
+      `node <(echo "require('fs').writeFileSync('/tmp/x','y')")`,
+      'dd if=src/a.ts "o$(echo f=/tmp/x)"',
+      "env node $(printf -- -e) 1",
+      "sh -c 'git diff $(echo --output=/tmp/x)'",
+      "find src -exec git diff $(echo --output=/tmp/x) ';'",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
+      expect(codex.decision, command).toBe("denied");
+    }
+    expect(both("git diff $(git merge-base HEAD main)").hook.reason).toContain("--end-of-options");
+  });
+
+  it("leaves one fed to a command it does not read to the agent's layer on Claude, and refuses it on Codex", () => {
+    for (const command of [
+      "tsc $(echo --outDir) /tmp/out",
+      "eslint $(echo --output-file) /tmp/x src",
+      'date -d "$(git log -1 --format=%cI)" +%s',
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+    }
+  });
+
+  it("admits one that cannot be an option, or fed to a command whose options write nothing", () => {
+    for (const command of [
+      "git diff --end-of-options $(git merge-base HEAD main)",
+      "git log --oneline --end-of-options $(git merge-base HEAD main)..HEAD",
+      "git diff -- $(git ls-files src)",
+      'git diff "HEAD$(echo ~1)"',
+      'git log --since="$(date +%Y-%m-%d)"',
+      "git rev-parse --verify $(git merge-base HEAD main)",
+      'cat "$(git rev-parse --show-toplevel)/README.md"',
+      "ls $(pwd)",
+      'echo "$(date +%s)"',
+      "rg -e foo -- $(git ls-files src)",
+      "rg -n foo <(git ls-files src)",
+      'find "src/$(echo other)" -name "*.ts"',
+      "cp -- $(echo --target-directory=/tmp) src/a.ts",
+      "pnpm test -- $(git ls-files src)",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+
+  it("still refuses a cd into a directory a substitution names, which it cannot place", () => {
+    const { hook, codex } = both('cd "$(git rev-parse --show-toplevel)"');
+    expect(hook).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(codex.decision).toBe("denied");
+  });
+});
+
+/**
+ * A `sed` script is read for what it writes and runs: a `w` or `W` file and an
+ * `s///w` file are writes judged by where they land, an `e` command and an
+ * `s///e` flag run a program, and a script the line does not spell cannot be
+ * read. A script that does none of these is ordinary work.
+ */
+describe("a sed script, on both executors", () => {
+  const both = reviewTree("perbo-sed-script-");
+
+  it("refuses a file it writes outside the worktree, or at a prohibited path", () => {
+    for (const command of [
+      "sed -i '1w /tmp/x' src/a.ts",
+      "cat src/a.ts | sed -n 'w /tmp/x'",
+      "sed ':a;w /tmp/x' src/a.ts",
+      "sed 's|a|b|gw /tmp/x' src/a.ts",
+      "sed -n '1{w /tmp/x\n}' src/a.ts",
+      "sed -e p -e 'W /tmp/x' src/a.ts",
+      "sed -s -e 'w /tmp/x' src/a.ts",
+      "sed -s --expression='w /tmp/x' src/a.ts",
+      // GNU ends the regex at the delimiter inside the bracket expression.
+      "sed 's/[/]/w /tmp/y' src/a.ts",
+      // BSD's -i takes the script as its suffix, and runs the file's name.
+      "cd src && sed -i 's/a/b/' 'w /tmp/x'",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+    }
+    const prohibited = both("sed -i 's/a/b/w src/keys/z.pem' src/a.ts");
+    expect(prohibited.hook).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(prohibited.codex).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+  });
+
+  it("refuses an e command and an s///e flag as running a program", () => {
+    for (const command of [
+      "sed -i '1e touch /tmp/pwn' src/a.ts",
+      "sed -i 's/a/touch \\/tmp\\/pwn/e' src/a.ts",
+      "sed --expression='1e id' src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "unreadable_inline_program" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "unreadable_inline_program" });
+    }
+  });
+
+  it("refuses a script the line does not spell", () => {
+    for (const command of [
+      'sed "$S" src/a.ts',
+      'sed -- "$(echo w /tmp/x)" src/a.ts',
+      'sed "s/a/$B/" src/a.ts',
+      'sed -- "s/a/$(echo b)/" src/a.ts',
+      "sed -f script.sed src/a.ts",
+      "sed -f script.sed -e p src/a.ts",
+      "ls src | xargs sed -n",
+      "ls src | xargs -I% sed -n 's/a/%/p' src/a.ts",
+      // No reading of it gets to the end, so what it writes cannot be said.
+      "sed -n 'k' src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
+      expect(codex.decision, command).toBe("denied");
+    }
+  });
+
+  it("reads the word after a bare -i as GNU's script or file where GNU can read it, else as BSD's suffix", () => {
+    const scoped = reviewTree("perbo-sed-suffix-", ["src/*.ts"]);
+    const exact = reviewTree("perbo-sed-suffix-exact-", ["src/a.ts", "README.md"]);
+    const suffixed = reviewTree("perbo-sed-suffix-bak-", ["src/**"], ["**/*.ts.bak"]);
+    for (const [judge, command] of [
+      [scoped, "sed -i 1d src/a.ts"],
+      [scoped, "sed -i p src/a.ts"],
+      [scoped, "sed -i 1~2d src/a.ts"],
+      [exact, "sed -i 1d src/a.ts"],
+      // With -e giving the script, GNU edits a file of that name on disk.
+      [exact, "sed -i README.md -e 1d src/a.ts"],
+      // GNU cannot compile `.bak`, so BSD's reading runs: the script follows it.
+      [both, "sed -i .bak 's/a/b/' src/a.ts"],
+    ] as const) {
+      const { hook, codex } = judge(command);
+      expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+    for (const command of ["sed -i .bak s/a/b/ src/a.ts", "cd src && sed -i .bak -e 1d a.ts"]) {
+      const { hook, codex } = suffixed(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    }
+  });
+
+  it("refuses BSD's -I as the in-place edit it is", () => {
+    const { hook, codex } = both("sed -I '' 's/a/b/' /etc/hosts");
+    expect(hook).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(codex.decision).toBe("denied");
+  });
+
+  it("admits a script that writes nothing but its edit and runs nothing", () => {
+    for (const command of [
+      "sed -n '1,5p' src/a.ts",
+      "sed -i 's/a/b/' src/a.ts",
+      "cat src/a.ts | sed 's/x/y/g'",
+      "sed -i '' 's/a/b/' src/a.ts",
+      "sed -I '' 's/a/b/' src/a.ts",
+      "sed -n 's/[^/]*$//p' src/a.ts",
+      "sed '1a foo; w /tmp/x' src/a.ts",
+      "sed -n 'r /etc/hosts' src/a.ts",
+      "sed 's/a/b/w /dev/stdout' src/a.ts",
+      "sed -n 'w src/out.txt' src/a.ts",
+      // sed names the file as written: no shell expands the ~.
+      "cd src && sed -n 'w ~/notes.txt' a.ts",
+      "sed -e 's/a/b/' -e '$a\\' -e 'end' src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});
+
+/**
+ * The state `perbo admit` writes by default — `src/**` and `test/**` to
+ * write, `.github/**`, `infra/**`, `**\/*.pem` and `**\/.env*` prohibited — with
+ * the profile's own lists and a key on disk under `src`.
+ */
+function admitDefaultsTree(prefix: string) {
+  const tree = realpathSync(scratch(prefix));
+  for (const directory of ["src/keys", "src/lib", "src/other", "test", "scripts"]) {
+    mkdirSync(join(tree, directory), { recursive: true });
+  }
+  writeFileSync(join(tree, "src/keys/k.pem"), "key\n");
+  writeFileSync(join(tree, "src/a.ts"), "source\n");
+  writeFileSync(join(tree, "src/lib/a.ts"), "source\n");
+  writeFileSync(join(tree, "test/a.test.js"), "test\n");
+  writeFileSync(join(tree, "scripts/build.js"), "build\n");
+  writeFileSync(join(tree, "pat"), "foo\n");
+  const state: PreToolGuardState = {
+    root: tree,
+    tmpdir: null,
+    cwd: tree,
+    paths_allowed: ["src/**", "test/**"],
+    paths_prohibited: [".github/**", "infra/**", "**/*.pem", "**/.env*"],
+    spec_folder_writable: true,
+    allow_list: [...profile.command_allow_list],
+    deny_list: [...profile.command_deny_list],
+  };
+  return (command: string) => ({
+    hook: judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_admit", tool_input: { command } },
+      state,
+      new Date("2026-09-26T00:00:00.000Z"),
+    ).decision,
+    codex: codexCommandDecision(command, tree, state),
+  });
+}
+
+const WRITES_TMP = `"require('fs').writeFileSync('/tmp/x','y')"`;
+
+/**
+ * A variable the line assigns is the word it holds: a value a substitution
+ * builds is a word the guard cannot read, where the command reads options,
+ * and a value the line spells is read as that value, beside the reading of
+ * the word as written. What a substitution prints into a variable is never a
+ * ground to vouch for the line. A variable the line does not assign is read as
+ * written.
+ */
+describe("a word built from a variable the line assigns, on both executors", () => {
+  const both = admitDefaultsTree("perbo-assigned-");
+
+  it("refuses one a substitution builds, where the command reads options", () => {
+    for (const command of [
+      "X=$(printf -- --output=/tmp/x); git diff $X",
+      "X=$(echo -delete); find src $X",
+      `X=$(echo -e); node $X ${WRITES_TMP}`,
+      "X=$(echo --pre=sh); rg $X x",
+      "X=$(printf -- --output=/tmp/x); echo ok && git diff $X",
+      `export X=$(echo -e); echo ok && node $X ${WRITES_TMP}`,
+      "X=$(printf -- --output=/tmp/x) git diff $X",
+      "X=--output=/tmp/x; X=$(echo ok); git diff $X",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+    }
+    expect(both("X=$(printf -- --output=/tmp/x); git diff $X").hook.reason).toContain("--end-of-options");
+  });
+
+  it("refuses the option or program a value the line spells makes it", () => {
+    for (const command of [
+      `X=-e; echo ok && node $X ${WRITES_TMP}`,
+      "X=--target-directory=/tmp; cp $X src/a.ts",
+      "X=of=/tmp/x; dd if=src/a.ts $X",
+      "X=--output=/tmp/x; echo ok; git diff $X",
+      "export X=--output=/tmp/x; git diff $X",
+      `X=-c; python3 $X "open('/tmp/x','w')"`,
+      "X=-t/tmp; cp $X src/a.ts",
+      "X='-t /tmp'; cp $X src/a.ts",
+      `X=' '; X+=-e; node $X ${WRITES_TMP}`,
+      `X=(-e); node $X ${WRITES_TMP}`,
+      `export X=-e; sh -c 'node $X "require(\\"fs\\").writeFileSync(\\"/tmp/x\\",\\"y\\")"'`,
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
+      expect(codex.decision, command).toBe("denied");
+    }
+    const deletes = both("X=-delete; find src $X");
+    expect(deletes.hook).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(deletes.codex).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    const pushes = both("X=push; git $X origin main");
+    expect(pushes.hook).toMatchObject({ answer: "deny", rule: "command_deny_list" });
+    expect(pushes.codex).toMatchObject({ decision: "denied", rule: "command_deny_list" });
+  });
+
+  it("admits what the value it spells would admit, answering as that line is answered", () => {
+    for (const [command, spelled] of [
+      ["X=-e; echo ok && node $X 'console.log(1)'", "echo ok && node -e 'console.log(1)'"],
+      ["X=-delete; find src/lib $X", "find src/lib -delete"],
+    ] as const) {
+      const { hook, codex } = both(command);
+      expect(hook.decision, command).toBe("allowed");
+      expect(hook.answer, command).toBe(both(spelled).hook.answer);
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+
+  it("does not take a substitution building a value as grounds to vouch for the line", () => {
+    const vouched = both("X=$(git rev-parse HEAD); git diff --end-of-options $X");
+    expect(vouched.hook).toMatchObject({ answer: "defer", decision: "allowed" });
+    expect(vouched.codex.decision).toBe("allowed");
+    // Grounds of its own still vouch for the line.
+    const echoed = both("X=$(git rev-parse HEAD); echo $X");
+    expect(echoed.hook).toMatchObject({ answer: "allow", decision: "allowed" });
+    expect(echoed.codex.decision).toBe("allowed");
+  });
+
+  it("reads a variable the line does not assign as written", () => {
+    for (const command of ["git diff $X", "find src $X", "rg foo $HOME", "git diff $PWD", "git log -n $N"]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+    const loop = both('for f in src/a.ts src/lib/a.ts; do rg foo "$f"; done');
+    expect(loop.hook).toMatchObject({ answer: "defer", decision: "allowed" });
+    expect(loop.codex).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+  });
+});
+
+/**
+ * Where a command stops reading options, a word the line builds is an
+ * operand: after `--` for every command, the ones the guard does not read
+ * among them, and after the program an interpreter runs. Where an option
+ * takes a value, a word built there is that value, so long as the shell does
+ * not split it into more words.
+ */
+describe("a word the line builds after a command's options, or as an option's value, on both executors", () => {
+  const both = admitDefaultsTree("perbo-built-value-");
+  const admitted = (command: string) => {
+    const { hook, codex } = both(command);
+    expect(hook.decision, command).toBe("allowed");
+    expect(codex.decision, command).toBe("allowed");
+    return hook.answer;
+  };
+  const refused = (command: string) => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(codex, command).toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+  };
+
+  it("honours -- for every command, one the guard does not read too", () => {
+    for (const command of ["pnpm test -- $(git ls-files src)", "npx eslint -- $(git ls-files src)"]) {
+      expect(admitted(command), command).toBe("allow");
+    }
+    // `find` has no `--` that ends its expression, and the script an
+    // interpreter runs after one is a program named at run time.
+    for (const command of ["find -- $(echo -delete)", "node -- $(echo x.js)"]) refused(command);
+  });
+
+  it("reads an interpreter's own options only until the program it runs", () => {
+    for (const command of [
+      'node scripts/build.js "$(git rev-parse HEAD)"',
+      "node scripts/build.js $(git ls-files src)",
+      "node --test -- $(git ls-files test)",
+      "python3 -m pytest $(git ls-files test)",
+      "python3 -u -m pytest $(git ls-files test)",
+      'python3 scripts/x.py -- "$(git rev-parse HEAD)"',
+      'python3 -W "$(echo ignore)" scripts/x.py',
+      'node -r "$(echo ./scripts/build.js)" scripts/build.js',
+    ]) {
+      expect(admitted(command), command).toBe("allow");
+    }
+    for (const command of [
+      `node $(printf -- -e) ${WRITES_TMP}`,
+      `python3 $(echo -c) "open('/tmp/x','w')"`,
+      // node still reads options after --test, and `--no-test -e …` runs code.
+      "node --test $(git ls-files test)",
+      // node reads options after -e's code, and a second -e replaces it.
+      `node -e "console.log(1)" "$(echo -e)" 2`,
+      // An option this does not know may take the next word.
+      "node --inspect-brk $(printf -- -e) 1",
+      'python3 -m "$(echo pytest)"',
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("takes a word built where an option's value goes as that value", () => {
+    for (const command of [
+      'rg -n -e "$(cat pat)" src',
+      'rg -g "$(echo \'*.ts\')" foo',
+      'find src -name "$(cat pat)"',
+      'git log --since "$(date +%F)"',
+      'git log --since="$(date +%F)" --until "$(date +%F)"',
+      'git log -n "$(echo 5)"',
+      'git diff -S "$(cat pat)"',
+    ]) {
+      admitted(command);
+    }
+    // `git config` is not on the allow-list, which Codex holds every
+    // substitution to; Claude's own layer decides it.
+    for (const command of [
+      'git log --author "$(git config user.name)"',
+      'git log --author="$(git config user.name)"',
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+    }
+  });
+
+  it("refuses one the shell splits, or one standing where no option takes a value", () => {
+    for (const command of [
+      "rg -e $(cat pat) src",
+      "git log -n $(echo 5)",
+      "find src -name $(cat pat)",
+      'rg -n "$(cat pat)" src',
+      // `-n` is `--numbered` to format-patch, and takes no value.
+      "git format-patch -n $(echo -o/tmp)",
+    ]) {
+      refused(command);
+    }
+  });
+});
+
+/**
+ * A word that begins with an expansion, where the program an interpreter
+ * runs or `git`'s verb stands, can be empty or an option when the line runs:
+ * `$Y`, `"$Y"`, `$1`, `$@`, and a variable the line assigns, which a
+ * subshell or a command in front of it can keep from reaching the command.
+ * It ends nothing, and every word built after it is read as an option. A
+ * substitution whose command prints an object name or an absolute path
+ * begins no option.
+ */
+describe("a word that begins with an expansion where the program stands, on both executors", () => {
+  const both = admitDefaultsTree("perbo-expansion-led-");
+  const refused = (command: string, rule = "write_outside_worktree") => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "deny", rule });
+    expect(codex, command).toMatchObject({ decision: "denied", rule });
+  };
+  const admitted = (command: string) => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+    expect(codex.decision, command).toBe("allowed");
+  };
+
+  it("reads every word built after it as an option the interpreter may take", () => {
+    for (const command of [
+      `node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `node "$Y" "$(printf -- -e)" ${WRITES_TMP}`,
+      `node \${Y} "$(printf -- -e)" ${WRITES_TMP}`,
+      `node $Y$Z "$(printf -- -e)" ${WRITES_TMP}`,
+      `node $1 "$(printf -- -e)" ${WRITES_TMP}`,
+      `node $@ "$(printf -- -e)" ${WRITES_TMP}`,
+      `python3 $Y "$(printf -- -c)" "open('/tmp/x','w')"`,
+      `node $Y "$(printf -- -e)" "require('fs').rmSync('src/keys',{recursive:true})"`,
+      `node --test $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `node -- $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `python3 -m $Y "$(printf -- -c)" "open('/tmp/x','w')"`,
+      "node $Y $(git ls-files test)",
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("reads a variable the line assigns as possibly empty where the command runs", () => {
+    for (const command of [
+      `(Y=scripts/build.js); node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `(Y=scripts/x.py); python3 $Y "$(printf -- -c)" "open('/tmp/x','w')"`,
+      `Y=scripts/build.js true; node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `if false; then Y=scripts/build.js; fi; node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `(Y=rev-parse); git $Y diff "$(printf -- --output=/tmp/x)"`,
+      // Where $Y is empty, the word after it is the verb.
+      `git $Y "d$(echo iff)" --output=/tmp/x`,
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("admits a word built after a program the line spells, or one a known command prints", () => {
+    for (const command of [
+      'node scripts/build.js "$(git rev-parse HEAD)"',
+      'node "$(git rev-parse --show-toplevel)/scripts/build.js"',
+      "python3 -m pytest $(git ls-files test)",
+      'Y=scripts/build.js; node $Y "$(git rev-parse HEAD)"',
+      'node -- $Y "$(git rev-parse HEAD)"',
+      'echo ok; git diff "$(git rev-parse HEAD)"',
+      'echo ok; git diff "$(git merge-base HEAD main)"',
+      'node "$(git rev-parse --show-toplevel)/scripts/build.js" "$(git rev-parse HEAD)"',
+    ]) {
+      admitted(command);
+    }
+  });
+
+  it("takes what a command prints only where the line leaves it the command this guard knows", () => {
+    for (const command of [
+      `git() { printf -- -e; }; node "$(git rev-parse HEAD)" ${WRITES_TMP}`,
+      `function git { printf -- -e; }; node "$(git rev-parse HEAD)" ${WRITES_TMP}`,
+      `git() { printf -- --output=/tmp/x; }; git diff "$(git rev-parse HEAD)"`,
+      "PATH=src:$PATH; node \"$(git rev-parse HEAD)\" x",
+      // A revision that does not resolve prints nothing under --verify, and
+      // is printed back without it.
+      `node "$(git rev-parse --verify nothere)-e" ${WRITES_TMP}`,
+      `node "$(git rev-parse --verify nothere)$(printf -- -e)" ${WRITES_TMP}`,
+      `node "$(git rev-parse -- -e)" ${WRITES_TMP}`,
+      // rev-parse prints back an option it does not know.
+      `node "$(git rev-parse -e HEAD)" ${WRITES_TMP}`,
+      'node "$(git rev-parse ../../tmp/x)" x',
+      // The shell splits what it prints outside double quotes.
+      "node $(git rev-parse HEAD) x",
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("reads the program on standard input where the script word can be empty", () => {
+    for (const command of [
+      `echo ${WRITES_TMP} | node ""`,
+      `echo ${WRITES_TMP} | node $Y`,
+      `echo ${WRITES_TMP} | node "$(git rev-parse --verify nothere)"`,
+    ]) {
+      refused(command);
+    }
+    admitted(`echo ${WRITES_TMP} | node scripts/build.js`);
+  });
+
+  it("takes a find starting point a substitution begins and a literal / continues", () => {
+    for (const command of [
+      'find "$(git rev-parse --show-toplevel)/src" -name x',
+      'find "$(echo -delete)/src" -name x',
+      'find "$(pwd)/src" -name "*.ts"',
+      'find "$(git rev-parse --show-toplevel)" -name x',
+    ]) {
+      admitted(command);
+    }
+    refused("find $(echo x)/src -name x");
+    refused('find "$(echo x)" -name x');
+  });
+
+  it("reads a $((…)) of numbers in a sed script as a number", () => {
+    admitted('sed -n "$((10-5)),$((10+5))p" src/a.ts');
+    admitted('sed -i "$((1+1))d" src/a.ts');
+    refused('sed -i "$((1+1))w /tmp/x" src/a.ts');
+    // A name in the arithmetic is evaluated in turn, and a subscript in it can run a command.
+    refused(`x='a[$(touch /tmp/p)]'; sed -n "$((x))p" src/a.ts`, "unreadable_inline_program");
+    refused("sed -n '$((1))p' src/a.ts", "unreadable_inline_program");
+  });
+
+  it("tells Codex how to write a built word a command it does not read would take as an option", () => {
+    const { hook, codex } = both('pnpm test "$(git ls-files src)"');
+    expect(hook).toMatchObject({ answer: "defer", decision: "allowed" });
+    expect(codex).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+    expect(codex.reason).toContain('"$(git ls-files src)" is built when the line runs where test still reads options');
+    expect(codex.reason).toContain("put -- before it to keep it an operand");
+    expect(both('pnpm test -- "$(git ls-files src)"').codex.decision).toBe("allowed");
   });
 });

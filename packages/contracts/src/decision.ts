@@ -2,7 +2,7 @@ import type { Finding, ReviewArtifact } from "./review.js";
 
 /**
  * A person's answer to a finding the review routed to them
- * (D-NEW-a-person-s-answer-closes-a-routed-finding): which findings take one,
+ * (D-132): which findings take one,
  * and which answers each takes. Here, and browser-safe, because three readers
  * have to agree on it: `perbo verdict --decide`, which records an answer; the
  * loop, which acts on it; and the desktop's decision screen, which asks for it.
@@ -34,7 +34,7 @@ export const NEVER_HANDED_FAMILIES = ["context", "security"] as const;
 /**
  * Whether a finding is a person's to answer: open, and routed `blocks` or
  * `escalates`. The routing is the policy's answer to who is asked; under the
- * routing policies in force the reviewer's `closure` no longer decides it, so a
+ * routing policies in force the reviewer's `closure` does not decide it, so a
  * finding whose closer it named as a person and that the policy routed
  * `remediable` is the executor's, and one routed `advisory` closes no gate.
  */

@@ -1,5 +1,16 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -56,29 +67,25 @@ function store(): string {
   return dir;
 }
 
-type Tally = { reads: number; torn: number; titles: number };
+type Tally = { reads: number; torn: number };
 
 /**
  * Reads `path` in a loop in a process of its own until `stop` exists: how many
- * reads it made, how many did not parse, and how many different titles it saw.
- * It says how many reads it has made so far in `progress`, so the writer can
- * go on until enough of them have landed rather than for a length of time.
+ * reads it made, and how many did not parse.
  */
-function reader(path: string, stop: string, progress: string): { ready: Promise<void>; done: Promise<Tally> } {
+function reader(path: string, stop: string): { ready: Promise<void>; done: Promise<Tally> } {
   const child = spawn(
     process.execPath,
     [
       "-e",
       `const fs = require("node:fs");
        let reads = 0, torn = 0;
-       const titles = new Set();
        process.stdout.write("ready\\n");
-       while (!fs.existsSync(${JSON.stringify(stop)})) {
+       do {
          reads++;
-         try { titles.add(JSON.parse(fs.readFileSync(${JSON.stringify(path)}, "utf8")).title); } catch { torn++; }
-         if (reads % 25 === 0) fs.writeFileSync(${JSON.stringify(progress)}, String(reads));
-       }
-       process.stdout.write(JSON.stringify({ reads, torn, titles: titles.size }) + "\\n");`,
+         try { JSON.parse(fs.readFileSync(${JSON.stringify(path)}, "utf8")); } catch { torn++; }
+       } while (!fs.existsSync(${JSON.stringify(stop)}));
+       process.stdout.write(JSON.stringify({ reads, torn }) + "\\n");`,
     ],
     { stdio: ["ignore", "pipe", "inherit"] },
   );
@@ -96,38 +103,44 @@ function reader(path: string, stop: string, progress: string): { ready: Promise<
   return { ready, done };
 }
 
-/** How many reads the reader has said it made; nothing yet, or a count caught mid-write, is none. */
-const readsSoFar = (progress: string): number => {
-  try {
-    return Number(readFileSync(progress, "utf8")) || 0;
-  } catch {
-    return 0;
-  }
-};
-
 describe("writing a ticket", () => {
+  it("leaves the file a reader already holds whole, and swaps the new one in beside it", () => {
+    const dir = store();
+    const path = join(dir, "tickets", "RACE-1.json");
+    const ticket = readTicket(dir, "RACE-1");
+    const before = readFileSync(path);
+    // A reader that opened the ticket before the write, and reads it after:
+    // what a reader racing the write holds at every moment of it. A write that
+    // rewrote the file in place would hand this one the new bytes, or some of
+    // them; a replaced file leaves it the old ones, all of them.
+    const held = openSync(path, "r");
+    try {
+      writeTicket(dir, { ...ticket, title: "Written while it is held" });
+      const buffer = Buffer.alloc(before.length + 4096);
+      const read = readSync(held, buffer, 0, buffer.length, 0);
+      expect(buffer.subarray(0, read).equals(before)).toBe(true);
+    } finally {
+      closeSync(held);
+    }
+    expect(readTicket(dir, "RACE-1").title).toBe("Written while it is held");
+  });
+
   it("is never seen half-written by a reader racing the writer", async () => {
     const dir = store();
     const path = join(dir, "tickets", "RACE-1.json");
     const stop = join(dir, "stop");
-    const progress = join(dir, "progress");
     const ticket = readTicket(dir, "RACE-1");
-    const racing = reader(path, stop, progress);
+    const racing = reader(path, stop);
     await racing.ready;
-    // Bounded by work done, not by time: enough writes and enough reads
-    // beside them, with a ceiling for a machine too loaded to get there.
-    const cap = Date.now() + 30_000;
-    let writes = 0;
-    while ((writes < 200 || readsSoFar(progress) < 200) && Date.now() < cap) {
+    // A fixed amount of writing, however fast the machine: the reader sees
+    // whatever overlap the scheduler gives it, and none of what it sees may be
+    // torn. The test above is the one that holds a reader across a write.
+    for (let writes = 0; writes < 200; writes++) {
       writeTicket(dir, { ...ticket, title: `A ticket rewritten while it is read, ${writes} times` });
-      writes++;
     }
     writeFileSync(stop, "");
-    const { reads, torn, titles } = await racing.done;
-    // A check nobody can fail is no check: the two have to have overlapped.
-    expect(writes).toBeGreaterThanOrEqual(200);
-    expect(reads).toBeGreaterThanOrEqual(200);
-    expect(titles).toBeGreaterThanOrEqual(2);
+    const { reads, torn } = await racing.done;
+    expect(reads).toBeGreaterThanOrEqual(1);
     expect(torn).toBe(0);
   }, 60_000);
 

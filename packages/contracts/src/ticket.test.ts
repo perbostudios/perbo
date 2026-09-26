@@ -711,7 +711,7 @@ describe("SCP-252: a pull request closed without merging leaves pr_open", () => 
   });
 });
 
-describe("a delivery a person's decisions took (D-NEW-a-person-s-answer-closes-a-routed-finding)", () => {
+describe("a delivery a person's decisions took (D-132)", () => {
   it("moves provisioning to pr_open on the note that run writes, and on no other", () => {
     const provisioning = ticket({ state: "provisioning" });
     const moved = transition(provisioning, "pr_open", `${DECIDED_DELIVERY_NOTE} (111111111111)`);

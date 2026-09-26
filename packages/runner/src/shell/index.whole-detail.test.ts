@@ -42,6 +42,9 @@ const cases: ReadonlyArray<[string, string, string?]> = [
   ["find's starting points from a file", `find -files0-from list -delete ${PAD}`],
   ["a legacy rule", `rm -rf build # don't touch ~/x ${PAD}`],
   ["a line that cannot be read", `cd - # ${PAD}`],
+  ["a backup suffix built when the line runs", `cp -b --suffix="$S" src/a.ts src/other/ ${PAD}`],
+  ["a word built where a writer still reads options", `find src $(echo -delete) ${PAD}`],
+  ["a sed script the line does not spell", `sed -i "$X" src/a.ts ${PAD}`],
   [
     "an ANSI-C quote this guard cannot end",
     `echo $'\\''; cp a /etc/x ${PAD}`,

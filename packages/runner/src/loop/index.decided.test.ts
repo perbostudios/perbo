@@ -13,10 +13,10 @@ import { git, runnerRepository } from "../test-support/repository.js";
 const scratch = scratchDirectories("perbo-runner-");
 
 /**
- * D-NEW-a-person-s-answer-closes-a-routed-finding: a person's answer to a
+ * D-132: a person's answer to a
  * finding the review routed to them closes that finding.
  *
- * PRB-13's shape: the review requests changes on two findings only a person
+ * The case: the review requests changes on two findings only a person
  * can close — observations about the repository, `outcome: unknown` — and the
  * person answers both. A fresh review of the same commit would raise the same
  * two findings for the same person to answer again, so the answers are handed
@@ -91,7 +91,7 @@ function makeConfig(repositoryRoot: string, over: Record<string, unknown> = {}) 
   });
 }
 
-/** Two findings only a person can close, as PRB-13's review routed them. */
+/** Two findings only a person can close, as the review routes them. */
 const forPerson: Finding[] = (
   [
     ["1", "lockfile", "The repository carries two lockfiles; which one is authoritative is not stated."],
@@ -197,7 +197,7 @@ const decision = (
   decided_at: at.toISOString(),
 });
 
-/** Run 1 of PRB-13: the review stops on the two findings routed to a person. */
+/** The first run: the review stops on the two findings routed to a person. */
 async function stoppedForPerson(): Promise<{
   repo: Repository;
   contract: PlanContract;

@@ -1,11 +1,20 @@
+import { assignmentsIn, type Assigned } from "./assigned.js";
 import {
   basename,
+  building,
+  builtOption,
+  builtOptionFinding,
   carries as carriesInto,
   isAssignment,
+  keepAsOperand,
   optionSet,
   suppliedAsOption,
   suppliedDestination,
+  UNREAD_OPTIONS,
+  valuesOf,
+  type BuiltWords,
   type Context,
+  type OptionReading,
   type SuppliedOperands,
 } from "./command.js";
 import {
@@ -15,9 +24,10 @@ import {
   type Destination,
   type WriteFinding,
 } from "./destination.js";
-import { findExpression } from "./find.js";
-import { gitFindings } from "./git.js";
-import { INTERPRETERS, interpreterFindings } from "./interpreter.js";
+import { clockSetting } from "./clock.js";
+import { findBuiltWords, findExpression } from "./find.js";
+import { gitBuiltWords, gitFindings } from "./git.js";
+import { INTERPRETERS, interpreterBuiltWords, interpreterFindings } from "./interpreter.js";
 import {
   heredocQueue,
   scanSegments,
@@ -28,8 +38,9 @@ import {
   type StdinSource,
   type Word,
 } from "./lexer.js";
-import { linkFindings } from "./link.js";
+import { LINK_VALUES, linkFindings } from "./link.js";
 import { type Cwd, type ResolvedScope } from "./scope.js";
+import { sedFindings } from "./sed.js";
 import { programSourceFindings, shellFromStdin } from "./stdin.js";
 import {
   EXEC_SPEC,
@@ -41,7 +52,7 @@ import {
   WRAPPERS,
   type WrapperSpec,
 } from "./wrappers.js";
-import { WRITERS, writerFindings } from "./writers.js";
+import { WRITERS, writerFindings, writerValues } from "./writers.js";
 
 /** The directory a command runs in, as a word: `find`'s default starting point. */
 const HERE: Word = { raw: ".", value: ".", substitutions: [], variable: false };
@@ -128,6 +139,12 @@ export interface CommandSegment {
   /** False where the parser could not account for the segment. */
   accounted: boolean;
   /**
+   * True for a segment a substitution runs to build a variable's value —
+   * `X=$(…)`, `export X=$(…)` — and every segment inside it. What it prints
+   * goes wherever the variable is expanded, which is not where it stands.
+   */
+  assigns: boolean;
+  /**
    * The text of a program word the parser could not read at all — a
    * substitution, a backtick, or an unexpanded variable stood where the verb
    * should be — wherever a nested shell put it (SCP-201). Empty for every
@@ -145,6 +162,19 @@ export interface CommandSegment {
  */
 export function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
   return segments.flatMap((segment) => [segment, ...everySegment(segment.nested), ...everySegment(segment.substitutions)]);
+}
+
+/** A word that assigns a variable its value, `NAME=…` or `NAME+=…`, wherever it stands. */
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+
+/** A segment, and every segment inside it, as one that builds a variable's value. */
+function assigning(segment: CommandSegment): CommandSegment {
+  return {
+    ...segment,
+    assigns: true,
+    nested: segment.nested.map(assigning),
+    substitutions: segment.substitutions.map(assigning),
+  };
 }
 
 /** What reading a command line yields: what it writes, where it stands, what it runs. */
@@ -177,6 +207,65 @@ function looksUp(words: readonly Word[]): boolean {
     if (/^-[pvV]+$/.test(value) && /[vV]/.test(value)) return true;
   }
   return false;
+}
+
+/**
+ * The verbs whose options neither write nor run a program, so a word a
+ * substitution builds may stand anywhere among their words: `ls $(pwd)` and
+ * `cat "$(git rev-parse --show-toplevel)/README.md"` read what they name and
+ * nothing else, whatever the substitution prints.
+ */
+const OPTIONS_INERT = new Set([
+  "cd", "pushd", "popd", "pwd", "echo", "printf", "true", "false", ":", "ls", "cat", "head", "tail", "wc",
+]);
+
+/**
+ * The words the line builds where `verb` still reads them as options, the
+ * name a refusal gives the command and how it says to write such a word, and
+ * whether the guard reads the verb's options at all. A writer, `ln` and `rg`
+ * read options until `--`, and an option their table says takes a value takes
+ * a word built there as that value; `dd` reads an `of=` wherever it stands;
+ * `find` reads its expression wherever it stands (`findBuiltWords`); an
+ * interpreter reads its own until the program it runs
+ * (`interpreterBuiltWords`); `git` reads its own (`gitBuiltWords`). A verb it
+ * does not read stops at `--`, and anywhere else a word built at run time is
+ * one the segment cannot account for.
+ */
+function builtWordsOf(
+  verb: string,
+  rest: readonly Word[],
+  context: Context,
+): { built: BuiltWords; label: string; keep: string; read: boolean } {
+  if (verb === "git") return { ...gitBuiltWords(rest, context), read: true };
+  if (INTERPRETERS.has(verb)) {
+    return { ...interpreterBuiltWords(verb, rest, context.assigned), label: verb, read: true };
+  }
+  if (verb === "find") {
+    return {
+      built: findBuiltWords(rest, context.assigned),
+      label: verb,
+      keep: "find reads a word there as more than a starting point wherever it stands, so write it on the line",
+      read: true,
+    };
+  }
+  const writer = WRITERS.get(verb);
+  const reading: OptionReading | null =
+    writer?.assignments !== undefined
+      ? { ends: "never", operands: false, named: false }
+      : writer !== undefined
+        ? { ends: "dashes", operands: true, named: true, values: writerValues(writer) }
+        : verb === "ln"
+          ? { ends: "dashes", operands: true, named: true, values: LINK_VALUES }
+          : verb === "rg"
+            ? { ends: "dashes", operands: true, named: true, values: valuesOf(RG_VALUES) }
+            : null;
+  const used = reading ?? UNREAD_OPTIONS;
+  return {
+    built: builtOption(rest, used, context.assigned),
+    label: verb,
+    keep: keepAsOperand(verb, used),
+    read: reading !== null,
+  };
 }
 
 /** `rg`'s options that take a value, as a separate word or attached. */
@@ -276,6 +365,48 @@ interface Analysis {
  * their own right and are judged as such.
  */
 function analyzeWords(words: Word[], context: Context): Analysis {
+  const expand: number[] = [];
+  const first = readWords(words, context, expand);
+  const assigned = context.assigned;
+  if (expand.length === 0 || context.expanded === true || assigned === undefined) return first;
+  const valued = words.flatMap((word, at) => {
+    if (!expand.includes(at)) return [word];
+    const how = building(word, assigned);
+    return how.kind === "assigned" ? how.words : [word];
+  });
+  return bothReadings(first, readWords(valued, { ...context, expanded: true }, []));
+}
+
+/**
+ * A command read as written and read again with the values the line assigns
+ * in place of its variables, as one: refused where either reading refuses,
+ * accounted for only where both are, and running what either runs. The first
+ * reading is kept because a variable can hold another value where the command
+ * runs — one set in a subshell, or in front of another command, does not
+ * reach it — and the second is what the line most plainly does.
+ */
+function bothReadings(written: Analysis, valued: Analysis): Analysis {
+  const seen = new Set(written.findings.map((finding) => finding.detail));
+  return {
+    findings: [...written.findings, ...valued.findings.filter((finding) => !seen.has(finding.detail))],
+    ...(written.cd === undefined ? {} : { cd: written.cd }),
+    accounted: written.accounted && valued.accounted,
+    mutating: written.mutating || valued.mutating,
+    programs: [...new Set([...written.programs, ...valued.programs])],
+    invocations: [...new Set([...written.invocations, ...valued.invocations])],
+    nested: [...written.nested, ...valued.nested],
+    substitutions: [...written.substitutions, ...valued.substitutions],
+    notes: [...new Set([...written.notes, ...valued.notes])],
+    unreadablePrograms: [...written.unreadablePrograms, ...valued.unreadablePrograms],
+  };
+}
+
+/**
+ * `analyzeWords`'s single reading, adding to `expand` the index of each word
+ * built from a variable the line assigns a value it spells, where the command
+ * still reads it as an option.
+ */
+function readWords(words: Word[], context: Context, expand: number[]): Analysis {
   const findings: WriteFinding[] = [];
   const nested: string[] = [];
   const programs: string[] = [];
@@ -752,6 +883,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       [basename(value), ...words.slice(i + 1).map((word) => word.raw)].join(" ").trim(),
     );
     const program = basename(value);
+    // `date -us …` sets the clock as `date --set …` does, and a list entry reads
+    // only the front of the line, so a `date` whose words set the clock also
+    // runs as its `--set` spelling.
+    if (program === "date") {
+      const setting = clockSetting(words.slice(i + 1).filter((word) => word.redirect !== true));
+      if (setting !== null) invocations.push(`date --set ${setting}`);
+    }
     if (PACKAGE_MANAGERS.has(program)) {
       i += 1;
       const stop = consumeOptions(program, PACKAGE_MANAGER_SPEC);
@@ -913,7 +1051,29 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const rest = words.slice(i + 1);
     const stands = placeholderStands(command, "the program itself");
     if (stands !== null) return stands;
-    if (command.variable || command.substitutions.length > 0) {
+    // A word the line builds when it runs, where the command still reads
+    // options, is an option this guard cannot read. For a verb it reads,
+    // whose options it knows can write or run a program, that is refused; for
+    // one it does not read, the segment is one it cannot account for, which
+    // no executor admits over its allow-list, and its note says how to write
+    // the word so the command reads it as an operand. A word built from a
+    // variable the line assigns a value it spells is read a second time with
+    // that value in its place (`analyzeWords`).
+    const readable = !command.variable && command.substitutions.length === 0;
+    if (readable && !OPTIONS_INERT.has(verb)) {
+      const { built, label, keep, read } = builtWordsOf(verb, rest, { ...context, cwd });
+      if (built.unreadable !== undefined && read) {
+        findings.push(builtOptionFinding(label, built.unreadable, keep, { ...context, cwd }));
+      } else if (built.unreadable !== undefined) {
+        accounted = false;
+        notes.push(
+          `${built.unreadable.raw} is built when the line runs where ${label} still reads options, so what ` +
+            `it becomes can be one of its options — ${keep}`,
+        );
+      }
+      expand.push(...built.assigned.map((at) => i + 1 + at));
+    }
+    if (!readable) {
       // `$(…)`, a backtick, or a bare `$name` stands where the verb should —
       // `exec`'s own leading flags are already consumed by the time this word
       // is reached, so `exec $(…)` and `exec $VAR` land here too. There is no
@@ -936,6 +1096,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       // deciding the line by where those landed has not seen the whole act.
       if (spec.beyondNamedPaths !== true) mutating = true;
       findings.push(...writerFindings(verb, spec, rest, { ...context, cwd, supplied }));
+      if (verb === "sed") findings.push(...sedFindings(rest, { ...context, cwd, supplied }));
     } else if (verb === "ln") {
       programs.push(verb);
       mutating = true;
@@ -1100,7 +1261,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   }
 
   for (const text of nested) {
-    const inner = inspectSegments(text, context.scope, cwd, context.depth + 1);
+    const inner = inspectSegments(text, context.scope, cwd, context.depth + 1, context.assigned);
     findings.push(...inner.findings);
     // The wrapper is not the act. `sh -c 'cp a b'` and `eval cp a b` write what
     // the inner line writes, so the decision the outer command gets is the one
@@ -1208,12 +1369,19 @@ function analyzeSegment(
     }
     // Every `$(…)`, backtick and process-substitution body is a command in its
     // own right, run before this one, and kept as a segment of its own
-    // (`CommandSegment.substitutions` says what it hands this one).
-    for (const word of words) bodies.push(...word.substitutions);
-    for (const body of bodies) {
-      const inner = inspectSegments(body, context.scope, cwd, context.depth + 1);
+    // (`CommandSegment.substitutions` says what it hands this one). One that
+    // builds a variable's value is marked as doing so.
+    const valueBodies = new Set<number>();
+    for (const word of words) {
+      for (const body of word.substitutions) {
+        if (ASSIGNMENT_WORD.test(word.raw)) valueBodies.add(bodies.length);
+        bodies.push(body);
+      }
+    }
+    for (const [at, body] of bodies.entries()) {
+      const inner = inspectSegments(body, context.scope, cwd, context.depth + 1, context.assigned);
       findings.push(...inner.findings);
-      substitutionSegments.push(...inner.segments);
+      substitutionSegments.push(...(valueBodies.has(at) ? inner.segments.map(assigning) : inner.segments));
       for (const segment of inner.segments) {
         invocations.push(...segment.invocations);
         unreadablePrograms.push(...segment.unreadablePrograms);
@@ -1308,6 +1476,7 @@ export function inspectSegments(
   scope: ResolvedScope,
   start: Cwd,
   depth: number,
+  inherited?: Assigned,
 ): CommandReading {
   if (depth > 8) {
     return {
@@ -1324,6 +1493,7 @@ export function inspectSegments(
   }
   const { texts, separators, balanced, bodies, unreadable } = scanSegments(command);
   const heredocs = heredocQueue(bodies);
+  const assigned = assignmentsIn(command, inherited);
   const findings: WriteFinding[] = [];
   if (unreadable !== null) {
     findings.push({
@@ -1345,7 +1515,7 @@ export function inspectSegments(
     }
     const analysis = analyzeSegment(
       segment,
-      { scope, cwd, segment, depth, stdin: piped },
+      { scope, cwd, segment, depth, stdin: piped, assigned },
       heredocs,
     );
     piped = pipeInto(separator, segment);
@@ -1360,6 +1530,7 @@ export function inspectSegments(
       substitutions: analysis.substitutions,
       notes: analysis.notes,
       accounted: analysis.accounted && balanced,
+      assigns: false,
       unreadablePrograms: analysis.unreadablePrograms,
     });
     // A `cd` the shell runs in a subshell — a pipeline stage, a backgrounded

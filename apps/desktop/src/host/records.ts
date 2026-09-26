@@ -532,7 +532,7 @@ export type FindingsOnRecord = z.infer<typeof FindingsOnRecordSchema>;
 /**
  * The findings of a ticket's last review as the loop reads it — the newest
  * `rev_` bundle — which is what a person's answer has to be one the loop acts
- * on against (D-NEW-a-person-s-answer-closes-a-routed-finding). Null where no
+ * on against (D-132). Null where no
  * review can be read.
  */
 export function findingsOnRecord(
@@ -581,7 +581,7 @@ const VerdictsRecordSchema = z.object({
 /**
  * The standing answers of one ticket that closed their finding as it stood —
  * shipped as it is — in the verdicts record `perbo verdict` writes
- * (D-NEW-a-person-s-answer-closes-a-routed-finding). An answer that handed the
+ * (D-132). An answer that handed the
  * finding to the executor closes nothing by itself: the round's verification
  * does, and the graph reads that where every closure is read. None where the
  * file is absent or cannot be read: `perbo inspect` is where a broken record
@@ -629,7 +629,7 @@ export function liveGraph(input: {
   /**
    * The person's answers to findings routed to them, each of which closes its
    * finding as of when it was taken
-   * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+   * (D-132).
    */
   decisions: readonly Decision[];
   /** The plan the ticket carries now, which a review has to have judged. */

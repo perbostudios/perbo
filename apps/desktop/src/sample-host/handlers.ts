@@ -1037,7 +1037,7 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
       // judged: the loop delivers — after one round verified closed where an
       // answer handed a finding to the executor, and without one where every
       // answer shipped it as it is — and a run that publishes nothing leaves
-      // no pull request (D-NEW-a-person-s-answer-closes-a-routed-finding).
+      // no pull request (D-132).
       if (kind === "decide" && everyDecisionTaken(key)) {
         if (decisionsHandWork(key)) approved.add(key);
         moveTicket(row.ticket, [

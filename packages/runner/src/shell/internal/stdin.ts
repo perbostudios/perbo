@@ -1,7 +1,7 @@
 import { basename, isAssignment, type Context } from "./command.js";
 import type { WriteFinding } from "./destination.js";
 import { inlineCodeFindings, unwrapped } from "./inline-code.js";
-import type { StdinSource, Word } from "./lexer.js";
+import { expandedPrefix, type StdinSource, type Word } from "./lexer.js";
 import type { Cwd } from "./scope.js";
 
 /**
@@ -29,9 +29,13 @@ export function programSourceFindings(
 ): WriteFinding[] {
   const tail = `: ${context.segment}`;
   // `python3 script.py`, `node build.js`: a file, and files are not read here.
-  // A lone `-` is the operand that says the program is on standard input.
+  // A lone `-` is the operand that says the program is on standard input, and
+  // so can one that is empty when the line runs — `""`, or a word that begins
+  // with an expansion, `$Y` or `"$(…)"`, which can expand to nothing: `node ""`
+  // runs what arrives on standard input.
   const script = operands[0];
-  if (script !== undefined && script.value !== "-") return [];
+  const empty = script !== undefined && (script.value === "" || expandedPrefix(script.raw)?.prefix === "");
+  if (script !== undefined && script.value !== "-" && !empty) return [];
 
   const source = context.stdin;
   if (source === undefined) {

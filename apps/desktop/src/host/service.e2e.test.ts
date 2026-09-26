@@ -1217,11 +1217,11 @@ describe("the graph while the work runs", () => {
     expect(second.state).not.toBe("finding_open");
   });
 
-  it("PRB-13: records each answer on its finding before the loop runs, and the graph reads them as decided", async () => {
+  it("records each answer on its finding before the loop runs, and the graph reads them as decided", async () => {
     // The CLI's `verdict`, `principle` and `run` are stood in for and their
     // argv kept: a real `run` executes a coding agent, and what `verdict
     // --decide` writes and what the loop does with it are proven in the CLI's
-    // and the runner's own tests (D-NEW-a-person-s-answer-closes-a-routed-finding).
+    // and the runner's own tests (D-132).
     const calls: string[][] = [];
     const runner: typeof runProcess = async (binary, args, options) => {
       if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
@@ -2839,7 +2839,7 @@ readline.createInterface({ input: process.stdin })
       expect((await service.request({ kind: "editingRead", id })).interviewModel).toBe("claude-opus-5-5");
     });
 
-    it("is the planning's own model where the catalog does not list Opus 5.5 or cannot be read", async () => {
+    it("is the planning's executor model where the catalog does not list Opus 5.5 or cannot be read", async () => {
       const { service, repoId, id, fake, options } = await planning();
       options.modelCatalog = async () => {
         throw new Error("Provider CLI unavailable.");
@@ -2860,7 +2860,7 @@ readline.createInterface({ input: process.stdin })
       expect(asked).not.toHaveBeenCalled();
     });
 
-    it("keeps the planning's own model where it drafts on Codex, and reads no catalog", async () => {
+    it("keeps the planning's executor model where it drafts on Codex, and reads no catalog", async () => {
       const { service, repoId, id, fake, options } = await planning();
       const session = await service.request({ kind: "editingRead", id });
       await service.request({

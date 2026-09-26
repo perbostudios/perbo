@@ -864,7 +864,7 @@ export const TICKET_RUNS: TicketRuns = {
  * The states a run's result proves. A delivery a person's decisions took
  * without a round proves only that the run provisioned and then went where an
  * approval goes, and its row says why in the words the lifecycle's guard reads
- * (D-NEW-a-person-s-answer-closes-a-routed-finding); every other run is walked
+ * (D-132); every other run is walked
  * through what its rounds prove.
  */
 export function observedPath(result: TicketRunResult): ReturnType<typeof statesObserved> {
@@ -1243,7 +1243,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
         delivery_checks_bound_ms: deliveryBoundMs,
       },
       contract,
-      // D-NEW-a-person-s-answer-closes-a-routed-finding: the answers a person
+      // D-132: the answers a person
       // gave to findings routed to them, which close those findings. Read from
       // this store's verdicts record; a record that cannot be read is named on
       // stderr and closes nothing.

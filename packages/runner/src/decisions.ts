@@ -2,7 +2,7 @@ import type { DecisionChoice, Finding, ReviewArtifact } from "@perbo/contracts";
 
 /**
  * A person's answer to a finding the review routed to them, and how it is
- * recorded on the finding (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ * recorded on the finding (D-132).
  */
 
 /** Whether a choice hands the finding to the executor. */
@@ -11,7 +11,7 @@ export const handsToExecutor = (choice: DecisionChoice): boolean => choice !== "
 /**
  * A person's answer to one finding the review routed to them, as `perbo
  * verdict --decide` records it and `perbo run` hands it to the loop
- * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ * (D-132).
  */
 export interface DecidedFinding {
   finding_key: string;

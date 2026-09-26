@@ -602,8 +602,8 @@ export class InterviewHost {
    * The model this planning's chat starts on (`interviewModelFor`, D-102). Only
    * Claude Code offers the chat's own model, so only its catalog is read: the
    * one the model pickers last read, or else read here once and kept. A catalog
-   * that cannot be read offers nothing, and the chat starts on the person's own
-   * default.
+   * that cannot be read offers nothing, and the chat starts on the planning's
+   * executor model, which is the model its spec is drafted with.
    */
   private async chatModel(models: TaskModels): Promise<string> {
     if (models.draftingProvider !== "claude-cli") return interviewModelFor(models, null);

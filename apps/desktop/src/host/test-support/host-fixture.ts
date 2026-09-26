@@ -88,7 +88,7 @@ export function fixture(
       }),
     },
     // No provider CLI is asked for its catalog: one that lists nothing, which
-    // leaves the chat on the planning's own model.
+    // leaves the chat on the planning's executor model.
     modelCatalog: async (provider) => ({
       provider,
       models: [],

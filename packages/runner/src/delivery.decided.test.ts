@@ -6,7 +6,7 @@ import { finding, makeContract, makeReview } from "./test-support/records.js";
 
 /**
  * The pull request's "Decided by a person" section
- * (D-NEW-a-person-s-answer-closes-a-routed-finding): what a person decided,
+ * (D-132): what a person decided,
  * in their words, and nothing else — a per-rule suppression is not a decision
  * and stays under Advisory, an address is never printed, and a note cannot
  * write a stop marker `perbo sync` would read.
