@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { sampleBridge } from "../../sample-host/bridge.js";
-import type { Detail, Job, Snapshot } from "../../shared/protocol.js";
+import { RequestSchema, TYPED_TEXT_MAX_CHARS, type Detail, type Job, type Snapshot } from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
 import { LoopScreen } from "./LoopScreen.js";
 import type { TaskContext } from "./task-context.js";
 
@@ -131,6 +132,26 @@ describe("the three answers a question takes", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Save and continue" }));
     });
     expect(decision).toMatchObject({ choice: "approach", answer: "Park it on the dead-letter queue." });
+  });
+
+  it("holds a typed approach to the room the answer leaves where it is typed, and sends it whole without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+    let held = "";
+    const request = await sent(() => {
+      const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+      const box = within(dialog).getByRole("textbox", { name: "Your approach" }) as HTMLTextAreaElement;
+      typeInto(box, "w".repeat(TYPED_TEXT_MAX_CHARS + 50));
+      held = box.value;
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save and continue" }));
+    });
+    // Every answer goes down together as one principle, headed by the task and
+    // each question's title: the box holds what that leaves, and not a
+    // character more.
+    expect(held).toBe("w".repeat(held.length));
+    expect(held.length).toBeLessThan(TYPED_TEXT_MAX_CHARS);
+    expect(request.answer).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    expect(request.answer.endsWith(held)).toBe(true);
+    expect(request.decisions[0]).toMatchObject({ choice: "approach", answer: held });
+    expect(RequestSchema.safeParse(request).success).toBe(true);
   });
 
   it("sends Let it decide as the approach left to the executor", async () => {

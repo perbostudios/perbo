@@ -7,7 +7,15 @@ import type { TicketState } from "@perbo/contracts";
 import { HomePage } from "./HomePage.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Route } from "../shell/route.js";
-import type { Request, Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
+import {
+  ARCHIVE_SEARCH_MAX_CHARS,
+  RequestSchema,
+  type Request,
+  type Snapshot,
+  type TaskRow,
+  type TaskSummary,
+} from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
 import { bridge } from "../workspace/index.js";
 
 let client: QueryClient;
@@ -79,6 +87,39 @@ describe("the archive's cost column", () => {
   });
 });
 
+describe("the search a person types (D-NEW-nothing-shown-is-cut)", () => {
+  it("is held to what an archive search holds where it is typed, on Home and in the archive, and exports without a refusal", async () => {
+    const { workspace } = archived(null);
+    const sent: Request[] = [];
+    vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {
+      sent.push(request);
+      return null;
+    }) as typeof bridge.request);
+    render(
+      <QueryClientProvider client={client}>
+        <HomePage workspace={workspace} navigate={() => undefined} archive={false} />
+      </QueryClientProvider>,
+    );
+    const running = screen.getByRole("textbox", { name: "Search running tickets" }) as HTMLInputElement;
+    typeInto(running, "s".repeat(ARCHIVE_SEARCH_MAX_CHARS + 20));
+    expect(running.value).toHaveLength(ARCHIVE_SEARCH_MAX_CHARS);
+    cleanup();
+    render(
+      <QueryClientProvider client={client}>
+        <HomePage workspace={workspace} navigate={() => undefined} archive />
+      </QueryClientProvider>,
+    );
+    const search = screen.getByRole("textbox", { name: "Search archived tasks" }) as HTMLInputElement;
+    typeInto(search, "s".repeat(ARCHIVE_SEARCH_MAX_CHARS + 20));
+    expect(search.value).toHaveLength(ARCHIVE_SEARCH_MAX_CHARS);
+    fireEvent.click(screen.getByRole("button", { name: "export CSV" }));
+    await waitFor(() => expect(sent.some((request) => request.kind === "exportArchive")).toBe(true));
+    const exported = sent.find((request) => request.kind === "exportArchive")!;
+    expect(RequestSchema.safeParse(exported).success).toBe(true);
+    expect((exported as { search: string }).search).toBe("s".repeat(ARCHIVE_SEARCH_MAX_CHARS));
+  });
+});
+
 describe("a Home card", () => {
   const pr = "https://github.com/example/webstore/pull/9";
   /** A board of these tickets, nothing filed and nothing running, each with its contract's outcome read. */
@@ -98,7 +139,7 @@ describe("a Home card", () => {
         costBasis: "none",
         diff: null,
         note: null,
-        outcome: `The outcome of ticket ${index}, long enough that a narrow card has to cut it short at its edge`,
+        outcome: `The outcome of ticket ${index}, long enough that a narrow card has to wrap it at its edge`,
       });
       return row;
     });
@@ -142,13 +183,13 @@ describe("a Home card", () => {
     expect(opened).toMatchObject([{ page: "task", key: "PRB-904" }]);
   });
 
-  it("says the contract's outcome on one line where the loop did not stop, and why it stopped where it did", () => {
+  it("says the contract's outcome whole where the loop did not stop, and why it stopped where it did", () => {
     home(board([["pr_open", pr], ["merged", pr], ["changes_requested", null], ["failed", null]]));
     for (const [index, name] of ["Ticket 0 pr_open", "Ticket 1 merged", "Ticket 2 changes_requested"].entries()) {
       const line = card(name).querySelector(".task-card-description > span")!;
       expect(line.className).toBe("task-card-outcome");
       expect(line.textContent).toBe(
-        `The outcome of ticket ${index}, long enough that a narrow card has to cut it short at its edge`,
+        `The outcome of ticket ${index}, long enough that a narrow card has to wrap it at its edge`,
       );
     }
     const stopped = card("Ticket 3 failed").querySelector(".task-card-description > span")!;
@@ -167,13 +208,13 @@ describe("a Home card", () => {
     home(workspace);
     for (const name of ["Ticket 0 merged", "Ticket 1 executing"])
       expect(card(name).querySelector(".task-card-outcome")!.textContent).toBe("\u00a0");
-    // One line, cut short with an ellipsis at the card's other end.
+    // Whole, wrapping onto more lines at the card's other end rather than cut
+    // short there (D-NEW-nothing-shown-is-cut).
     const rule = /\.task-card-description > \.task-card-outcome \{([^}]*)\}/.exec(
       readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"),
     )?.[1];
-    expect(rule).toMatch(/white-space: nowrap;/);
-    expect(rule).toMatch(/overflow: hidden;/);
-    expect(rule).toMatch(/text-overflow: ellipsis;/);
+    expect(rule).toMatch(/overflow-wrap: anywhere;/);
+    for (const cut of ["nowrap", "overflow: hidden", "ellipsis"]) expect(rule).not.toContain(cut);
   });
 
   /** The bridge, answering every request with nothing and keeping each one it was asked. */

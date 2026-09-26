@@ -169,7 +169,8 @@ export async function judgeRelevel(
     touched === null
       ? "git could not list what the base brought in; reviewing the merged change set afresh"
       : `the base brought in ${touched.length} path(s) inside the contract's scope ` +
-          `(${touched.slice(0, 5).join(", ")}); reviewing the merged change set afresh`,
+          `(${touched.slice(0, 5).join(", ")}${touched.length > 5 ? ` and ${touched.length - 5} more` : ""}); ` +
+          "reviewing the merged change set afresh",
   );
   const graphOutcome = await reviewGraph(
     {

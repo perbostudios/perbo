@@ -565,7 +565,7 @@ function decide(
       if (hit !== undefined) {
         return denied(
           ADMISSION_RULES.deny_list,
-          segment.text.slice(0, 200),
+          segment.text,
           `${hit} on the runner's command deny-list refuses this command`,
         );
       }
@@ -634,13 +634,13 @@ function decide(
     if (writeCause(escaped) === "unreadable_program") {
       return denied(
         ADMISSION_RULES.unreadable_inline_program,
-        detail.slice(0, 200),
+        detail,
         escaped.detail,
       );
     }
     return denied(
       writeRule(escaped),
-      escaped.target ?? detail.slice(0, 200),
+      escaped.target ?? detail,
       escaped.detail,
     );
   }

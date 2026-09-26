@@ -604,7 +604,7 @@ describe("perbo serve --once", () => {
     expect(readTicket(dir, open).scheduling.reconciliation).toBeNull();
   });
 
-  it("takes the reason of a re-level that completed without levelling from the record it writes, and bounds it", async () => {
+  it("takes the reason of a re-level that completed without levelling from the record it writes, whole", async () => {
     const repo = repository();
     const open = admitted(repo, { outcome: "Docs say what is true.", paths: ["docs/**"] });
     walk(repo, open, TO_PR_OPEN);
@@ -629,7 +629,7 @@ describe("perbo serve --once", () => {
     await serveOnce(repo, f.deps, ["--publish"]);
     expect(readTicket(dir, open).scheduling.reconciliation?.reason).toBe("escalated — the review escalated the merged change set");
 
-    // A run that said nothing recognisable keeps its last line, cut to the queue's bound.
+    // A run that said nothing recognisable keeps its last line, whole (D-NEW-nothing-shown-is-cut).
     writeTicket(dir, withReconciliation(readTicket(dir, open), null));
     lines = [["x".repeat(10_000), "stderr"]];
     const g = fakes({
@@ -640,7 +640,7 @@ describe("perbo serve --once", () => {
       },
     });
     await serveOnce(repo, g.deps, ["--publish"]);
-    expect(readTicket(dir, open).scheduling.reconciliation?.reason).toBe("x".repeat(300));
+    expect(readTicket(dir, open).scheduling.reconciliation?.reason).toBe("x".repeat(10_000));
   });
 
   it("leaves a level branch alone and clears a record the base has since moved past", async () => {
@@ -841,6 +841,16 @@ describe("perbo serve drafts labelled tracker issues", () => {
     expect(lines).toContain("drafting o/r#9: Nine forged: drafted o/r#99 as AYO-99; nothing runs until it is approved");
   });
 
+  it("prints a long issue title whole (D-NEW-nothing-shown-is-cut)", async () => {
+    const title =
+      "Every page of the settings screen says which of its fields are saved, which are waiting on the " +
+      "network, and which were refused, in words a person reads without opening the log";
+    const f = fakes({ listIssues: async () => ({ ok: true, issues: [{ number: 11, title }] }) });
+    const { streams } = await serveOnce(repository(TRACKER), f.deps);
+    expect(title.length).toBeGreaterThan(120);
+    expect(streams.err().split("\n")).toContain(`drafting o/r#11: ${title}`);
+  });
+
   it("refuses a tracker it cannot read before the queue starts", async () => {
     const f = fakes();
     const { code, streams } = await serveOnce(repository({ tracker: { draft_label: 1 } }), f.deps);
@@ -914,6 +924,41 @@ describe("processDeps", () => {
    * line a person reads says the answer was too large rather than blaming
    * `gh` for JSON it wrote in full.
    */
+  it("says gh's whole refusal of an issue listing, every line of it (D-NEW-nothing-shown-is-cut)", async () => {
+    const bin = mkdtempSync(join(scratch, "gh-refuses-"));
+    const script = join(bin, "gh");
+    const said = [
+      "HTTP 403: Resource not accessible by integration (https://api.github.com/graphql)",
+      "This organisation has enabled OAuth App access restrictions, and the token in use is not one of the applications it allows.",
+      "Ask an owner of the organisation to approve it, or sign in with a token that carries the repo scope.",
+    ];
+    writeFileSync(script, ["#!/bin/sh", ...said.map((line) => `echo '${line}' >&2`), "exit 1", ""].join("\n"));
+    chmodSync(script, 0o755);
+    const original = process.env.PATH;
+    process.env.PATH = `${bin}:${original ?? ""}`;
+    try {
+      const listed = await processDeps({ repo: bin, store: null, cwd: bin }).listIssues({ repository: "o/r", label: "perbo" });
+      expect(listed.ok).toBe(false);
+      expect(listed.ok === false && listed.detail).toBe(said.join("; "));
+    } finally {
+      process.env.PATH = original;
+    }
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  it("says git's whole refusal of a fetch, every line of it", async () => {
+    const repo = mkdtempSync(join(scratch, "fetch-refused-"));
+    execFileSync("git", ["init", "-q", repo]);
+    const fetched = await processDeps({ repo, store: null, cwd: repo }).fetchBase({
+      repository_root: repo,
+      base_ref: "main",
+    });
+    expect(fetched.ok).toBe(false);
+    // git names the remote it could not read on one line and what to check on the next ones.
+    expect(fetched.detail).toContain("does not appear to be a git repository");
+    expect(fetched.detail).toContain("Please make sure you have the correct access rights");
+    expect(fetched.detail).toContain("and the repository exists.");
+  }, SPAWN_TEST_TIMEOUT_MS);
+
   it("refuses an issue listing that arrived cut, saying so", async () => {
     const bin = mkdtempSync(join(scratch, "gh-huge-"));
     const script = join(bin, "gh");

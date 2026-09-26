@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createScratch } from "@perbo/test-support";
 import { EditingSessionSchema, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
-import { editingForm } from "../../shared/contract-editing.js";
-import { mintSpecFromTitle, saveSpec, specView, type SpecDeps } from "./spec.js";
+import { driftHash, writeDriftRecord } from "@perbo/planning";
+import { editingForm, readingStateOf } from "../../shared/contract-editing.js";
+import { draftedReading, mintSpecFromTitle, saveSpec, specTexts, specView, type SpecDeps } from "./spec.js";
 import type { EditingSession, RequestOf, SpecSections } from "../../shared/protocol.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -379,13 +380,23 @@ describe("the slug a session records", () => {
 });
 
 describe("mintSpecFromTitle", () => {
-  it("mints a folder from the title, with an otherwise empty spec", () => {
+  it("mints a folder from the cut, with an otherwise empty spec titled Untitled (D-118)", () => {
     const repo = repository();
     const written = mintSpecFromTitle(repo, "Retry a failed run");
     expect(written.slug).toBe("retry-a-failed-run");
     expect(written.folder).toBe("specs/retry-a-failed-run");
     const text = readFileSync(join(repo.path, written.folder, "spec.md"), "utf8");
-    expect(text).toContain("Retry a failed run");
+    // The cut names the folder and is no title: it never shows as one.
+    expect(text.split("\n")[0]).toBe("# Untitled");
+    expect(text).not.toContain("Retry a failed run");
+  });
+
+  it("refuses a cut whose folder is taken, naming the words the folder came from", () => {
+    const repo = repository();
+    mintSpecFromTitle(repo, "Retry a failed run");
+    expect(() => mintSpecFromTitle(repo, "Retry a failed run")).toThrow(
+      "specs/retry-a-failed-run/spec.md already exists, and 'Retry a failed run' takes the same folder",
+    );
   });
 
   it("writes into the folder the repository's configuration names", () => {
@@ -393,5 +404,60 @@ describe("mintSpecFromTitle", () => {
     mkdirSync(join(repo.path, ".perbo"), { recursive: true });
     writeFileSync(join(repo.path, ".perbo", "config.json"), JSON.stringify({ specs: "docs/specs" }));
     expect(mintSpecFromTitle(repo, "Retry a failed run").folder).toBe("docs/specs/retry-a-failed-run");
+  });
+});
+
+describe("draftedReading", () => {
+  /** A planning over PRB-1 with its spec written, and the verdict admission wrote beside the ticket. */
+  function drafted(verdict: { spec?: string; findings?: number } | null) {
+    const repo = repository();
+    const at = join(repo.path, "specs", "signup-mail", "spec.md");
+    mkdirSync(join(repo.path, "specs", "signup-mail"), { recursive: true });
+    writeFileSync(at, "# Signup mail\n\n## Outcome\n\nOne email.\n\n## Requirements\n\n- R1: One email is queued.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n");
+    if (verdict !== null)
+      writeDriftRecord(join(repo.path, ".perbo"), "PRB-1", {
+        spec: verdict.spec ?? driftHash(readFileSync(at)),
+        promises: `sha256:${"b".repeat(64)}`,
+        origin: "drafted",
+        findings: Array.from({ length: verdict.findings ?? 0 }, () => ({
+          heading: "Criterion 1 and R1",
+          difference: "R1 asks for one email; criterion 1 promises two.",
+          options: [
+            { label: "Reword criterion 1.", detail: null, recommended: true },
+            { label: "Change R1.", detail: null, recommended: false },
+          ],
+        })),
+        dismissed: false,
+        checked_at: "2026-09-25T10:00:00.000Z",
+        model: null,
+      });
+    const record = session({ key: "PRB-1", specSlug: "signup-mail" });
+    return { repo, record, at };
+  }
+
+  it("is the planning's reading state where the verdict its drafting wrote holds for the spec as it is", () => {
+    // A plan just drafted agrees with its spec by construction (D-128), so the
+    // plan the planning holds has been read, and its first confirm reads
+    // nothing again (D-NEW-basic-and-epic-flows).
+    const { repo, record } = drafted({});
+    expect(draftedReading(() => repo, record)).toBe(readingStateOf(record, specTexts(() => repo)));
+  });
+
+  it("is null where the verdict is not there, found something, or is of other bytes of the spec", () => {
+    const none = drafted(null);
+    expect(draftedReading(() => none.repo, none.record)).toBeNull();
+    const found = drafted({ findings: 1 });
+    expect(draftedReading(() => found.repo, found.record)).toBeNull();
+    const moved = drafted({});
+    writeFileSync(moved.at, readFileSync(moved.at, "utf8").replace("One email.", "Two emails."));
+    expect(draftedReading(() => moved.repo, moved.record)).toBeNull();
+    const other = drafted({ spec: `sha256:${"c".repeat(64)}` });
+    expect(draftedReading(() => other.repo, other.record)).toBeNull();
+  });
+
+  it("is null for a planning with no spec or no plan", () => {
+    const { repo, record } = drafted({});
+    expect(draftedReading(() => repo, { ...record, specSlug: null })).toBeNull();
+    expect(draftedReading(() => repo, { ...record, key: null })).toBeNull();
   });
 });

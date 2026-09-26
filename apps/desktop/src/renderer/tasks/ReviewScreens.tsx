@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { retainedBranch } from "@perbo/contracts/browser";
 import { isLive } from "../../shared/jobs.js";
-import type { Job } from "../../shared/protocol.js";
+import { TYPED_TEXT_MAX_CHARS, type Job } from "../../shared/protocol.js";
 import {
   Button,
   Dialog,
@@ -335,6 +335,7 @@ export function ReviewScreen(context: TaskContext) {
           <Field id="feedback-note" label="Your assessment">
             <textarea
               id="feedback-note"
+              maxLength={TYPED_TEXT_MAX_CHARS}
               value={note}
               onChange={(event) => setNote(event.target.value)}
               placeholder="What should the next attempt address?"

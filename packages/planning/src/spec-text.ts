@@ -179,10 +179,18 @@ function firstSentence(text: string): string {
 }
 
 /**
- * A spec title taken from the first thing a person said about the work: what
- * names the folder of a planning that has to be named before any model has
- * written a word, and the title the spec carries until the interview writes
- * its own (D-118).
+ * The title line of a spec whose folder was named from the person's first
+ * turn, until the Architect or the person names the work (D-118). The words
+ * cut from the turn name the folder and nothing else: they are no title, and
+ * never show as one.
+ */
+export const UNTITLED_SPEC = "Untitled";
+
+/**
+ * The words taken from the first thing a person said about the work that name
+ * the folder of a planning that has to be named before any model has written
+ * a word (D-118). They name the folder only; the spec's title line says
+ * {@link UNTITLED_SPEC} until the work is named.
  *
  * The person's own words, cut down deterministically: the first sentence, its
  * opening dropped, clipped to a whole word. Nothing a model returned reaches

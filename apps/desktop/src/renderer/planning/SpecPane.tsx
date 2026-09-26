@@ -8,7 +8,7 @@ import { useContractEditing } from "../contract-editor.js";
 import { changeKey, chatChange, textMarks } from "./change-marks.js";
 import { SpecSection } from "./SpecSection.js";
 import { useTurnSending } from "./InterviewDock.js";
-import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
+import { INTERVIEW_WROTE_THE_SPEC, SPEC_TITLE_MAX_CHARS } from "../../shared/protocol.js";
 import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
 import { confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
@@ -159,11 +159,11 @@ export function SpecPane({
   // save read against a base the person can no longer see.
   const refused = useRef<SpecView | null>(null);
   // The title a file's title line gives the field: none while it is still the
-  // cut the host named the folder from (D-118), which is no title, and no
-  // plan has been drafted. The field is then empty, for the person to name
-  // the work or for the Architect's title to fill once it replaces the cut in
-  // the file; once a plan is drafted the title line is the ticket's name
-  // (D-127), whatever its words.
+  // Untitled the host wrote as it named the folder (D-118), and no plan has
+  // been drafted. The field is then empty, for the person to name the work or
+  // for the Architect's title to fill once it replaces that line in the file;
+  // once a plan is drafted the title line is the ticket's name (D-127),
+  // whatever its words.
   const cut = editor.session?.key == null ? editor.session?.specCut : null;
   const titleIn = (source: SpecView | null | undefined): string =>
     !source || source.title === cut ? "" : source.title;
@@ -583,7 +583,7 @@ export function SpecPane({
               className="spec-title"
               placeholder="What is this piece of work?"
               value={shownTitle}
-              maxLength={200}
+              maxLength={SPEC_TITLE_MAX_CHARS}
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => commit()}
             />

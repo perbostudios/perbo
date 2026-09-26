@@ -10,7 +10,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { AcceptanceCriterion } from "@perbo/contracts";
-import { EditingSessionSchema } from "../../shared/protocol.js";
+import { EditingSessionSchema, RequestSchema, TYPED_PATH_MAX_CHARS } from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
 import type { ReplyMap, Request } from "../../shared/protocol.js";
 import { editingForm } from "../../shared/contract-editing.js";
 import { bridge } from "../workspace/index.js";
@@ -278,6 +279,32 @@ describe("contract verification approval", () => {
         }) }),
       }),
     ));
+  });
+
+  it("holds a new allowed path to what a path holds where it is typed, and saves it without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+    const context = await contextFor([criterion()]);
+    const requests = captureEdits(context);
+    mount(
+      <Composer
+        {...context}
+        existing={context.detail}
+        existingRepoId={context.repoId}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "+ add a path" }));
+    const path = screen.getByRole("textbox", { name: "New allowed path" }) as HTMLInputElement;
+    typeInto(path, "p".repeat(TYPED_PATH_MAX_CHARS + 20));
+    expect(path.value).toHaveLength(TYPED_PATH_MAX_CHARS);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compile the contract" }));
+    await waitFor(() =>
+      expect(requests.mock.calls.some(([request]) => request.kind === "editingSave")).toBe(true),
+    );
+    const saved = requests.mock.calls.map(([request]) => request).findLast((request) => request.kind === "editingSave")!;
+    expect(RequestSchema.safeParse(saved).success).toBe(true);
+    expect((saved as Extract<Request, { kind: "editingSave" }>).form.draft.paths).toContain(
+      "p".repeat(TYPED_PATH_MAX_CHARS),
+    );
   });
 
   it("lets a distinct assertion and its evidence kind be reviewed and saved together", async () => {

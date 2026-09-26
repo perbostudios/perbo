@@ -365,7 +365,7 @@ describe("UI v2", () => {
     );
   });
 
-  it("reaches the contract as the planning's last tab, and goes back to the plan by its tabs (D-NEW-basic-and-epic-flows)", async () => {
+  it("reaches the contract as one of the planning's tabs, and goes back to the plan by its tabs (D-NEW-basic-and-epic-flows)", async () => {
     // Confirming a plan leads here from the Graph, and the contract is where a
     // person reads what approving would freeze. It is a tab of the planning,
     // so not being ready to approve is a click on the tab of the pane to

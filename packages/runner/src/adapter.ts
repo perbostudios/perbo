@@ -383,7 +383,7 @@ export function assertNeutralised(
   }
   const errors = init.mcp_server_errors;
   if (Array.isArray(errors) && errors.length > 0) {
-    violations.push(`tool servers were attempted and failed: ${JSON.stringify(errors).slice(0, 200)}`);
+    violations.push(`tool servers were attempted and failed: ${JSON.stringify(errors)}`);
   }
   for (const path of [...paths(init.plugins), ...memoryPaths]) {
     if (inside(path)) violations.push(`configuration loaded from inside the worktree: ${path}`);
@@ -492,7 +492,7 @@ function describeTool(name: string, input: unknown): string {
   const record = (input ?? {}) as Record<string, unknown>;
   if (name === "Bash" && typeof record.command === "string") return record.command;
   if (typeof record.file_path === "string") return `${name} ${record.file_path}`;
-  return `${name} ${JSON.stringify(record).slice(0, 300)}`;
+  return `${name} ${JSON.stringify(record)}`;
 }
 
 export async function runAgent(request: AgentRequest): Promise<AgentResult> {
@@ -840,11 +840,11 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         commands.push({
           sequence: commands.length,
           tool: decision.tool,
-          detail: redact(decision.target ?? decision.tool).slice(0, 2_000),
+          detail: redact(decision.target ?? decision.tool),
           decision: decision.decision,
           denial_reason: decision.reason === null ? null : redact(decision.reason),
           denial_rule: decision.rule,
-          denial_target: decision.target === null ? null : redact(decision.target).slice(0, 200),
+          denial_target: decision.target === null ? null : redact(decision.target),
           cwd: decision.cwd,
           decided_by: "pre_execution_hook",
           second_reading: "the runner never read this call's tool_use block",
@@ -862,7 +862,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         decision: decision.decision,
         denial_reason: decision.reason === null ? null : redact(decision.reason),
         denial_rule: decision.rule,
-        denial_target: decision.target === null ? null : redact(decision.target).slice(0, 200),
+        denial_target: decision.target === null ? null : redact(decision.target),
         // The directory the enforced judgement stood in, which after a refusal
         // is not where the transcript reading thinks the shell went: a refused
         // `cd` never happened.
@@ -1124,7 +1124,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         commands.push({
           sequence: commands.length,
           tool: block.name,
-          detail: detail.slice(0, 2_000),
+          detail,
           decision: admission.decision,
           denial_reason: admission.reason,
           denial_rule: admission.rule,
@@ -1202,7 +1202,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
               decision: "denied",
               denial_reason: "the agent's permission layer refused it before it ran",
               denial_rule: ADMISSION_RULES.allow_list,
-              denial_target: entry.detail.slice(0, 200),
+              denial_target: entry.detail,
               decided_by: "agent_permission_layer",
             };
           }
@@ -1211,11 +1211,11 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         commands.push({
           sequence: commands.length,
           tool: name,
-          detail: detail.slice(0, 2_000),
+          detail,
           decision: "denied",
           denial_reason: "outside the runner's command allow-list",
           denial_rule: ADMISSION_RULES.allow_list,
-          denial_target: detail.slice(0, 200),
+          denial_target: detail,
           // Denied before it reached the shell or the guard: there is no
           // directory it was judged from.
           cwd: null,

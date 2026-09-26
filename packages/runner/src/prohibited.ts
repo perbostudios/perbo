@@ -396,7 +396,7 @@ const BEFORE_A_PUSH = /^(?:(?:cd|pushd)\s+[A-Za-z0-9_.~+/-]+|pwd|ls|true|:)$/;
 function somethingBeforeThePush(earlier: readonly string[]): string | null {
   for (const text of earlier) {
     if (!BEFORE_A_PUSH.test(text.trim())) {
-      return `the line runs more than a move of the shell before the push (${text.trim().slice(0, 60)})`;
+      return `the line runs more than a move of the shell before the push (${text.trim()})`;
     }
   }
   return null;
@@ -461,7 +461,7 @@ export function inspectCommandWithCwd(
       const key = `${rule.action}|${rule.detail ?? ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      hits.push({ action: rule.action, detail: `${sentence}: ${segment.slice(0, 200)}` });
+      hits.push({ action: rule.action, detail: `${sentence}: ${segment}` });
     }
   }
   for (const segment of read.segments) {
@@ -470,7 +470,7 @@ export function inspectCommandWithCwd(
       const key = `${rule.action}|${rule.detail}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      hits.push({ action: rule.action, detail: `${rule.detail}: ${segment.text.slice(0, 200)}` });
+      hits.push({ action: rule.action, detail: `${rule.detail}: ${segment.text}` });
     }
   }
   const writes: WriteFinding[] = [];

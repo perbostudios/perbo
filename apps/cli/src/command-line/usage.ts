@@ -400,10 +400,16 @@ export const USAGE = `perbo — contract to pull request, locally
       plan just drafted agrees with its spec, and an interview edit of the
       plan is held to the spec, so it is your own edit of one or the other, or
       an interview turn that wrote the spec and left the plan, that gives it
-      something to read. It is advice and not a gate: the exit code is 0
-      whatever it finds. --dismiss records that you went on to the contract
-      with the differences open, so the same reading is not put to you again
-      at the same state; it calls no model and needs a verdict at this state.
+      something to read. The exit code is 0 whatever it finds; the desktop
+      refuses to approve the contract while a difference it records is open.
+      --dismiss sets the differences of the verdict at this state aside, so
+      they are not put to you again at the same state and the desktop's
+      planning drops them; no page offers it. It calls no model, needs a
+      verdict at this state, and is refused where the ticket has no record of
+      the edits made to its plan since it was drafted and once anyone has
+      edited the plan by hand since then (the interview's edits do not
+      count): answer the differences instead, or edit the plan until a
+      reading finds none.
 
   perbo inspect PRB-1 [--attempt <id>] [--json] [--repo .] [--store <dir>]
   perbo inspect <local run id> [--attempt <id>] [--json]

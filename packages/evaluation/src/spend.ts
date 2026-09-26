@@ -219,7 +219,8 @@ export class SpendLedger {
         reason:
           `the ${formatUsd(this.ceilingMicros, 2)} spend ceiling cannot be enforced: ` +
           `${this.#unobserved.length} launched review(s) reported no usable dollar cost ` +
-          `(${this.#unobserved.slice(0, 3).join(", ")}${this.#unobserved.length > 3 ? ", …" : ""}), ` +
+          `(${this.#unobserved.slice(0, 3).join(", ")}` +
+          `${this.#unobserved.length > 3 ? ` and ${this.#unobserved.length - 3} more` : ""}), ` +
           `so the ${formatUsd(this.#total, 2)} total is not a bound on what this run has spent`,
       };
     }

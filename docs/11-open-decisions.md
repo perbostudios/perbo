@@ -70,6 +70,20 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Why: experiments on stand-in tickets kept reopening what the product was; people's use answers it.
 - Changes if: real use cannot answer a question the founder needs answered.
 
+### D-NEW-nothing-shown-is-cut — Nothing a person reads is cut
+
+- Owner: Founder
+- Decision: text Perbo shows a person is never cut, mid-sentence or otherwise; where it has to fit a limit it is made more concise without losing what it says. Length caps stay, and so does a count cap a decision states by number (D-094, D-117, D-127, D-128). Who meets a cap depends on who writes the text:
+  - a model that writes a capped field is told the limit up front and asked to write concisely, and where its text still runs past it the same session is asked again to condense it, rather than the text being clipped;
+  - a person typing into a capped field is held to it where they type, from the same constant the field's schema reads — where their words go down composed with others as one field, to the room the rest leaves — and what they typed is never refused when sent or cut afterwards;
+  - a line Perbo composes — progress, notes, refusal reasons, pull-request sections — is written to fit in whole sentences, and where it names a list it names whole items and then "and K more";
+  - output from a tool rather than a model — git's and gh's refusals, a check's summary line, a provider's rate-limit or reset sentence, quoted evidence, the command the write guard refused — is recorded whole and shown whole, and no field that holds it carries a length cap; where a screen has room for one line, Perbo writes that line in whole sentences and the whole output sits behind an "i".
+
+  An identifier no person reads as prose — a session id, a tool, rule or finding key held to a record's field width or shortened for display, a spec's folder named from the words cut from a person's first turn (D-118) — and an excerpt of a log (a check's output tail, a job's log tail, a transcript line) are not text shown to a person under this rule. Nor is text only a model reads: the executor's account of its change (D-092) briefs the next round's executor and is never shown to a person, so it stays held to its 4,000 characters and past them is cut with a marker the next executor reads.
+- Why: in the founder's words, text shown to a person "should not be cut. Should only be made more concise and condensed without loss of information if it is shown to the user." A sentence cut short reads as something it did not say.
+- Changes if: a field has to hold text no condensing fits, and the person would rather see it cut than not at all.
+- Built: the runner's records and lines carry whole the command a refusal is about, the processes a sweep ended, git's and gh's refusals at a merge, a check's summary line and a transport's failure and reset sentence, and name five whole items then how many more; the reviewer's rejection of a verdict it cannot accept quotes the fragment of the verdict whole, on one printable line; `perbo interview`'s guard, `perbo serve`, `perbo inspect` and `perbo review`'s card say theirs whole, the cards wrapping a value under its column rather than clipping it; the desktop's chat records the Architect's refusals, tool reports, edit summaries and its own notes whole, and a note about a tool's output — why a line of the chat did not parse or could not be recorded, a stopped chat's stderr, its process's error — says what happened in one sentence with the output, redacted and whole, behind an "i"; it hands a message of the Architect's past its 12,000 characters, or a question redaction lengthened past its field, back to the same session to condense, at most twice running before it says what it did not show; the Architect and the executor are told their limits up front; the reading of a plan against its spec measures each finding as the person is shown it, redacted in `perbo drift` before its lengths are checked, and hands one whose words run past a field, redaction included, back to the same session to condense, at most twice, and the desktop, whose redaction may know a credential the command's environment does not, fails a reading a field of which it still finds past its length rather than cutting or leaving out that field. Every field a person types into that has a limit holds them to it where they type, from the constant the request's schema reads (`TYPED_TEXT_MAX_CHARS`, `TYPED_PATH_MAX_CHARS`, `SPEC_TITLE_MAX_CHARS`, `PERSON_NAME_MAX_CHARS`, `ARCHIVE_SEARCH_MAX_CHARS` in `apps/desktop/src/shared/protocol.ts`, `TICKET_NAME_CAP` in `@perbo/contracts`): a turn in the chat and on the question page, a spec's title and sections, a criterion and its assertion, a new allowed path, each off-limits glob, a note on a review, a person's name, the search of Home and the archive, a ticket's name; where the words go down composed with others as one field — a part's own words in a lettered group of the Architect's questions, an own-words answer on the loop page — the box holds the room the rest of the composition leaves, so nothing typed is refused when sent. The desktop clips no text at the edge of its box: a line longer than its box wraps onto as many lines as it takes, the title bar and a page's header growing to hold it, and a test reads the stylesheet the renderer ships and fails on `text-overflow: ellipsis` or a line clamp. A spec's title line says Untitled until the Architect or the person names the work (D-118). Not built: a transport's failure that `@perbo/model` records keeps its first line only, and that line to 300 characters with an ellipsis, which SCP-188 keeps from quoting what was sent.
+
 ## Work and planning
 
 ### D-003 — Perbo owns admitted work
@@ -107,7 +121,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-101 — Create opens planning mode
 
 - Owner: Founder
-- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: a Spec and an Explorer pane while the spec is written, and the panes a plan needs once one is drafted — for a plan divided into nodes a Graph second, under Spec, then Impact — with the contract as the last tab (D-NEW-basic-and-epic-flows); the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run; runs, decisions and publishing still take one at a time.
+- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: a Spec and an Explorer pane while the spec is written, and the panes a plan needs once one is drafted — for a plan divided into nodes a Graph second, under Spec, then Impact — then the contract, with Problems below it while a problem is open (D-NEW-basic-and-epic-flows); the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run; runs, decisions and publishing still take one at a time.
 - Why: planning the next piece of work while the last one runs is what the queue is for.
 - Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and offers no second way to start a plan beside it, with the Explorer and Graph panes beside it and the chat docked beside whichever is open but the contract and the Problems pane, and planning alongside a run; the explorer's reads and the chat's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, which checks once when the planning first has a plan and by its button after that, because its answer is a fresh index of the whole tracked tree, with the count of what falls outside also on the contract page, which is the last screen where a scope can still be widened, answered outside the job list with the explorer's reads.
 
@@ -135,9 +149,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-127 — A ticket's name is the fewest words that tell it apart
 
 - Owner: Founder
-- Decision: a ticket is called what the drafter named it: as few words as tell this work apart from every other ticket in the repository's store, whatever its state. What it is, not what is being done to make it, and nothing that tells it apart from nothing — the file or folder it lands in, "a single file", "app", "page", the repository. No set length, and at most 60 characters. The drafter is shown every other ticket's name, however many, but for the one it is drafting again, and a name it returns that is already one of them, ignoring case and spacing, is passed over and not refused. Where nothing drafted a name, or the one drafted is taken, a ticket drafted from a spec is called by the spec's title, and failing that every ticket is called by its outcome. A name the person gave the spec on the Spec pane is kept for the spec, the ticket and the plan: while the person, not the Architect, was the last to title the spec and the spec still states that title, the ticket is called by it as it stands, whatever the drafter proposed and whatever another ticket is called, and the spec is left as it is. That name is held to the same 60 characters: a longer title is refused at admission, for the person to shorten, and never cut. An edit never renames a ticket: the outcome may be reworded as often as a person likes and the name stays. The name is display only: the branch and the pull request are named from the approved outcome, and no name reaches a path, a branch or a command ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). A name a person gives a ticket on the board is held to the same 60 characters, is kept on that machine, not on the ticket, and the drafter is not shown it. A ticket drafted from a spec and its spec carry one name: every admission without `--keep-title`, `--start-over` included, rewrites the spec's title line to the ticket's name, and when a person renames a ticket that is not yet approved, its spec's title follows. Only the title line moves; the folder keeps the slug it was minted with, which the admission record names. An approved ticket's spec is left as approval read it, because the run commits it against the hash approval recorded (D-103).
+- Decision: a ticket is called what the drafter named it: as few words as tell this work apart from every other ticket in the repository's store, whatever its state. What it is, not what is being done to make it, and nothing that tells it apart from nothing — the file or folder it lands in, "a single file", "app", "page", the repository. No set length, and at most 60 characters. The drafter is shown every other ticket's name, however many, but for the one it is drafting again, and a name it returns that is already one of them, ignoring case and spacing, is passed over and not refused. Where nothing drafted a name, or the one drafted is taken, a ticket drafted from a spec is called by the spec's title, unless that still says Untitled (D-118), and failing that every ticket is called by its outcome. A name the person gave the spec on the Spec pane is kept for the spec, the ticket and the plan: while the person, not the Architect, was the last to title the spec and the spec still states that title, the ticket is called by it as it stands, whatever the drafter proposed and whatever another ticket is called, and the spec is left as it is. That name is held to the same 60 characters: a longer title is refused at admission, for the person to shorten, and never cut. An edit never renames a ticket: the outcome may be reworded as often as a person likes and the name stays. The name is display only: the branch and the pull request are named from the approved outcome, and no name reaches a path, a branch or a command ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). A name a person gives a ticket on the board is held to the same 60 characters, is kept on that machine, not on the ticket, and the drafter is not shown it. A ticket drafted from a spec and its spec carry one name: every admission without `--keep-title`, `--start-over` included, rewrites the spec's title line to the ticket's name, and when a person renames a ticket that is not yet approved, its spec's title follows. Only the title line moves; the folder keeps the slug it was minted with, which the admission record names. An approved ticket's spec is left as approval read it, because the run commits it against the hash approval recorded (D-103).
 - Why: a board is read by scanning it, and a name that repeats its neighbours' words or carries the whole outcome makes every row read alike. Only the other names say which words tell this one apart, so the drafter is shown them, and an exact repeat is caught by a check rather than by the prompt. An edit that renamed the ticket to its outcome would put back the sentence the name exists to replace. The Spec pane, the picker and the contract's head each show the work's name, and a spec titled one way beside a ticket named another reads as two pieces of work. A name the person typed is their own choice of what the work is called, and admission replacing it with a model's would take that choice back.
-- Built: `draftContract` in `@perbo/planning` shows the drafter a `names` block beside the board and requires the draft's `name` under this rule (`draft_v6`); `perbo admit` passes every ticket's title but the one `--start-over` names, and `ticketTitle` in `apps/cli/src/commands/admit.ts` chooses the drafted name, the spec's title, then the outcome, passing over one `sameName` (`@perbo/contracts`) finds taken, or with `--keep-title` takes the spec's title as it stands, refusing one past `TICKET_NAME_CAP` (`@perbo/contracts`) before a model is asked, and leaves the spec unwritten; that one constant is the 60 characters the drafter's schema, admission and the desktop's rename each hold a name to; `perbo edit` leaves the title alone, and so does the desktop's sample host, which has no drafter and calls a sample ticket by its spec's title, or by its outcome where another ticket carries that title and the person did not give it. The desktop drafts through `perbo admit --from-spec`, so it names tickets the same way. The planning session's `named` records who last titled its spec and with what: the person, from a Spec-pane save that changed the title it read, spacing aside, or the Architect, from a chat turn that left the spec stating another title than it began with, the cut (D-118) excepted; `keepsPersonsTitle` in `apps/desktop/src/shared/contract-editing.ts` adds `--keep-title` to Generate plan, to Start over and to `replan` where the person's is the title the spec states; `replan` carries the record to the planning over the plan it drafts again, and the sample host keeps the same record under the same rule. `retitleSpecFile` in `@perbo/planning` is the one writer of the spec's title line: `perbo admit` calls it once nothing can refuse the admission and records the spec's hash as renamed, so the drift verdict it seeds holds, and the desktop host calls it when a ticket not yet approved is renamed; the sample host titles its spec with `retitleSpec` at the same two moments.
+- Built: `draftContract` in `@perbo/planning` shows the drafter a `names` block beside the board and requires the draft's `name` under this rule (`draft_v6`); `perbo admit` passes every ticket's title but the one `--start-over` names, and `ticketTitle` in `apps/cli/src/commands/admit.ts` chooses the drafted name, the spec's title where it does not say Untitled, then the outcome, passing over one `sameName` (`@perbo/contracts`) finds taken, or with `--keep-title` takes the spec's title as it stands, refusing one past `TICKET_NAME_CAP` (`@perbo/contracts`) before a model is asked, and leaves the spec unwritten; that one constant is the 60 characters the drafter's schema, admission and the desktop's rename each hold a name to; `perbo edit` leaves the title alone, and so does the desktop's sample host, which has no drafter and calls a sample ticket by its spec's title, or by its outcome where another ticket carries that title and the person did not give it. The desktop drafts through `perbo admit --from-spec`, so it names tickets the same way. The planning session's `named` records who last titled its spec and with what: the person, from a Spec-pane save that changed the title it read, spacing aside, or the Architect, from a chat turn that left the spec stating another title than it began with, the Untitled the host wrote as it named the folder (D-118) excepted; `keepsPersonsTitle` in `apps/desktop/src/shared/contract-editing.ts` adds `--keep-title` to Generate plan, to Start over and to `replan` where the person's is the title the spec states; `replan` carries the record to the planning over the plan it drafts again, and the sample host keeps the same record under the same rule. `retitleSpecFile` in `@perbo/planning` is the one writer of the spec's title line: `perbo admit` calls it once nothing can refuse the admission and records the spec's hash as renamed, so the drift verdict it seeds holds, and the desktop host calls it when a ticket not yet approved is renamed; the sample host titles its spec with `retitleSpec` at the same two moments.
 
 ### D-015 — Perbo reads code and never edits it
 
@@ -669,13 +683,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
   nothing else.
 - Built: `ask_options` and the `asked` event beside the Architect's other tools, bounded at four
   groups of four parts of eight options and refused at the tool above that; the host relaying it
-  under the clipping and redaction every other field the session writes is given, flattening the
+  under the redaction every other field the session writes is given, flattening the
   whitespace a label goes back down as; the asking and the count answered recorded on the planning,
   moved on by an answer — a lettered line a part, whatever is said under the letter, so a part in the
   person's own words moves it as a picked one does — and ended by anything else or by the line itself
   falling out of the conversation's cap; and the card, in the dock and on the Problems pane alike,
   which puts one group with its parts lettered, gives each part that said the answer is none of these
-  a box inside that answer, and sends from the bar at its foot, enabled once every part is picked or
+  a box inside that answer, holding what is typed in it to the room the group's one turn leaves
+  (D-NEW-nothing-shown-is-cut), and sends from the bar at its foot, enabled once every part is picked or
   said, each part lettered in the option's own words or the person's — a lettered part on one line, since a newline
   under a letter would read as a part that was never answered — a lone part bare, which has no letter
   to be read against and so goes down in the paragraphs it was written in.
@@ -704,17 +719,19 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the plan carries it forward — only from a state that had it, so a hand edit never read is not
   washed away by a later turn — a rename, which moves only the title line the reading never reads,
   carries the verdict as it stands, and a hand edit of a promise or of the spec, or a chat turn that
-  wrote the spec and left the plan, lets it go. It is read on a page of its own between an epic's
-  plan and its contract, and at a basic ticket's **Confirm contract**
-  (D-NEW-basic-and-epic-flows), and each difference is put, one at a time, as answers to pick from in D-117's shape, on that page and in the chat beside every
-  other, with the person's own words beside them; whichever they
+  wrote the spec and left the plan, lets it go. It is never read as a plan is drafted, since a plan
+  the model drafts from the spec counts as satisfying it (D-NEW-basic-and-epic-flows); it is read
+  when the person confirms the plan — an epic's **Confirm the plan**, a basic ticket's **Confirm
+  contract** — where the spec or the plan's promise moved since the last reading, and after a turn
+  of the chat only where it answered a difference still open: a turn otherwise starts no reading,
+  and what it moved is read at the confirm (D-NEW-basic-and-epic-flows). Each difference is put,
+  one at a time, as answers to pick from in D-117's shape, on a page of its own and in the chat
+  beside every other pane, with the person's own words beside them; whichever they
   pick goes to the Architect as an ordinary turn, so the spec and the plan move together under the
   guard above, and nothing the model returned becomes anything but a turn
-  ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). For an epic it is advice and never a
-  gate: the person may go on to the contract with every difference open, and having done so is
-  recorded against the same two hashes, so the same reading is not put to them again at the same
-  state. A basic ticket's Confirm contract is refused while a difference is open, until each is
-  resolved (D-NEW-basic-and-epic-flows). It
+  ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The confirm is refused while a
+  difference is open, for an epic as for a basic ticket, until each is resolved
+  (D-NEW-basic-and-epic-flows). It
   is a reading of words, apart from the id-level disagreements the contract page lists — a
   requirement nothing cites, a citation pointing at nothing — which stay where they are. A
   criterion an edit writes carries the requirement it answers, as a drafted one does, and a
@@ -734,10 +751,11 @@ This is the one home for the decisions that govern Perbo. Every other document c
   from a state that had one, because a turn cannot vouch for a hand edit it did not see. The
   difference goes back through the chat rather than through an edit of its own because the
   Architect is the one editor holding both documents: an answer picked on the page moves the spec
-  and the plan under the same guard, where a direct edit would have to be held to it again. For an
-  epic it is advice because a check that gated the contract would be one people learn to click
-  past, and because a difference a person chose to keep is theirs to keep; a basic ticket's is
-  held at its confirm for the reason D-NEW-basic-and-epic-flows gives. A citation is checked where the
+  and the plan under the same guard, where a direct edit would have to be held to it again; a
+  difference the person means to keep is closed the same way, by an answer that moves the spec to
+  say it. It holds the confirm for the reason D-NEW-basic-and-epic-flows gives, and it is read
+  there rather than after every turn because a turn the guard held to the spec needs no reading,
+  and one that wrote the spec alone is read before anything is frozen. A citation is checked where the
   contract freezes rather than at every edit, so a drafter may leave a requirement uncited and no
   later edit is refused over a state whoever is editing did not create.
 - Built: the chat's own guard, which refuses an `edit_plan` changing the outcome or a
@@ -754,43 +772,44 @@ This is the one home for the decisions that govern Perbo. Every other document c
   person's own voice and at most one recommended, refusing any other shape; the verdict at
   `.perbo/tickets/<KEY>.drift.json`, keyed by the spec's bytes and the plan's promise texts — the
   outcome and each criterion's words, sorted, so that ids and arrangement are not in it — with
-  where it came from, whether the person went on with it open, and the model's provenance where
+  where it came from, whether it was dismissed, and the model's provenance where
   one ran: written empty by `admit` as it drafts a plan from a spec, carried forward by the
   chat at the end of a turn that moved the plan, from a verdict that stood as the turn began
   and stayed the turn's own — a hand edit beside it is not carried — dismissed by
-  `perbo drift --dismiss` at the same state or refused, and printed back without a model wherever
+  `perbo drift --dismiss` at the same state, and refused at any other or once the plan has an edit
+  by hand since it was drafted (D-NEW-basic-and-epic-flows), and printed back without a model wherever
   the two hashes still match — a reading records its own verdict only where the spec and the plan
   still match what it judged, keeps one that another reading or a dismissal wrote for that same
   state, and a printed verdict's `cached: true` says no model ran for it or its result was not
   recorded; the desktop's `driftCheck`, a job in
-  the same manner as drafting, and `driftDismiss`, which the host refuses for a session with no
-  spec, no plan or an approved ticket, and clears the differences the host keeps; and the
-  Problems pane between an epic's plan and its contract, reached by every way from the plan to the
-  contract, and in a basic ticket's rail while its confirm's reading has problems open, which asks
-  for the reading as it opens and goes on to the contract tab on its own when
-  nothing differs — problems resolved from another pane included — or the person went on before; where the reading finds differences the host
-  keeps them on the planning until the person goes on with them open or the contract is approved;
-  the pane hides the chat, and while any of them is open it sits in the rail after Explorer and
-  Impact, labelled "Problems" (D-NEW-basic-and-epic-flows) — resolved, it is only the step every Confirm passes through — and opening the ticket
+  the same manner as drafting, and `driftDismiss`, which no page of the desktop asks for any more
+  and which the host refuses for a session with no spec, no plan or an approved ticket, passes
+  `perbo drift --dismiss`'s refusal on, and otherwise clears the differences it keeps; and the
+  Problems pane, which an epic's every way from the plan to the contract passes through, which
+  reads the plan as it opens only where the spec or the plan's promise moved since the last
+  reading, and which goes on to the contract tab on its own when nothing is open — problems
+  resolved from another pane included; where a reading finds differences the host keeps them on
+  the planning until a reading finds them closed or the contract is approved;
+  the pane hides the chat, and while any of them is open it sits in the rail as its lowest tab,
+  labelled "Problems" (D-NEW-basic-and-epic-flows), and opening the ticket
   from Home or the picker lands there (D-130); it puts one problem at a time — the first still open, as a card
   in the chat's own shape, recommended answer first and the person's own words last, with a
   counter in its corner reading "Problem 1 of N" and "N more after this" — whose bar at its foot posts the
   answer as a turn, says "Resolving the problem" while the Architect applies it and while the
-  plan is read against the spec again, which the host asks for on its own once the turn ends,
-  and shows the next problem when that reading records it — the same list found again is put
+  plan is read against the spec again, which the host asks for on its own once a turn ends while
+  a problem is open, at the state it records as read, and shows the next problem when that reading records it — the same list found again is put
   again only where no card stands to answer it, never over a question the Architect is
   asking of its own, and never by a reading a chat turn overlapped, which resolves none
   either, because it read a plan the turn's answer had not reached yet; the same problem is put in the chat as an asked line in D-117's shape headed
   "Problem 1 of N", so it is answered from any other pane the same way and the same re-read
-  follows; once none is open the pane says "Every problem is resolved" and offers "Confirm the
-  plan" at its foot, to the right of "Back to the plan" — the work is still being planned, and the button is the way on to the contract — while a basic ticket's goes back to its contract on its own, leaving the rail, and the
-  chat's note saying the same is words alone, because every pane the chat sits beside but the Spec
-  pane and the contract carries that way on already; a question the Architect raises of its own stands
-  ahead of that resolved state, on the page as the thing to answer, headed "A question from the
-  Architect" with the counter hidden, and the way on is withheld on the page until
-  it is answered and the plan read again; "Go on to the contract anyway", for an epic,
-  and "Back to the plan" stay on every state, and an error shows with the way on and the way
-  back rather than as a wall; the citation check at
+  follows; once none is open the person is moved back to where they confirm — an epic's Graph, a
+  basic ticket's contract — and the Problems tab leaves the rail, and the chat's note saying every
+  problem is resolved is words alone, because every pane the chat sits beside but the Spec pane
+  carries that way on already; a question the Architect raises of its own while it applies an
+  answer stands on the page as the thing to answer, headed "A question from the Architect" with
+  the counter hidden; "Back to the plan" stays on every state, and nothing offers a way past an
+  open problem; a reading that could not be made shows with the way back, and with the way on to
+  the contract only where no problem is open, rather than as a wall; the citation check at
   approval, where the contract is frozen and the spec travels with it, refusing a plan that cites
   what its spec no longer states and passing over a spec it cannot read, as the rest of approval
   does; the disagreements between the two listed on the contract page before the button that
@@ -802,7 +821,8 @@ This is the one home for the decisions that govern Perbo. Every other document c
   on an epic's contract, which shows the graph, named under it —
   because approving is the last place a changed assertion can be read; and the last change the
   chat made to the pair marked where the two are read — the Spec pane's reading, the Graph's node
-  cards and inspector, and a basic ticket's criteria on its contract — additions green and removals
+  cards and, under each criterion's box, its inspector, and a basic ticket's criteria on its
+  contract — additions green and removals
   red and struck through, kept on the planning as what the spec's sections and the plan's outcome
   and criteria said before and after and who made the change: the chat, recorded once a chat turn
   ends, or the person, recorded once an edit by hand, a compile, a spec save or a plan drafted
@@ -905,9 +925,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
   problems open, those land on the Problems pane (D-128). The ticket's own page asks this only of
   the planning curating the ticket, which is one with a graph it was divided into or a spec it was
   drafted from; a session the ticket's own editor opened is not one, so that ticket stays on its
-  own page. The reading between the plan and the contract is not a pane a planning is left at, so
-  it is never remembered: every **Confirm the plan** passes through it, and the pane remembered is
-  the one the person confirmed from. Nor is a pane the planning does not offer, reached by an
+  own page. The Problems pane is not a pane a planning is left at, so it is never remembered: an
+  epic's every **Confirm the plan** passes through it, and the pane remembered is the one the
+  person confirmed from. Nor is a pane the planning does not offer, reached by an
   address typed by hand. Where the pane left is one the planning no longer offers — a Graph for a
   plan that is no longer divided, or a contract that something has changed since — the way in lands
   where it otherwise would. The contract of a plan waiting for approval is a tab of the planning
@@ -932,7 +952,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the contract was reached at and is recorded by `visitContract`, each leaving the revision alone
   and writing nothing for where the person already is or for a discarded planning, the same on the
   native host and the sample host; planning mode sending one of them once per pane it reaches, for
-  a pane that `remembered` in `renderer/planning/panes.ts` allows — every pane but the reading —
+  a pane that `remembered` in `renderer/planning/panes.ts` allows — every pane but Problems —
   and that `flowFor` offers; `leftAt` there, which answers the recorded pane only where `flowFor`
   still offers it, and `reopenPane`, which answers the Problems pane while problems are open, else
   `leftAt`, else the Spec; the picker's rows, `TaskPage`'s redirect and planning mode's own route
@@ -953,77 +973,117 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: which tabs planning offers follows what is being planned. While the spec is being
   written and there is no plan, the Spec and the Explorer are all there is: Impact, the Graph and
   Problems wait for a plan, because a plan is what each of them is about. A plan the drafter
-  divides into a graph is an epic: Spec, Graph, Explorer, Impact, then Problems while a reading of
-  the plan against its spec has problems open (D-128); it lands on its Graph once drafted, and every
-  **Confirm the plan** goes through that reading to the contract. A plan it leaves flat is a basic
-  ticket: its criteria are drafted from the spec's requirements, each citing the one it answers
-  with a verification the drafter adds, and it has no graph to curate, so it has no Graph pane and
-  no pane of its own for the criteria, which are read and changed on its contract. When Generate
-  plan, or Start over, brings back a flat plan, the impact check and the reading of the plan
-  against the spec run side by side, and once both are back the person lands on Problems where
-  the reading found any, else on Impact where the check found paths outside the scope, else on the
-  contract, with a pop-up over that page saying the task is simple, so there is no graph, whose one
-  button, **Next**, puts it away. A basic ticket offers Spec and Explorer, then Impact only while
-  its last check found paths outside the scope and Problems while any are open, and its way on is
-  **Confirm contract**. The contract is the planning's last tab, **Confirm contract**, shown while
-  the person is on it and afterwards while nothing has changed since they were — the spec's
-  sections, a mark in the Explorer, an edit of the plan; once something has, the tab goes until
-  the person reaches the contract again, through the reading for an epic. The chat is not beside
-  it. On it a basic ticket's criteria are edited by hand, each change written into the contract as
-  it is made; such an edit starts no reading and keeps the tab, since it is made on the tab
-  itself, and carries no change marks, which are the chat's (D-128), while a change the chat made
-  to them is marked there. A basic ticket's plan is read against its spec when the person confirms
-  the contract — **Approve · start the loop**, on the contract tab — and only where the spec or the
-  criteria have moved since the last reading: a plan just drafted and not changed keeps the
-  agreeing verdict its drafting wrote and confirms straight away, with no model run. Where the reading finds problems, the Problems tab appears in the rail
-  as it does for an epic, in the same place, while any is open, and the confirm is refused until
-  each is resolved — answered on the Problems page as an epic's are, with no way past them there,
-  or by changing the criteria on the contract and confirming again, which reads the plan again.
-  Once every problem is resolved the tab goes, and a person on it is moved back to the contract to
-  confirm again. An epic's contract shows its graph in place of the criteria, read-only: panned and
-  zoomed, and changed only on the Graph pane, whose node inspector shows each node's criteria
-  read-only too; the chat changes an epic's criteria, through the validated edit path (D-100,
-  D-102), and there is no pane for criteria of their own. The ticket's contract after approval draws
-  the plan by the same rule, an epic's graph and a basic ticket's criteria, both read-only. Every
-  node on a graph, on the Graph pane and on a contract, says under its title how many criteria it
-  covers and the paths expected to satisfy them. Plan it again lands in the planning over the plan
-  it drafts: on its Graph for an epic, on its contract for a basic ticket (D-129).
+  divides into a graph is an epic: Spec, Graph, Explorer, Impact, then the contract. A plan it
+  leaves flat is a basic ticket: its criteria are drafted from the spec's requirements, each
+  citing the one it answers with a verification the drafter adds, and it has no graph to curate,
+  so it has no Graph pane and no pane of its own for the criteria, which are read and changed on
+  its contract; it offers Spec and Explorer, then Impact only while its last check found paths
+  outside the scope, then the contract. Problems is the lowest tab for either shape, below the
+  contract, and is there only while a reading of the plan against its spec has a problem open
+  (D-128). The contract tab, **Confirm contract**, is shown while the person is on it and
+  afterwards while nothing has changed since they were — the spec's sections, a mark in the
+  Explorer, an edit of the plan; once something has, the tab goes until the person reaches the
+  contract again. The chat is not beside it. A plan the model drafts from the spec — the first by
+  Generate plan on the Spec pane, or again by Start over or Plan it again — counts as satisfying
+  that spec, because the model generated it from the spec and the person did not: nothing reads
+  it as it lands, it never lands on Problems, it is recorded as read at the state it was drafted at
+  (D-128), and the problems a reading found in the plan it replaces go with that plan. When
+  Generate plan, or Start over, brings back an epic, it lands on its Graph. When it brings back a
+  basic ticket, its impact is checked: it lands on Impact where the check found paths outside the
+  scope, else on the contract, with a pop-up over that page saying the task is simple, so there is
+  no graph, whose one button, **Next**, puts it away. Plan it again lands in the planning over the
+  plan it drafts: on its Graph for an epic, on its contract for a basic ticket (D-129). After that
+  the plan is read against the spec only when the person confirms it — an epic's
+  **Confirm the plan**, a basic ticket's **Confirm contract**, which is **Approve · start the
+  loop** on the contract tab — and only where the spec's sections or the plan's outcome and
+  criteria have moved since the last reading, whoever moved them, by hand or through the chat: a
+  plan unchanged since confirms straight away, with no reading. While that reading runs the page
+  says **Checking for drift**, and where it finds nothing the confirm goes on: an epic to its
+  contract, a basic ticket to approving. While any problem is open the confirm is refused, for an
+  epic as for a basic ticket, and nothing offers a way past it: each is resolved — answered on
+  the Problems page or in the chat, or by changing the plan and confirming again, which reads it
+  again. An epic's Confirm the plan passes through the Problems page, which shows the problems
+  where any are open; a basic ticket's stays on its contract and says so. Problems appears only
+  after such a reading finds a problem. Once every problem is resolved the Problems tab goes, and
+  a person on it is moved back to where they confirm: an epic's Graph, a basic ticket's contract.
+  No page offers to dismiss the problems; the command line does (`perbo drift --dismiss`, and the
+  host's `driftDismiss`), and only where nobody has edited the plan by hand since it was drafted:
+  no edit at all, or only the chat's, whose edits move the spec with the plan (D-128). An edit by
+  hand since the draft — on a basic ticket's contract, in an epic's Graph pane, or with `perbo
+  edit` — refuses the dismissal, saying why in one sentence, and its problems are resolved by
+  answering them or by editing. On a basic ticket's contract its criteria are edited by
+  hand, each change written into the contract as it is made; such an edit starts no reading and
+  keeps the tab, since it is made on the tab itself. An epic's criteria are edited by hand in the
+  Graph pane's node inspector — each reworded, and how it is proven chosen — and by the chat,
+  both through the validated edit path (D-100, D-102); there is no pane for criteria of their
+  own. A hand edit carries no change marks, which are the chat's (D-128), while a change the chat
+  made is marked where the criteria are read. An epic's contract shows its graph in place of the
+  criteria, read-only: panned and zoomed, and changed only on the Graph pane. The ticket's
+  contract after approval draws the plan by the same rule, an epic's graph and a basic ticket's
+  criteria, both read-only. Every node on a graph, on the Graph pane and on a contract, says under
+  its title how many criteria it covers and the paths expected to satisfy them.
 - Why: a pane with nothing to show is a stage a person goes looking into. Before a plan there is
   nothing to measure impact against, and a flat plan has no division to curate: its criteria are
   the one thing on it to change, and the contract, the page that freezes them, already shows them.
   The pop-up says why the graph is missing at the moment it would be looked for. A contract kept as
   a tab only while nothing has moved means that going back to it is always going back to a
-  contract that was checked. A basic ticket's criteria are changed by hand on the page that
-  freezes them, so the confirm is the last moment the plan can be read against the spec before it
-  is frozen, and reading there rather than at each edit leaves the edits uninterrupted; reading
-  only where something moved keeps an unchanged draft one press from approval. Its problems hold
-  that press, where an epic's are advice (D-128), because approving is the step after it and
-  freezes the criteria as they stand. An epic's criteria are the chat's to change because the chat
-  holds the spec and the plan together (D-102), so the graph shows them to be read.
+  contract that was checked. Problems sits lowest because it is where a confirm that was refused
+  leads, and it is there only while something is open. The plan is read at its confirm, the last
+  moment before the contract that freezes it, rather than at each edit, so edits — the person's
+  and the chat's — go uninterrupted, and only where something moved, so an unchanged plan is one
+  press from the contract. A plan the model drafted from the spec is not read as it lands, first
+  or again, because the drafter wrote it from those very words and nobody has touched it since: a
+  reading would spend a model judging the model's own work, and the person would wait on a check
+  with nothing of theirs to find. A dismissal passes over problems nobody answered, which is
+  sound only while the plan is still what the drafter or the chat wrote from the spec; once a
+  person has edited it by hand, the difference is theirs, and it is answered or edited away rather
+  than set aside. A problem open holds the confirm because what the contract freezes should promise
+  what the spec asks for, and closing one is an answer or an edit away.
 - Built: `flowFor` in `apps/desktop/src/renderer/planning/panes.ts`, the one rule for which tabs a
-  planning shows, which the rail draws and planning mode records against; `contractState` there,
-  the state a contract is reached at — the spec's sections, which each host fingerprints onto the
-  planning's open draft as `spec`, the ticket's `updated_at`, and the scope the planning holds —
-  recorded on the session as `confirmed` by `editingContractVisited` as the person arrives on the
-  contract tab, and again by the contract page once a change written there lands, and compared on
-  every draw; `readingState` there, the state a reading is of — the spec's sections and the plan's
-  outcome and criteria's words, sorted — which `driftCheck` carries as `state` and both hosts record
-  on the session as `read` once a reading no chat turn overlapped lands of it, and which a fresh
-  draft clears; the session's `impact`, how many paths the last impact check of its draft found
+  planning shows and in which order, which the rail draws and planning mode records against;
+  `contractState` there, the state a contract is reached at — the spec's sections, which each
+  host fingerprints onto the planning's open draft as `spec`, the ticket's `updated_at`, and the
+  scope the planning holds — recorded on the session as `confirmed` by `editingContractVisited`
+  as the person arrives on the contract tab, and again by the contract page once a change written
+  there lands, and compared on every draw; `readingState` and `readingStateOf` in
+  `shared/contract-editing.ts`, the state a reading is of — the spec's sections and the plan's
+  outcome and criteria's words, sorted — which `driftCheck` carries as `state` and both hosts
+  record on the session as `read` once a reading no chat turn overlapped lands of it, the re-read
+  after an answer included, and as a plan drafted from the spec lands and as Plan it again opens
+  its planning, where the verdict admission wrote still holds for the spec (`draftedReading` in
+  `host/plan/spec.ts`, and the sample host's own); both hosts keeping the planning's plan as an
+  edit on the Graph pane leaves it, as they keep it after the chat's, so the state compared is the
+  plan's own; the session's `impact`, how many paths the last impact check of its draft found
   outside the scope, written by both hosts as the check answers and cleared by a fresh draft;
   `useDraftLanding` and `SimpleTaskNotice` in `renderer/planning/SimpleTask.tsx`, which watch a
-  draft settle, run a basic ticket's two checks and land it by `checkedLanding`, and check the
-  impact of a basic plan opened with none recorded, where it opened; `ContractPane`, the contract
-  tab; `contractShows` in `renderer/tasks/ContractScreen.tsx`, the one rule both contract pages
-  draw the plan by, and there the basic ticket's confirm, which reads the plan where `read` is not
-  its `readingState` and holds the approve while problems are open, whether or not the reading
-  could be made, goes ahead without a reading that could not be made on the next press only
-  while no problem is open, and holds while the drafts list does not yet carry the planning;
-  `DriftPane` moving a basic ticket's person back to the contract once every problem is resolved;
+  draft settle, land an epic on its Graph at once and read nothing, check a basic ticket's impact
+  under **Checking the impact** and land it by `checkedLanding`, and check the impact of a basic
+  plan opened with none recorded, where it opened; `reconcile` in `shared/contract-editing.ts`,
+  which drops the problems of the plan a fresh draft replaces as it records the draft as read, and
+  `redraftedSince` there, by which both hosts record nothing of a reading that a Generate plan or a
+  Start over overtook; where the admission's verdict is missing or no longer holds for the spec,
+  the draft is not recorded as read and its first confirm reads it, as D-128's record says; `ContractPane`, the contract tab; `contractShows` in
+  `renderer/tasks/ContractScreen.tsx`, the one rule both contract pages draw the plan by, and
+  there the confirm: a basic ticket's reads the plan where `read` is not its state, showing
+  **Checking for drift** while it does, and goes ahead without a reading that could not be made on
+  the next press only while no problem is open; an epic's, where `read` is not its state, goes
+  back by the Problems pane, so the plan is read as at Confirm the plan; and either holds the
+  approve while a planning over the ticket records problems open, whether or not the reading
+  could be made and whichever route reached the contract, the approve shortcut included, a basic
+  ticket's holding too while the drafts list does not yet carry the planning; `problemsHoldApproval` in
+  `shared/contract-editing.ts`, by which the desktop host and the sample host each refuse a `run`
+  that approves, in one sentence, while a planning over the ticket records problems open; `DriftPane`, which reads on arrival only where `read` is not the state, and shows no
+  wait where it reads nothing, offers no way past an open problem, and moves a person back to the Graph or the contract once none is open;
   `CriteriaEditor`, the criteria editing the ticket's own editor and a basic ticket's contract
-  share, which draws the chat's marks;
-  `GraphInspector`, which reads a node's criteria; `ContractGraph` and `nodeSummary` beside the
-  Graph pane; and `draftedLanding`, where Plan it again lands.
+  share, which draws the chat's marks; `GraphInspector`, which rewords a node's criteria and
+  chooses how each is proven through `set_criterion`, the host recording the edit as the
+  person's, with the chat's last change marked under each; `ContractGraph` and `nodeSummary`
+  beside the Graph pane; `draftedLanding`, where Plan it again lands; and the dismissal's
+  refusal: `perbo drift --dismiss` in `apps/cli/src/commands/drift.ts` refuses where the draft
+  snapshot `<KEY>.draft.json` records an edit by the person (`author: "you"`) that changed the
+  plan and that no re-draft has replaced, or where there is no snapshot to say, the desktop host's
+  `driftDismiss` passing that refusal on, and the sample host keeping which of its tickets a
+  person has edited since the draft (`handEdited`) and refusing in the same words.
 
 ### D-131 — A planning starts from its repository's question
 
@@ -1100,9 +1160,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-118 — An untitled planning is named by its first turn
 
 - Owner: Founder
-- Decision: the Architect writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts a title from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — writes the spec with it and records the slug, then starts the chat on that spec and sends the turn. The chat says which folder was named. A turn no folder name can come from is refused, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable. That cut names the folder and is no title, so the Architect writes the spec's title line when it first writes the spec, named as a ticket is rather than cut from the message, and shown the other tickets' names as the drafter is (D-127). Where neither it nor the person titles the spec, the cut stays on the title line until admission gives the spec the ticket's name, and the session records the cut, so the picker and, on the planning's panes, the top bar call the planning Untitled for as long as its spec's title is still the cut, and by its title the moment the Architect or the person writes another. The Spec pane's title field shows the file's title, and is empty while that is still the cut and no plan is drafted, for the person to name the work there; a name they give is the spec's title, and the ticket's and the plan's when the plan is drafted (D-127), and the field shows the Architect's as soon as the Architect writes one.
+- Decision: the Architect writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts words from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — names the spec's folder with them, writes the spec with Untitled on its title line and records the slug, then starts the chat on that spec and sends the turn. The cut names the folder and nothing else: it is no title, and its words never show as one (D-NEW-nothing-shown-is-cut). The chat says which folder was named. A turn no folder name can come from is refused, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable. The Architect writes the spec's title line when it first writes the spec, where that line still says Untitled, named as a ticket is rather than cut from the message, and shown the other tickets' names as the drafter is (D-127). Where neither it nor the person titles the spec, the title line says Untitled until admission gives the spec the ticket's name, and the session records the title line it wrote, so the picker and, on the planning's panes, the top bar call the planning Untitled for as long as its spec's title is still that line, and by its title the moment the Architect or the person writes another; admission passes over a title that still says Untitled where it would name a ticket by its spec's title. The Spec pane's title field shows the file's title, and is empty while that is still Untitled and no plan is drafted, for the person to name the work there; a name they give is the spec's title, and the ticket's and the plan's when the plan is drafted (D-127), and the field shows the Architect's as soon as the Architect writes one.
 - Why: a person opening planning and typing what they want should be talking to the Architect, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
-- Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn, recording the cut as the session's `specCut` and saying so as a note, and the sample host doing the same; `openDrafts` titling each listed planning by its spec's title unless that is its cut, which a Spec-pane save announces as an editing change so the list is read again; the Spec pane leaving its title field empty over the cut until a plan is drafted, while a section saved meanwhile leaves the title line as it is; `interviewOrientation` asking for the title line as a title, with every ticket's name but the one drafted from this spec in a `names` block.
+- Built: `specTitleFromMessage` in `@perbo/planning` cutting the words, `writeSpecFile`'s `folderName` naming a new spec's folder from them while its title line says `UNTITLED_SPEC`, the host naming the spec on the first turn that way, recording that title line as the session's `specCut` and saying so as a note, and the sample host doing the same; `openDrafts` titling each listed planning by its spec's title unless that is its `specCut`, which a Spec-pane save announces as an editing change so the list is read again; the Spec pane leaving its title field empty over it until a plan is drafted, while a section saved meanwhile leaves the title line as it is; `interviewOrientation` asking for the title line as a title where it says Untitled, with every ticket's name but the one drafted from this spec in a `names` block; `ticketTitle` in `perbo admit` passing over a spec title that says Untitled. A session recorded while the host wrote the cut itself on the title line holds the cut as its `specCut`, and is read the same way.
 
 ### D-124 — `@perbo/contracts` holds what two packages share
 

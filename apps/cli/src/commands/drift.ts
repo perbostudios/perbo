@@ -31,9 +31,9 @@ import {
   type DriftKey,
 } from "../store/drift.js";
 import { storeFor, StoreTargetSchema } from "../store/index.js";
-import { assertContractMatches, readContract, readTicket } from "../store/tickets.js";
+import { assertContractMatches, readContract, readDraftSnapshot, readTicket } from "../store/tickets.js";
 import { readInput, UsageError } from "../usage-error.js";
-import { ModelIdSchema } from "./admit.js";
+import { ModelIdSchema, recordedEdits } from "./admit.js";
 
 /**
  * `perbo drift` — the plan read against the spec it was drafted from
@@ -43,8 +43,9 @@ import { ModelIdSchema } from "./admit.js";
  * The interview cannot part the two: its edit of a promise is held to the
  * spec in the same turn. A person's own edit is held to nothing, so after one
  * the plan and its spec may no longer promise the same thing, and this is the
- * reading that says where. It is advice on the way from the plan to the
- * contract and never a gate: the exit code is 0 whatever it finds.
+ * reading that says where. The exit code is 0 whatever it finds; the desktop
+ * holds approving the contract while a difference it records is open
+ * (D-NEW-basic-and-epic-flows).
  *
  * The verdict is kept beside the ticket against two hashes — the spec's bytes
  * and the plan's promise texts — and holds while neither moves. Admission
@@ -132,9 +133,27 @@ export async function drift(
   };
 
   if (input.dismiss) {
-    // Going on with the differences open is recorded against the reading it
-    // was open over, and only that one: a state nothing has read has no
-    // findings to dismiss.
+    // Only a plan nobody has edited by hand since it was drafted: the
+    // interview's edits move the spec with the plan under its guard (D-128),
+    // and a person's do not, so after one the problems are resolved by
+    // answering them or by editing (D-NEW-basic-and-epic-flows). The edit
+    // log beside the ticket says who made each edit since the draft.
+    const edits = readDraftSnapshot(dir, key);
+    if (edits === null) {
+      throw new UsageError(
+        `${key} has no record of the edits made to its plan since it was drafted, so its ` +
+          "problems cannot be dismissed: answer them, or edit the plan until a reading finds none",
+      );
+    }
+    if (recordedEdits(edits).count > 0) {
+      throw new UsageError(
+        `${key}'s plan has been edited by hand since it was drafted, so its problems cannot be ` +
+          "dismissed: answer them, or edit the plan until a reading finds none",
+      );
+    }
+    // A dismissal is recorded against the reading whose differences it sets
+    // aside, and only that one: a state nothing has read has no findings to
+    // dismiss.
     if (!holds) {
       throw new UsageError(
         `nothing has been read at this state of ${key}: the spec or the plan moved since the ` +

@@ -59,7 +59,8 @@ export function refuseWidening(facts: {
       detail:
         `remediation round ${facts.remediationRound} was given ${facts.scopeGiven.length} scope ` +
         `finding(s) and widened the change set instead: ` +
-        `${facts.widened.slice(0, 5).join(", ")}${facts.widened.length > 5 ? ", …" : ""} were not in ` +
+        `${facts.widened.slice(0, 5).join(", ")}` +
+        `${facts.widened.length > 5 ? ` and ${facts.widened.length - 5} more` : ""} were not in ` +
         `the change set it was asked to narrow. ${allowedPathsSentence(facts.pathsAllowed)}`,
     },
   };

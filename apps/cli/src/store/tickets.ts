@@ -68,8 +68,8 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  *   the interview and by `perbo drift`; read by `perbo drift` and by the
  *   interview's `carryDrift` as a chat turn brings a clean verdict forward; and
  *   read and written by the desktop host as a rename carries it to the
- *   retitled spec. It is
- *   advice on the way to the contract and nothing gates on it
+ *   retitled spec. The CLI gates nothing on it; the desktop holds approving
+ *   the contract while a difference it records is open
  *   ([D-128](../../../../docs/11-open-decisions.md)).
  */
 

@@ -49,6 +49,7 @@ import {
   PlanningError,
   type SourceIssue,
   type Spec,
+  UNTITLED_SPEC,
   assertNoSymlink,
   assertNodePagesWritable,
   contractDifferences,
@@ -1512,7 +1513,10 @@ function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean): s
   if (keepTitle) return specTitle.length > 0 ? specTitle : outcome;
   // Flattened because it is a model's words shown as a title (ADR-0023 §4).
   const drafted = oneLine(resolved.drafted?.draft.name ?? "");
-  const named = [drafted, specTitle].find(
+  // A spec still Untitled names nothing: its folder was named from the
+  // person's first turn and the work was never titled (D-118).
+  const stated = specTitle === UNTITLED_SPEC ? "" : specTitle;
+  const named = [drafted, stated].find(
     (name) => name.length > 0 && !resolved.names.some((taken) => sameName(name, taken)),
   );
   return named ?? outcome;

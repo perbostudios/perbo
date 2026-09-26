@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, Dropdown, IconButton, Notice } from "../ui/index.js";
 import {
   ManifestEditorSchema,
+  TYPED_PATH_MAX_CHARS,
   type ManifestEditor,
 } from "../../shared/protocol.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
@@ -181,14 +182,17 @@ export function ManifestDialog({
             <textarea
               aria-label="Off-limits paths"
               value={value.offLimits.join("\n")}
-              onChange={(event) =>
+              onChange={(event) => {
+                const lines = event.target.value.split("\n");
+                // Each glob is held to what one holds where it is typed, as a
+                // one-line field's own limit would hold it, so nothing typed is
+                // refused when it is saved (D-NEW-nothing-shown-is-cut).
+                if (lines.some((path) => path.length > TYPED_PATH_MAX_CHARS)) return;
                 edit({
                   ...value,
-                  offLimits: event.target.value
-                    .split("\n")
-                    .filter((path) => path.trim()),
-                })
-              }
+                  offLimits: lines.filter((path) => path.trim()),
+                });
+              }}
             />
           </label>
           <p className="small muted">

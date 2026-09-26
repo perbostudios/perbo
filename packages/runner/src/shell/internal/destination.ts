@@ -256,7 +256,7 @@ export function pathFinding(
   if (detail === null) return [];
   return [
     {
-      detail: `${detail}: ${segment.slice(0, 200)}`,
+      detail: `${detail}: ${segment}`,
       target: word.raw,
       resolved: landed(destination),
       rule: ruleOf(destination),

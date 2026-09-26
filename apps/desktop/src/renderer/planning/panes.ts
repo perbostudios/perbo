@@ -15,22 +15,22 @@ const PANES = {
   explorer: { id: "explorer", label: "Explorer", icon: "folder" },
   impact: { id: "impact", label: "Impact", icon: "growth-chart" },
   /**
-   * The step between the plan and the contract, where the plan is read against
-   * the spec it was drafted from (D-128).
-   * A pane of planning, so the rail stays beside it; in the rail only while the
-   * reading has found problems, because until then it is on the way to the
-   * contract and nowhere to go to, and once it has, the problems are what the
-   * planning is about until each is resolved or the person goes on past them.
-   * Its id is "drift", which every route to it names.
-   */
-  drift: { id: "drift", label: "Problems", icon: "alert" },
-  /**
-   * The contract, the planning's last tab: the page approving happens on,
+   * The contract, after the plan's own panes: the page approving happens on,
    * reached inside planning rather than as a place of its own
    * (D-NEW-basic-and-epic-flows). Drawn as a
    * tick, the nearest drawing there is to "approve this".
    */
   contract: { id: "contract", label: "Confirm contract", icon: "approve" },
+  /**
+   * The problems a reading of the plan against the spec it was drafted from
+   * found (D-128), each to be resolved before the plan goes on to the
+   * contract: the lowest tab, and in the rail only while one is open. An
+   * epic's Confirm the plan passes through it, which reads the plan where
+   * anything the reading judges has moved since the last reading, and goes on
+   * to the contract by itself where no problem is open.
+   * Its id is "drift", which every route to it names.
+   */
+  drift: { id: "drift", label: "Problems", icon: "alert" },
 } as const satisfies { [Id in PlanningPane]: { id: Id; label: string; icon: InkIconName } };
 export const PLANNING_PANES = Object.values(PANES);
 type Pane = (typeof PLANNING_PANES)[number];
@@ -74,24 +74,6 @@ export function contractState(
   );
 }
 
-/**
- * The state a reading of the plan against its spec is of: the spec's
- * sections, as the host fingerprints them, and the plan's promise — its
- * outcome and each criterion's words, sorted, which is what the reading reads
- * and all it reads of the plan (D-128). While it is the state recorded as the
- * last reading's (`read`), nothing that reading judged has moved, and a basic
- * ticket's Confirm contract needs no reading of its own
- * (D-NEW-basic-and-epic-flows).
- */
-export function readingState(
-  spec: string | null,
-  promise: { outcome: string; criteria: readonly { text: string }[] },
-): string {
-  return fingerprint(
-    JSON.stringify([spec, promise.outcome.trim(), promise.criteria.map((criterion) => criterion.text.trim()).sort()]),
-  );
-}
-
 /** What planning mode offers a planning. */
 export interface PlanningFlow {
   shape: PlanShape;
@@ -104,18 +86,20 @@ export interface PlanningFlow {
  *
  * While the spec is being written there is no plan to measure anything
  * against, so the Spec and the Explorer are all there is. A plan divided into
- * a graph — an epic — offers its Graph second, then the Explorer and Impact,
- * and the Problems pane after them while a reading of the plan against its
- * spec has problems open (D-128). A plan left flat — a basic ticket — has no
- * graph to curate: the Explorer, then Impact only where its check found paths
- * outside the scope, then Problems while any are open.
+ * a graph — an epic — offers its Graph second, then the Explorer and Impact.
+ * A plan left flat — a basic ticket — has no graph to curate: the Explorer,
+ * then Impact only where its check found paths outside the scope.
  *
- * The contract is the last tab, and is one while the person is on it
+ * The contract comes after them, and is a tab while the person is on it
  * (`current`), and after that while nothing has changed since they were —
  * the spec's words, a mark in the Explorer, an edit of the plan. Once
  * something has, it goes until the person reaches it again. A change a
  * person makes on a basic ticket's contract is made while they are on it, and
  * planning mode records the state it leaves as reached, so it keeps the tab.
+ *
+ * Problems is the lowest tab, below the contract, for either shape, and is
+ * there only while a reading of the plan against its spec has a problem open
+ * (D-128).
  */
 export function flowFor(
   workspace: Pick<Snapshot, "drafts" | "tasks">,
@@ -129,16 +113,14 @@ export function flowFor(
     shape === "spec"
       ? [PANES.spec, PANES.explorer]
       : shape === "epic"
-        ? [PANES.spec, PANES.graph, PANES.explorer, PANES.impact, ...problems]
-        : [PANES.spec, PANES.explorer, ...((draft?.impact ?? 0) > 0 ? [PANES.impact] : []), ...problems];
+        ? [PANES.spec, PANES.graph, PANES.explorer, PANES.impact]
+        : [PANES.spec, PANES.explorer, ...((draft?.impact ?? 0) > 0 ? [PANES.impact] : [])];
   const reachable =
     draft !== undefined &&
     draft.confirmed !== null &&
     draft.confirmed === contractState(workspace, draft);
-  return {
-    shape,
-    panes: shape !== "spec" && (current === "contract" || reachable) ? [...panes, PANES.contract] : panes,
-  };
+  const contract = shape !== "spec" && (current === "contract" || reachable) ? [PANES.contract] : [];
+  return { shape, panes: [...panes, ...contract, ...problems] };
 }
 
 /**
@@ -220,14 +202,13 @@ export function draftedLanding(plan: { sessionId: string; nodes: number }): Rout
 }
 
 /**
- * Where a basic ticket lands once the checks its fresh plan is given have
- * come back (D-NEW-basic-and-epic-flows):
- * the Problems pane where the reading of the plan against the spec found any,
- * else the Impact pane where the impact check found paths outside the scope,
- * else the contract.
+ * Where a basic ticket lands once the impact check its fresh plan is given
+ * has come back (D-NEW-basic-and-epic-flows): the Impact pane where it found
+ * paths outside the scope, else the contract. Never on Problems: a basic
+ * ticket's plan is read against its spec only at its Confirm contract.
  */
-export function checkedLanding(checked: { problems: boolean; flagged: boolean }): PlanningPane {
-  return checked.problems ? "drift" : checked.flagged ? "impact" : "contract";
+export function checkedLanding(checked: { flagged: boolean }): PlanningPane {
+  return checked.flagged ? "impact" : "contract";
 }
 
 /** What the way on to the contract is called: an epic confirms its plan, a basic ticket its contract. */
@@ -247,14 +228,14 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
  * footer and its shortcut, the pane footer the other panes share and the
  * Spec's way to the plan.
  *
- * An epic's goes by way of the reading of the plan against its spec (D-128),
- * which is the one step between the plan and the contract and lands on the
- * contract tab by itself where there is nothing to say. A basic ticket's goes
- * to its contract, where its criteria are edited and where its Confirm
- * contract reads the plan against the spec, where anything the reading judges
- * has moved since the last one (D-NEW-basic-and-epic-flows). An approved plan
- * is frozen and goes straight to its contract, and so does a plan with no
- * planning to read it in.
+ * An epic's goes by way of the Problems pane, which reads the plan against
+ * its spec where anything the reading judges has moved since the last one
+ * (D-128), holds the way on while a problem is open, and lands on the
+ * contract tab by itself where none is. A basic ticket's goes to its
+ * contract, where its criteria are edited and where its Confirm contract
+ * reads the plan against the spec by the same rule
+ * (D-NEW-basic-and-epic-flows). An approved plan is frozen and goes straight
+ * to its contract, and so does a plan with no planning to read it in.
  */
 export function confirmRoute(way: {
   repoId: string;

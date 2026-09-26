@@ -10,7 +10,7 @@ import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
 import { costLabel, runEnding, taskRecords } from "./task-context.js";
 import type { RunEnding, TaskContext } from "./task-context.js";
-import type { DecisionQuestion } from "../../shared/protocol.js";
+import { TYPED_TEXT_MAX_CHARS, type DecisionQuestion } from "../../shared/protocol.js";
 
 export function TaskHeader(context: TaskContext) {
   const { ticket, title, repo } = taskRecords(context);
@@ -395,6 +395,24 @@ const AnswersSchema = z.record(
   z.string(),
   z.object({ text: z.string(), custom: z.boolean(), choice: z.enum(DECISION_CHOICES) }),
 );
+/**
+ * Every answer together, as the principle the executor is handed: each
+ * question's title and the words that answer it (D-065).
+ */
+function decisionText(
+  key: string,
+  questions: readonly DecisionQuestion[],
+  answers: z.infer<typeof AnswersSchema>,
+): string {
+  return (
+    "For task " +
+    key +
+    ":\n" +
+    questions
+      .map((question, index) => index + 1 + ". " + question.title + "\n" + (answers[question.id]?.text ?? ""))
+      .join("\n\n")
+  );
+}
 function DecisionOverlay(
   context: TaskContext & { questions: DecisionQuestion[] },
 ) {
@@ -424,6 +442,18 @@ function DecisionOverlay(
   // A finding the executor is never handed takes only Ship as it is; a
   // question that takes no choice takes the person's words for a principle.
   const ownWords = question.choices.length === 0 || question.choices.includes("approach");
+  // The person's words are held where they type them to the room the answer
+  // has left: every answer goes down together as one principle, which holds
+  // what a typed field holds, so nothing typed is refused when it is sent
+  // (D-NEW-nothing-shown-is-cut).
+  const room = Math.max(
+    0,
+    TYPED_TEXT_MAX_CHARS -
+      decisionText(detail.ticket.key, questions, {
+        ...answers,
+        [question.id]: { text: "", custom: true, choice: "approach" },
+      }).length,
+  );
   const busy = Boolean(exclusiveJob(workspace.jobs));
   useEffect(() => {
     sessionStorage.setItem(storageKey, JSON.stringify(answers));
@@ -472,21 +502,7 @@ function DecisionOverlay(
       setError("Answer every question before confirming.");
       return;
     }
-    const text =
-      "For task " +
-      detail.ticket.key +
-      ":\n" +
-      questions
-        .map(
-          (question, index) =>
-            index +
-            1 +
-            ". " +
-            question.title +
-            "\n" +
-            answers[question.id]!.text,
-        )
-        .join("\n\n");
+    const text = decisionText(detail.ticket.key, questions, answers);
     void bridge
       .request({
         kind: "decide",
@@ -664,6 +680,7 @@ function DecisionOverlay(
                       ref={own}
                       aria-label="Your approach"
                       placeholder="Type the approach in a sentence…"
+                      maxLength={room}
                       value={custom}
                       onFocus={() => setCustomSelected(true)}
                       onKeyDown={(event) => {

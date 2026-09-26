@@ -24,13 +24,13 @@ export interface OwedReading {
  * a problem's card and the note saying every problem is resolved, are the
  * reading's and not the turn's, and do not move the bound.
  *
- * Owed only while the session records problems, since the host reads again
- * after a turn only where there is a record to read against, and only while
- * the interview runs.
+ * Owed only while the session records a problem open, since the host reads
+ * again after a turn only while one is (D-128), and only while the interview
+ * runs.
  */
 export function owedReading(
   conversation: readonly InterviewEntry[],
-  session: { drift: unknown; running: boolean },
+  session: { drift: { open: readonly unknown[] } | null; running: boolean },
   newest: Pick<Job, "startedAt"> | null,
 ): OwedReading {
   const last = conversation.findLastIndex((entry) => entry.line.kind === "turn");
@@ -39,7 +39,8 @@ export function owedReading(
     conversation.slice(last).findLast((entry) => !putByReading(entry.line))!.at,
   );
   const owed =
-    session.drift != null &&
+    session.drift !== null &&
+    session.drift.open.length > 0 &&
     session.running &&
     !(newest !== null && Date.parse(newest.startedAt) >= appliedAt);
   return { turn: conversation[last]!.n, appliedAt, owed };

@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   ExecutionAttemptSchema,
   SecretIndex,
+  type CheckResult,
   type ExecutionAttempt,
   type ReviewArtifact,
   type RunBundle,
@@ -16,6 +17,7 @@ import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../test-support/records.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { WIDTH } from "../text.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -1750,5 +1752,112 @@ describe("the denials of an attempt that ended without changes", () => {
     const named = denials.split("\n").filter((line) => line.includes("perbo-implementer"));
     expect(named).toHaveLength(1);
     expect(named[0]).toContain("Write /tmp/evidence");
+  });
+});
+
+/**
+ * What `inspect` prints a person is never cut (D-NEW-nothing-shown-is-cut):
+ * text longer than its column goes under it, wrapped, and every word of it is
+ * there. Each value here is longer than any column the card gives it.
+ */
+describe("the card, whole", () => {
+  const long = (what: string) => `${what} ${"that runs on past any column the card could give it ".repeat(3)}END`;
+  const flat = (rendered: string) => rendered.replace(/\s+/g, " ");
+  const rendered = (edit: (report: ReturnType<typeof buildInspectReport>) => void, detail = false) => {
+    const { store } = storeWithAttempts(`whole-${Math.random().toString(36).slice(2)}`);
+    const report = buildInspectReport({ storeDirectory: store, key: "AYO-7", attempt: null });
+    edit(report);
+    const text = renderInspect(report, { color: false, detail, version: "test" });
+    for (const line of text.split("\n")) expect(line.length, line).toBeLessThanOrEqual(WIDTH);
+    return flat(text);
+  };
+  const check = (over: Partial<CheckResult>): CheckResult =>
+    ({ check_id: "check_unit", name: "unit", kind: "unit", status: "failed", summary: "1 failed", command: "pnpm test", detail: null, duration_ms: null, source: "file", ...over }) as CheckResult;
+
+  it("prints a check's command and summary whole", () => {
+    const summary = long("Tests 1 failed | 311 passed");
+    const command = "pnpm exec vitest run --project unit --reporter verbose";
+    const out = rendered((report) => {
+      report.attempts[1]!.checks = [check({ summary, command })];
+    });
+    expect(out).toContain(command);
+    expect(out).toContain(summary);
+  });
+
+  it("prints what hangs under a check whole: its node, its re-run, its failing tests and its tmpdir", () => {
+    const narrowed = long("packages/search/src/query.ts");
+    const rerun = long("pnpm exec vitest run packages/search/test/query.test.ts");
+    const note = long("the re-run named the same test");
+    const test = long("packages/search/test/query.test.ts > paginates");
+    const tmpdir = long("/private/var/folders/xy/abcdefghijklmnop/T/perbo-attempt");
+    const out = rendered((report) => {
+      report.attempts[1]!.checks = [
+        check({
+          node: { node_id: "node_1", scope: "files", paths: [narrowed] },
+          rerun: { status: "failed", command: rerun, note },
+          failing_tests: [test],
+          tmpdir,
+        } as unknown as Partial<CheckResult>),
+      ];
+    });
+    for (const text of [narrowed, rerun, note, test, tmpdir]) expect(out).toContain(text);
+  });
+
+  it("prints a finding's location, a verification's pointer and a changed file whole", () => {
+    const file = long("packages/search/src/a/deeply/nested/directory/query.ts").replace(/ /g, "-");
+    const changed = long("packages/search/src/another/deeply/nested/directory/page.ts").replace(/ /g, "-");
+    const pointer = long("src/paginate.ts:12, where the page size is read");
+    const out = rendered((report) => {
+      report.attempts[1]!.review!.findings[0]!.file = file;
+      report.attempts[2]!.verification!.per_finding[0]!.pointer = pointer;
+      report.attempts[1]!.changed_files = [{ path: changed, change_kind: "modified", additions: 3, deletions: 1 }];
+    }, true);
+    expect(out.replace(/ /g, "")).toContain(file);
+    expect(out.replace(/ /g, "")).toContain(changed);
+    expect(out).toContain(pointer);
+  });
+
+  it("prints the target of a refused command whole", () => {
+    const target = long("/Users/someone/.config/an-application/settings.json");
+    const out = rendered((report) => {
+      report.attempts[1]!.denials = [{ tool: "Bash", command: "echo x > \"$CONFIG\"", rule: "write_outside_worktree", target, agent: null } as never];
+    }, true);
+    expect(out).toContain(target);
+  });
+
+  it("prints a remediation round's rung whole", () => {
+    const out = rendered((report) => {
+      const keys = Array.from({ length: 1000 }, (_, n) => `k${n}`);
+      report.attempts[2]!.ladder = { kind: "resolve_conflict", given: keys, closed: keys, open: keys } as never;
+    });
+    expect(out).toContain("given 1000 closed 1000 open 1000 (conflict — not a remediation round)");
+  });
+
+  it("prints how a ticket was admitted whole", () => {
+    const criteria = long("imported from the tracker");
+    const level = long("P2 raised by the person");
+    const out = rendered((report) => {
+      report.admission = { criteria_source: criteria, criteria_count: 3, derived_level: level, level_source: "manual" } as never;
+    });
+    expect(out).toContain(criteria);
+    expect(out).toContain(level);
+  });
+
+  it("prints a local run's contract and url whole", () => {
+    const reference = long("owner/repository#412");
+    const url = `https://github.com/owner/repository/pull/412/${"files".repeat(20)}`;
+    const out = rendered((report) => {
+      report.admission = null;
+      (report as { kind: string }).kind = "local";
+      (report as { contract_source: unknown }).contract_source = {
+        source: "pull_request",
+        reference,
+        outcome_from: "title",
+        criteria: [],
+        url,
+      };
+    });
+    expect(out).toContain(reference);
+    expect(out.replace(/ /g, "")).toContain(url);
   });
 });

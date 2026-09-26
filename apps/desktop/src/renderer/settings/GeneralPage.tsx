@@ -14,7 +14,7 @@ import {
 import { errorMessage, useAction } from "../workspace/index.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
-import type { Settings } from "../../shared/protocol.js";
+import { PERSON_NAME_MAX_CHARS, type Settings } from "../../shared/protocol.js";
 
 const MOMENTS: { key: keyof Settings["notifyOn"]; label: string }[] = [
   { key: "decision", label: "A ticket needs a decision" },
@@ -67,7 +67,7 @@ export function GeneralPage({ workspace, navigate }: PageProps) {
                   aria-label="Your name"
                   autoFocus
                   value={name}
-                  maxLength={60}
+                  maxLength={PERSON_NAME_MAX_CHARS}
                   onChange={(event) => setName(event.target.value)}
                   onBlur={saveName}
                   onKeyDown={(event) => {

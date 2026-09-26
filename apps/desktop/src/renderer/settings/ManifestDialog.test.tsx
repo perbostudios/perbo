@@ -4,7 +4,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ManifestDialog } from "./ManifestDialog.js";
 import { bridge } from "../workspace/index.js";
-import type { ManifestEditor, ReplyMap, Request } from "../../shared/protocol.js";
+import {
+  ManifestEditorSchema,
+  TYPED_PATH_MAX_CHARS,
+  type ManifestEditor,
+  type ReplyMap,
+  type Request,
+} from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
 
 // jsdom has no modal dialog; the dialog's own open state is all these cases read.
 beforeAll(() => {
@@ -113,5 +120,20 @@ describe("the worktree manifest dialog", () => {
     await waitFor(() => expect(saves).toHaveLength(1));
     expect(saves[0]).toEqual({ digest: A, value: { entries: [], offLimits: ["mine/**"] } });
     await waitFor(() => expect(closes).toHaveLength(1));
+  });
+
+  it("holds each off-limits glob to what one holds where it is typed, and saves it without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+    const { saves } = mount(() => manifest(A, ["old/**"]));
+    await waitFor(() => expect(paths().value).toBe("old/**"));
+    const full = "p".repeat(TYPED_PATH_MAX_CHARS);
+    typeInto(paths(), "\n" + full);
+    expect(paths().value).toBe("old/**\n" + full);
+    // One character more on that line is not taken.
+    typeInto(paths(), "q");
+    expect(paths().value).toBe("old/**\n" + full);
+    fireEvent.click(save());
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(saves[0]!.value.offLimits).toEqual(["old/**", full]);
+    expect(ManifestEditorSchema.safeParse(saves[0]!.value).success).toBe(true);
   });
 });

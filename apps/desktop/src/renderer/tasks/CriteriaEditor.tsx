@@ -1,5 +1,5 @@
 import { Button, Dropdown, Field, IconButton } from "../ui/index.js";
-import { CriterionSchema } from "../../shared/protocol.js";
+import { CriterionSchema, TYPED_TEXT_MAX_CHARS } from "../../shared/protocol.js";
 import type { Draft, PlanPromise } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
 import { MarkedCriterion, RemovedCriteria } from "../planning/ChangeMarks.js";
@@ -83,6 +83,7 @@ export function CriteriaEditor({
                 <textarea
                   aria-label={"Criterion " + (index + 1)}
                   autoFocus
+                  maxLength={TYPED_TEXT_MAX_CHARS}
                   value={editedCriterion.text}
                   onChange={(event) => {
                     const text = event.target.value;
@@ -144,6 +145,7 @@ export function CriteriaEditor({
                     >
                       <textarea
                         id={"proof-" + index}
+                        maxLength={TYPED_TEXT_MAX_CHARS}
                         value={editedCriterion.assertion}
                         onChange={(event) =>
                           setEditedCriterion({

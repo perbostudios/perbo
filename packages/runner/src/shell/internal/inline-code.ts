@@ -1116,7 +1116,7 @@ function spawnedFindings(command: SpawnedCommand, how: string, context: Context,
     .filter((finding) => finding.target !== null && (finding.cause ?? "outside_target") === "outside_target")
     .map((finding) => ({
       ...finding,
-      detail: `the code passed to ${how} runs \`${command.text.slice(0, 120)}\`, and in it ${finding.detail}`,
+      detail: `the code passed to ${how} runs \`${command.text}\`, and in it ${finding.detail}`,
     }));
 }
 
@@ -1139,7 +1139,7 @@ export function inlineCodeFindings(
   context: Context,
   cwd: Cwd,
 ): WriteFinding[] {
-  const tail = `: ${context.segment.slice(0, 200)}`;
+  const tail = `: ${context.segment}`;
   if (code.variable || code.substitutions.length > 0) {
     return [
       {

@@ -33,7 +33,7 @@ const problemCard = (n: number, minute: number): InterviewEntry =>
 const resolvedNote = (n: number, minute: number): InterviewEntry =>
   entry(n, minute, { kind: "note", text: EVERY_PROBLEM_RESOLVED, notable: true });
 const reading = (minute: number) => ({ startedAt: at(minute) });
-const recorded = { drift: { open: [], resolved: false }, running: true };
+const recorded = { drift: { open: [{ heading: "Criterion 1 and R1" }], resolved: false }, running: true };
 
 describe("the reading a turn is owed (D-128)", () => {
   it("owes nothing before the person has taken a turn", () => {
@@ -70,10 +70,12 @@ describe("the reading a turn is owed (D-128)", () => {
     expect(owedReading(conversation, recorded, reading(5)).owed).toBe(false);
   });
 
-  it("owes nothing where the session records no problems, or the interview is not running", () => {
+  it("owes nothing where the session records no problem open, or the interview is not running", () => {
     const conversation = [turn(1, 1), said(2, 4)];
     expect(owedReading(conversation, { drift: null, running: true }, null).owed).toBe(false);
-    expect(owedReading(conversation, { drift: undefined, running: true }, null).owed).toBe(false);
+    // Every problem resolved: a turn then is not read after, since the chat's
+    // edits are read at the confirm (D-128).
+    expect(owedReading(conversation, { drift: { open: [] }, running: true }, null).owed).toBe(false);
     expect(owedReading(conversation, { ...recorded, running: false }, null).owed).toBe(false);
   });
 });

@@ -31,6 +31,7 @@ export {
   specSlug,
   specSymbolNames,
   specTitleFromMessage,
+  UNTITLED_SPEC,
   symbolBeingTyped,
   symbolOptions,
 } from "./spec-text.js";

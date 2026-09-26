@@ -147,9 +147,9 @@ export const DRIFT_ORIGINS = ["drafted", "carried", "read"] as const;
  * of a promise, or of the spec, lets it go. `drafted` is the verdict a plan
  * has by construction as it is drafted; `carried` is that verdict brought
  * forward by a chat turn that moved the plan, which the interview's guard
- * held to the spec; `read` is a model's. `dismissed` records that the person
- * went on to the contract with these findings open, so the same reading is
- * not put to them again at the same state.
+ * held to the spec; `read` is a model's. `dismissed` records that these
+ * findings were dismissed (`perbo drift --dismiss`), so the same reading is
+ * not put again at the same state.
  */
 export const DriftRecordSchema = z.strictObject({
   spec: z.string().regex(/^sha256:[0-9a-f]{64}$/),

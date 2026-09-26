@@ -520,6 +520,13 @@ describe("perbo admit --from-spec", () => {
     expect(readTicket(storeDir(other.repo, null), "PRB-3").title).toBe(drafted.outcome);
   });
 
+  it("passes over a spec still Untitled for the outcome, where the drafted name is taken (D-118)", async () => {
+    const { repo, specPath } = repository(SPEC.replace("# Activation email", "# Untitled"));
+    await admitTyped(repo, "Activation email retries");
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries" })]));
+    expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe(drafted.outcome);
+  });
+
   it("keeps the drafted name when the outcome is edited", async () => {
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries" })]));

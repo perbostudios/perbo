@@ -373,7 +373,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     findings.push({
       detail:
         `the command ${operand.raw} passed to ${by} cannot be read — it is built at ` +
-        `run time: ${context.segment.slice(0, 200)}`,
+        `run time: ${context.segment}`,
       target: null,
       resolved: null,
     });
@@ -415,7 +415,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     findings.push({
       detail:
         `${reason}, so the word naming the command it runs cannot be told from the ` +
-        `option's own value: ${context.segment.slice(0, 200)}`,
+        `option's own value: ${context.segment}`,
       target: null,
       resolved: null,
     });
@@ -426,7 +426,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     findings.push({
       detail:
         `${option} builds the command ${wrapper} runs out of a string this guard does ` +
-        `not read: ${context.segment.slice(0, 200)}`,
+        `not read: ${context.segment}`,
       target: null,
       resolved: null,
     });
@@ -437,7 +437,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     findings.push({
       detail:
         `${wrapper} ${option} runs the command under another root directory, so every path it ` +
-        `names resolves somewhere this guard does not read: ${context.segment.slice(0, 200)}`,
+        `names resolves somewhere this guard does not read: ${context.segment}`,
       target: null,
       resolved: null,
     });
@@ -465,7 +465,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     findings.push({
       detail:
         `the command ${operand.raw} passed to ${by} cannot be read — ${how}: ` +
-        `${context.segment.slice(0, 200)}`,
+        `${context.segment}`,
       target: null,
       resolved: null,
     });
@@ -484,7 +484,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   const moved = (destination: Destination, raw: string, label: string): Cwd => {
     if (destination.kind === "unresolvable") {
       findings.push({
-        detail: `${destinationSentence(label, raw, destination)}: ${context.segment.slice(0, 200)}`,
+        detail: `${destinationSentence(label, raw, destination)}: ${context.segment}`,
         target: raw,
         resolved: null,
       });
@@ -503,7 +503,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         detail:
           `the directory ${wrapper} ${option} runs in cannot be resolved — ${supplied.wrapper} ` +
           `substitutes the words it reads from standard input for ${supplied.placeholder}, and ` +
-          `they are not on the line: ${context.segment.slice(0, 200)}`,
+          `they are not on the line: ${context.segment}`,
         target: operand.raw,
         resolved: null,
       });
@@ -726,7 +726,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     findings.push({
       detail:
         `${word.raw} is what ${supplied.wrapper} substitutes its input for, and it stands as ${where}, ` +
-        `so what runs cannot be read: ${context.segment.slice(0, 200)}`,
+        `so what runs cannot be read: ${context.segment}`,
       target: null,
       resolved: null,
     });
@@ -802,7 +802,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         findings.push({
           detail:
             `the placeholder ${named} ${program} substitutes its input for is shaped like an ` +
-            `option, so the command it runs cannot be read: ${context.segment.slice(0, 200)}`,
+            `option, so the command it runs cannot be read: ${context.segment}`,
           target: null,
           resolved: null,
         });
@@ -821,7 +821,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
             detail:
               `${program} stands behind ${supplied.wrapper}, which puts the words it reads from ` +
               `standard input into the command ${program} runs, so what runs cannot be read: ` +
-              `${context.segment.slice(0, 200)}`,
+              `${context.segment}`,
             target: null,
             resolved: null,
           });
@@ -837,7 +837,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
             detail:
               `${expanded.raw} is a word the shell expands, so where ${program} finds ${named} ` +
               `in the command it runs — or whether it does — cannot be read here: ` +
-              `${context.segment.slice(0, 200)}`,
+              `${context.segment}`,
             target: null,
             resolved: null,
           });
@@ -923,7 +923,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       findings.push({
         detail:
           `the program ${command.raw} cannot be read — it is built at run time: ` +
-          `${context.segment.slice(0, 200)}`,
+          `${context.segment}`,
         target: null,
         resolved: null,
       });
@@ -972,7 +972,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       programs.push(verb);
       const reason = "`popd` returns to a directory this guard did not see";
       findings.push({
-        detail: `the working directory cannot be resolved — ${reason}: ${context.segment.slice(0, 200)}`,
+        detail: `the working directory cannot be resolved — ${reason}: ${context.segment}`,
         target: null,
         resolved: null,
       });
@@ -1001,7 +1001,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         findings.push({
           detail:
             `what find walks and what it does there cannot be read — ${fed}: ` +
-            `${context.segment.slice(0, 200)}`,
+            `${context.segment}`,
           target: null,
           resolved: null,
         });
@@ -1012,7 +1012,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           detail:
             `the starting points find -files0-from reads from ${expression.startsFrom.raw} are ` +
             `not on the line, so where its -delete or -exec body writes cannot be resolved: ` +
-            `${context.segment.slice(0, 200)}`,
+            `${context.segment}`,
           target: null,
           resolved: null,
         });
@@ -1292,7 +1292,7 @@ function pipeInto(separator: string, segment: string): StdinSource | undefined {
 
 function legacyFindings(segment: string): WriteFinding[] {
   return LEGACY_RULES.filter((rule) => rule.pattern.test(segment)).map((rule) => ({
-    detail: `${rule.detail}: ${segment.slice(0, 200)}`,
+    detail: `${rule.detail}: ${segment}`,
     target: null,
     resolved: null,
   }));
@@ -1327,7 +1327,7 @@ export function inspectSegments(
   const findings: WriteFinding[] = [];
   if (unreadable !== null) {
     findings.push({
-      detail: `this line cannot be read — ${unreadable}: ${command.slice(0, 200)}`,
+      detail: `this line cannot be read — ${unreadable}: ${command}`,
       target: null,
       resolved: null,
     });

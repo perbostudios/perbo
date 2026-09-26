@@ -81,7 +81,7 @@ export function executorPromptVersion(
   resumed: boolean,
 ): string {
   if (kind === "resolve_conflict") return conflictPromptVersion(config.relevel_context);
-  if (kind !== "execute") return "executor_remediation_v7";
+  if (kind !== "execute") return "executor_remediation_v8";
   return resumed ? RESUMED_EXECUTOR_PROMPT_VERSION : EXECUTOR_PROMPT_VERSION;
 }
 
@@ -111,14 +111,12 @@ export function classifyTermination(args: {
    * were refused changed nothing because it could not.
    */
   const denied = agentResult.commands.filter((command) => command.decision === "denied");
-  const deniedSummary = denied
-    .slice(0, 5)
-    .map(
-      (command) =>
-        `${command.denial_rule ?? "unknown"} on ` +
-        `${command.denial_target ?? command.detail.slice(0, 80)}`,
-    )
-    .join("; ");
+  // Whole commands, the first five, then how many more (D-NEW-nothing-shown-is-cut).
+  const deniedSummary =
+    denied
+      .slice(0, 5)
+      .map((command) => `${command.denial_rule ?? "unknown"} on ${command.denial_target ?? command.detail}`)
+      .join("; ") + (denied.length > 5 ? `; and ${denied.length - 5} more` : "");
   if (agentResult.termination.reason !== "completed") {
     return withCeilingGuidance(agentResult.termination, config);
   }
@@ -139,7 +137,8 @@ export function classifyTermination(args: {
         `the sealed change set carries ${sealed.outside_allowed_paths.length} path(s) ` +
         `outside what the contract admits a write under, which the pre-execution ` +
         `guard should have refused: ` +
-        `${sealed.outside_allowed_paths.slice(0, 5).join(", ")} — ` +
+        `${sealed.outside_allowed_paths.slice(0, 5).join(", ")}` +
+        `${sealed.outside_allowed_paths.length > 5 ? ` and ${sealed.outside_allowed_paths.length - 5} more` : ""} — ` +
         `${allowedPathsSentence(pathsAllowed)}`,
     };
   }

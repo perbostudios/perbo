@@ -515,6 +515,35 @@ describe("mergeUp itself", () => {
     expect(git(worktree, "rev-parse", "HEAD").trim()).not.toBe(tip);
     expect(git(worktree, "status", "--porcelain")).toContain("?? src/collides.ts");
   }, MERGE_UP_TIMEOUT_MS);
+  it("carries git's whole refusal, every line of it (D-NEW-nothing-shown-is-cut)", async () => {
+    const repo = runnerRepository(scratch);
+    const worktree = branchWorktree(repo.dir, "blocked-many");
+    writeFileSync(join(worktree, "src", "own.ts"), "export const own = 1;\n");
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-qm", "own");
+    // Six files the base adds where the worktree has untracked ones: git names
+    // each on a line of its own, more lines and characters than any cut kept.
+    const names = [1, 2, 3, 4, 5, 6].map((n) => `src/a-rather-long-file-name-the-base-adds-${n}.ts`);
+    for (const name of names) writeFileSync(join(repo.dir, name), "export const base = 1;\n");
+    git(repo.dir, "add", "-A");
+    git(repo.dir, "commit", "-qm", "base: six files");
+    for (const name of names) writeFileSync(join(worktree, name), "not committed\n");
+
+    const result = await mergeUp({
+      worktree,
+      repository_root: repo.dir,
+      base_ref: "main",
+      base_commit: repo.head,
+      ticket_key: "SCP192",
+      attempt_id: "att_0000000000000001",
+    });
+
+    expect(result.status).toBe("conflict");
+    const detail = (result as { detail: string }).detail;
+    expect(detail.length).toBeGreaterThan(400);
+    for (const name of names) expect(detail).toContain(name);
+    expect(detail).toContain("Please move or remove them before you merge.");
+  }, MERGE_UP_TIMEOUT_MS);
 });
 
 describe("a base that has not moved costs nothing", () => {

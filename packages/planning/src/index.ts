@@ -34,6 +34,7 @@ export {
   requirementNodes,
   SpecConflict,
   specTitleFromMessage,
+  UNTITLED_SPEC,
 } from "./spec-text.js";
 export type { Spec } from "./spec-text.js";
 export { assertNoSymlink, readSpecText, retitleSpecFile, writeSpecFile } from "./spec-write.js";

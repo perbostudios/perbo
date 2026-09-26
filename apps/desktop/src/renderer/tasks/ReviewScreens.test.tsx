@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CoverageStatus, CriterionEvidenceBinding, VerificationStrength } from "@perbo/contracts";
 import { sampleBridge } from "../../sample-host/bridge.js";
-import type { Detail, Snapshot } from "../../shared/protocol.js";
+import { RequestSchema, TYPED_TEXT_MAX_CHARS, type Detail, type Request, type Snapshot } from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
+import { bridge } from "../workspace/index.js";
 import { MergeScreen, ReviewScreen } from "./ReviewScreens.js";
 import type { TaskContext } from "./task-context.js";
 
@@ -184,5 +186,39 @@ describe("the review and merge screens' primary action", () => {
     const bar = [...document.querySelectorAll<HTMLElement>(".merge-actions > .button")];
     expect(bar.map((button) => button.textContent)).toEqual(["Back to review", "Don’t merge", "Merge on GitHub"]);
     expect(bar.at(-1)!.className).toContain("button--primary");
+  });
+});
+
+describe("a note sent back with a finding (D-NEW-nothing-shown-is-cut)", () => {
+  it("is held to what a note holds where it is typed, and sent whole without a refusal", async () => {
+    // jsdom has no modal dialog; the dialog is only opened here.
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      };
+      HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      };
+    }
+    const task = context([{ status: "met", strength: "directly_verified", assertion: "one" }]);
+    const review = task.detail.attempts.at(-1)!.review!;
+    const template = sample.detail.attempts.flatMap((attempt) => attempt.review?.findings ?? [])[0];
+    expect(template).toBeDefined();
+    review.findings = [{ ...template!, status: "open" }];
+    const sent: Request[] = [];
+    vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {
+      sent.push(request);
+      return null;
+    }) as typeof bridge.request);
+    view(task);
+    fireEvent.click(screen.getByRole("button", { name: "Send a finding back" }));
+    const note = screen.getByLabelText("Your assessment") as HTMLTextAreaElement;
+    typeInto(note, "n".repeat(TYPED_TEXT_MAX_CHARS + 50));
+    expect(note.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    fireEvent.click(within(note.closest("dialog")!).getByRole("button", { name: "Record feedback" }));
+    await vi.waitFor(() => expect(sent.some((request) => request.kind === "verdict")).toBe(true));
+    const verdict = sent.find((request) => request.kind === "verdict")!;
+    expect(RequestSchema.safeParse(verdict).success).toBe(true);
+    expect((verdict as { note: string }).note).toBe("n".repeat(TYPED_TEXT_MAX_CHARS));
   });
 });

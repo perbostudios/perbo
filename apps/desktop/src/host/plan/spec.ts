@@ -4,6 +4,7 @@ import {
   EMPTY_SPEC_TEXT,
   PlanningError,
   SpecConflict,
+  UNTITLED_SPEC,
   assertNoSymlink,
   driftHash,
   parseSpec,
@@ -20,7 +21,7 @@ import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { perboPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
-import { sectionsOf, titleChanged, type SpecReader } from "../../shared/contract-editing.js";
+import { readingStateOf, sectionsOf, titleChanged, type SpecReader } from "../../shared/contract-editing.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
 import { specSlugOf } from "../../shared/spec-slug.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
@@ -28,6 +29,7 @@ import type { ChangeMarks } from "./marks.js";
 import type { RegisteredRepository } from "../profile/store.js";
 import type {
   Detail,
+  EditingSession,
   RequestOf,
   SpecRow,
   SpecSaveReply,
@@ -72,6 +74,32 @@ export function specTexts(repository: (id: string) => RegisteredRepository): Spe
       return null;
     }
   };
+}
+
+/**
+ * The state a plan just drafted from its spec was read at by its drafting
+ * (D-128): admission writes a verdict that finds nothing beside the ticket,
+ * keyed by the spec's bytes it drafted from, so while the spec is still those
+ * bytes the plan the planning holds has been read, at
+ * {@link readingStateOf} of it. Null where the planning has no spec or no
+ * plan, or the verdict is not there, found something, or is of other bytes —
+ * the plan is then read when the person confirms it.
+ */
+export function draftedReading(
+  repository: (id: string) => RegisteredRepository,
+  record: EditingSession,
+): string | null {
+  if (record.specSlug === null || record.key === null) return null;
+  try {
+    const repo = repository(record.repoId);
+    assertNoSymlink(repo.path, `${specFolder(repo)}/${record.specSlug}/spec.md`);
+    const bytes = readFileSync(specPath(repo, record.specSlug));
+    const verdict = readDriftRecord(perboPath(repo), record.key);
+    if (verdict === null || verdict.findings.length > 0 || verdict.spec !== driftHash(bytes)) return null;
+    return readingStateOf(record, specTexts(repository));
+  } catch {
+    return null;
+  }
 }
 
 /** The title each spec states, as {@link specTexts} reads it. */
@@ -337,19 +365,22 @@ export function saveSpec(
 }
 
 /**
- * A spec named from a title, minted in the repository's spec folder. The
- * folder is minted once and never moves, so what it was called is worth
- * saying while the spec is still empty enough to start again.
+ * A spec whose folder is named from the words cut from the person's first
+ * turn, minted in the repository's spec folder, with {@link UNTITLED_SPEC} on
+ * its title line: the cut names the folder and is no title (D-118). The folder
+ * is minted once and never moves, so what it was called is worth saying while
+ * the spec is still empty enough to start again.
  */
 export function mintSpecFromTitle(
   repo: RegisteredRepository,
-  title: string,
+  cut: string,
 ): { slug: string; folder: string } {
   const written = writeSpecFile({
     repositoryRoot: repo.path,
     folder: specFolder(repo),
     slug: null,
-    text: { ...EMPTY_SPEC_TEXT, title },
+    folderName: cut,
+    text: { ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC },
     base: EMPTY_SPEC_TEXT,
   });
   return { slug: written.slug, folder: written.folder };

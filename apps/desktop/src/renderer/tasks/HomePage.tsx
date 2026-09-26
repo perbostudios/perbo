@@ -18,7 +18,7 @@ import { useCreate, withoutDeleting } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
-import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
+import { ARCHIVE_SEARCH_MAX_CHARS, type Snapshot, type TaskRow, type TaskSummary } from "../../shared/protocol.js";
 import { archiveRows, isArchivable, isFiled, isMergeDecided } from "../../shared/archive.js";
 import { HOME_TONES, HOME_TONE_LABELS, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
@@ -447,6 +447,7 @@ export function HomePage({
               <input
                 ref={searchInput}
                 aria-label="Search running tickets"
+                maxLength={ARCHIVE_SEARCH_MAX_CHARS}
                 placeholder="Search running tickets…"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -518,6 +519,7 @@ export function HomePage({
             <input
               ref={searchInput}
               aria-label="Search archived tasks"
+              maxLength={ARCHIVE_SEARCH_MAX_CHARS}
               placeholder="Search title, ticket or PR…"
               value={search}
               onChange={(event) => {

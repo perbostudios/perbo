@@ -14,7 +14,7 @@ One binary carries every command: `doctor`, `baseline`, `review`, `inspect`, `ve
 
 **Trust boundary:** a model's drafted contract or proposed scope is data until a person's `approve` confirms it; only then does a scope glob become an action parameter ([ADR-0023](adr/0023-untrusted-context-boundary.md), [D-072](11-open-decisions.md)).
 
-Built: Create, its picker, the Spec pane, which writes the spec folder, the Explorer pane, the Graph pane, the Impact pane, the Problems pane every way from the plan to the contract goes through, over `perbo drift` ([D-128](11-open-decisions.md)), `perbo interview` itself on both transports and the chat docking it beside every pane but Problems, and the loop committing the spec folder first on the ticket's branch ([D-101](11-open-decisions.md), [D-102](11-open-decisions.md), [D-103](11-open-decisions.md)). Decided, not built: the precondition `merge: loop` needs before use (SCP-229, [D-041](11-open-decisions.md)).
+Built: Create, its picker, the Spec pane, which writes the spec folder, the Explorer pane, the Graph pane, the Impact pane, the Problems pane an epic's every way from the plan to the contract goes through, over `perbo drift` ([D-128](11-open-decisions.md)), `perbo interview` itself on both transports and the chat docking it beside every pane but Problems, and the loop committing the spec folder first on the ticket's branch ([D-101](11-open-decisions.md), [D-102](11-open-decisions.md), [D-103](11-open-decisions.md)). Decided, not built: the precondition `merge: loop` needs before use (SCP-229, [D-041](11-open-decisions.md)).
 
 ## `apps/desktop` — the Perbo desktop
 

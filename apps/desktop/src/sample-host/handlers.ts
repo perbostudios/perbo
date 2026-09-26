@@ -10,8 +10,8 @@ import {
 import { DECIDED_DELIVERY_NOTE, isNeverReadPath, retainedBranch } from "@perbo/contracts/browser";
 import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { openDrafts, sectionsOf, titleChanged, turnMark } from "../shared/contract-editing.js";
-import type { EditingOwner, SpecReader } from "../shared/contract-editing.js";
+import { openDrafts, problemsHoldApproval, titleChanged, turnMark } from "../shared/contract-editing.js";
+import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
 import { heldRepository, isLive, isRun } from "../shared/jobs.js";
 import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
@@ -45,6 +45,7 @@ import {
   forgetDrift,
   graphLog,
   graphView,
+  handEdited,
   initial,
   interviewStatus,
   isWorking,
@@ -84,15 +85,9 @@ import {
   answerSampleTurn,
   askingChanged,
   converse,
+  draftedReading,
+  sampleSpecText,
 } from "./records.js";
-
-/** A sample spec as it states itself, as the host reads one for the drafts list. */
-const sampleSpecText: SpecReader = (_repoId, slug) => {
-  const markdown = specFiles()[slug];
-  if (markdown === undefined) return null;
-  const { text } = readSpecSections(markdown);
-  return { title: text.title, sections: sectionsOf(text) };
-};
 
 /**
  * The sample host's answer to every Request kind, one entry each (D-100's
@@ -157,6 +152,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         );
         job.resultKey = request.key;
         marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
+        handEdited.add(request.key);
       },
       120,
     ),
@@ -170,6 +166,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         undoGraphEditAt(request.key, request.edit);
         job.resultKey = request.key;
         marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
+        handEdited.add(request.key);
       },
       120,
     ),
@@ -384,6 +381,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   driftDismiss: (request) => {
     const key = driftTarget(request.id);
+    // Refused once a person has edited the plan since it was drafted, in the
+    // CLI's words, as the host's dismissal is refused by `perbo drift`.
+    if (handEdited.has(key))
+      throw new Error(
+        `${key}'s plan has been edited by hand since it was drafted, so its problems cannot be ` +
+          "dismissed: answer them, or edit the plan until a reading finds none",
+      );
     const held = driftRecords.get(key);
     const keys = driftKeys(key);
     if (held === undefined || keys === null || held.spec !== keys.spec || held.promises !== keys.promises)
@@ -509,6 +513,10 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // Who named the spec goes with it to the new planning, as the host carries it (D-127).
     editing.carryNamed(opened.id, planning?.named ?? null);
     emit({ kind: "records", repoId: request.repoId, key: drafted.key });
+    // Read by its drafting, as the host records it, so its first confirm
+    // unchanged reads nothing again (D-NEW-basic-and-epic-flows).
+    const read = draftedReading(editing.read(opened.id));
+    if (read !== null) editing.recordRead(opened.id, read);
     return { sessionId: opened.id, key: drafted.key, nodes: opened.nodes };
   },
   generatePlan: (request, owner) =>
@@ -831,6 +839,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       applyDraft(ticket, request.draft);
       ticket.plan_version += 1;
       marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
+      handEdited.add(request.key);
       if (request.models) {
         snapshot.taskModels = {
           ...snapshot.taskModels,
@@ -840,7 +849,14 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       }
       job.resultKey = request.key;
     }, 1000, owner),
-  run: (request) => startWork(request.kind, request.repoId, request.key, request.publish),
+  run: (request) => {
+    // Refused while a planning over the ticket records problems open, in the
+    // host's words: an open problem holds approving for either shape
+    // (D-NEW-basic-and-epic-flows).
+    const held = request.approve ? problemsHoldApproval(editingRecords(), request.repoId, request.key) : null;
+    if (held !== null) throw new Error(held);
+    return startWork(request.kind, request.repoId, request.key, request.publish);
+  },
   decide: (request) => {
     // Each answer is recorded on its finding before the run, as the host does.
     decisionsTaken.set(request.key, [

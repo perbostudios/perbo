@@ -343,12 +343,13 @@ export function loopMergeDecision(args: {
   if (carries !== undefined) return { merge: true, approved_head: carries.head };
 
   const named = approvals.map((one) => one.head).join(", ");
+  const touched = [...new Set(carried.flatMap((entry) => entry.scope_touched))];
   const why =
     carried.length === 0
       ? "something reached this branch after the approval"
       : carried.some((entry) => entry.content_equal)
         ? "the base was merged in and touched " +
-          `${[...new Set(carried.flatMap((entry) => entry.scope_touched))].slice(0, 5).join(", ")} ` +
+          `${touched.slice(0, 5).join(", ")}${touched.length > 5 ? ` and ${touched.length - 5} more` : ""} ` +
           "inside the change's own scope, which the approved review never saw beside it"
         : "the change set's content is no longer what was approved";
   return stop(

@@ -163,12 +163,19 @@ export function renderArtifact(
   for (const check of artifact.checks) {
     const mark = CHECK_MARK[check.status] ?? "?";
     const style: Style = check.status === "passed" ? "ok" : "bad";
-    const left = `  ${paint(mark, style)}  ${pad(check.name, 15)} ${pad(check.command ?? "", 24)}`;
+    // The command and the summary whole (D-NEW-nothing-shown-is-cut): the
+    // summary right of the command where both fit the width, and under the
+    // row, wrapped, where they do not.
+    const command = (check.command ?? "").padEnd(24);
+    const left = `  ${paint(mark, style)}  ${pad(check.name, 15)} ${command}`;
     // `paint` adds invisible bytes, so measure the unpainted prefix.
-    const visible = `  ${mark}  ${pad(check.name, 15)} ${pad(check.command ?? "", 24)}`;
-    const summary = clip(check.summary, WIDTH - visible.length - 2);
-    const gap = Math.max(2, WIDTH - visible.length - summary.length);
-    lines.push(left + " ".repeat(gap) + paint(summary, "mid"));
+    const visible = `  ${mark}  ${pad(check.name, 15)} ${command}`;
+    if (visible.length + 2 + check.summary.length <= WIDTH) {
+      const gap = Math.max(2, WIDTH - visible.length - check.summary.length);
+      lines.push(left + " ".repeat(gap) + paint(check.summary, "mid"));
+    } else {
+      lines.push(left.trimEnd(), ...wrap(check.summary, 5).map((line) => paint(line, "mid")));
+    }
   }
   lines.push(paint("     these outrank any model claim about them", "dim"));
   if (artifact.overrides.length > 0) {
@@ -245,11 +252,15 @@ export function renderArtifact(
       `  ${paint(tag, style)}  ${paint(ruleId, "hi")}` + " ".repeat(gap) + paint(conf, "dim"),
     );
     const criterion = finding.criterion_id ? `  ${finding.criterion_id}` : "";
-    const at = clip(
-      finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""}` : "(no file)",
-      WIDTH - 11 - criterion.length,
-    );
-    lines.push(paint(`           ${at}`, "mid") + (criterion ? paint(criterion, "dim") : ""));
+    // The location whole (D-NEW-nothing-shown-is-cut), and the criterion beside
+    // it where the two fit the width, under it where they do not.
+    const at = finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""}` : "(no file)";
+    if (11 + at.length + criterion.length <= WIDTH) {
+      lines.push(paint(`           ${at}`, "mid") + (criterion ? paint(criterion, "dim") : ""));
+    } else {
+      for (const line of wrap(at, 11)) lines.push(paint(line, "mid"));
+      if (criterion) lines.push(paint(`         ${criterion}`, "dim"));
+    }
     for (const line of wrap(finding.statement, 11)) lines.push(paint(line, "mid"));
     lines.push(
       paint(`           key ${finding.key.slice(0, 8)}   risk ${artifact.actual_risk}`, "dim"),
@@ -263,10 +274,10 @@ export function renderArtifact(
       ? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
       : "";
     const prefix = `  ${pad(tag, 8)} ${pad(finding.rule_id, 24)} `;
-    lines.push(
-      `  ${paint(pad(tag, 8), style)} ${pad(finding.rule_id, 24)} ` +
-        paint(clip(at, WIDTH - prefix.length), "dim"),
-    );
+    const row = `  ${paint(pad(tag, 8), style)} ${pad(finding.rule_id, 24)} `;
+    // The location whole (D-NEW-nothing-shown-is-cut): beside the rule where it fits.
+    if (prefix.length + at.length <= WIDTH) lines.push(row + paint(at, "dim"));
+    else lines.push(row.trimEnd(), ...wrap(at, 11).map((line) => paint(line, "dim")));
   }
   if (rest.length + remediable.length > 0) lines.push("");
 

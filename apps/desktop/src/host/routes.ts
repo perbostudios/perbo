@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { keepsPersonsTitle, openDrafts, promiseOf } from "../shared/contract-editing.js";
+import { planNodes } from "@perbo/contracts";
+import { keepsPersonsTitle, openDrafts, problemsHoldApproval, promiseOf } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
 import { heldRepository, isRun } from "../shared/jobs.js";
 import { isArchivable, notArchivable } from "../shared/archive.js";
@@ -8,7 +9,7 @@ import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { contractImpact, impactView } from "./plan/impact.js";
-import { nameSpecAfterRename, saveSpec, specPath, specTexts, specTitles, specView, type SpecDeps } from "./plan/spec.js";
+import { draftedReading, nameSpecAfterRename, saveSpec, specPath, specTexts, specTitles, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
@@ -676,6 +677,19 @@ function graphEdit(
       await run.invoke(graphEditArgs(request.key, request));
       job.resultKey = request.key;
       m.marks.recordPlanChange(repo, request.key, before, "person");
+      // The plan as it now reads, on every planning over the ticket, as the
+      // chat's edits leave it: what a confirm compares with the last reading
+      // of the plan against its spec is the plan the planning holds (D-128).
+      // A read that fails leaves the planning as it was, not the edit failed.
+      try {
+        m.reads.invalidate(repo.id);
+        const now = await m.tickets.detail(repo.id, request.key);
+        for (const session of m.profile.state.editingSessions)
+          if (session.repoId === repo.id && session.key === request.key && session.phase !== "discarded")
+            m.editing.countNodes(session.id, planNodes(now.contract).length, now.digest, now);
+      } catch {
+        // Read again the next time the planning is opened.
+      }
     },
   );
 }
@@ -871,6 +885,12 @@ async function replan(
   // The new planning holds the same spec, and who named it with it, so the
   // next draft from it keeps the person's name as this one did (D-127).
   m.editing.carryNamed(opened.id, planning?.named ?? null);
+  // The plan drafted here was read by its drafting, as one Generate plan
+  // drafts is (D-128): recorded as read at the state it was drafted at, so its
+  // first confirm unchanged reads nothing again, and a criterion edited first
+  // is what the confirm's reading judges (D-NEW-basic-and-epic-flows).
+  const drafted = draftedReading((id) => m.registry.lookup(id), m.editing.read(opened.id));
+  if (drafted !== null) m.editing.recordRead(opened.id, drafted);
   return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
 }
 
@@ -908,6 +928,13 @@ function loop(
           .filter((job) => job.repoId === repo.id && job.key === request.key && isRun(job))
           .at(-1)?.publish ??
           false);
+  // Refused, before anything starts, while a planning over the ticket records
+  // problems open: an open problem holds approving for either shape, and the
+  // pages are not the only way to ask (D-NEW-basic-and-epic-flows).
+  if (request.kind === "run" && request.approve) {
+    const held = problemsHoldApproval(m.profile.state.editingSessions, repo.id, request.key);
+    if (held !== null) throw new Error(held);
+  }
   const job = m.jobs.start(
     {
       repo,

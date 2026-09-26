@@ -110,6 +110,12 @@ describe("the remediation brief carries the previous round's account (D-092)", (
     expect(executorPrompt(contract)).not.toContain("perbo:previous-attempt");
   });
 
+  it("tells every attempt the most its account may run to (D-NEW-nothing-shown-is-cut)", () => {
+    const limit = `at most ${EXECUTOR_ACCOUNT_MAX_CHARS.toLocaleString("en-US")} characters`;
+    expect(executorPrompt(contract).replace(/\s+/g, " ")).toContain(limit);
+    expect(remediationPrompt({ contract, findings: [], round: 1, max_rounds: 6 }).replace(/\s+/g, " ")).toContain(limit);
+  });
+
   it("asks every attempt to end with its account under the fixed heading", () => {
     const brief = executorPrompt(contract);
     expect(brief).toContain(EXECUTOR_ACCOUNT_HEADING);

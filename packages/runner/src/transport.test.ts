@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeTransportFailure,
   isRetryableStatus,
+  resetInText,
   transportExhaustion,
 } from "./transport.js";
 
@@ -262,5 +263,28 @@ describe("what the record says", () => {
     expect(detail).toContain("Overloaded");
     expect(detail).toContain("10 reported retries");
     expect(detail).toContain("exited 1");
+  });
+});
+
+/**
+ * The provider's own words are tool output, recorded and shown whole
+ * (D-NEW-nothing-shown-is-cut): the evidence a failure was read from and the
+ * sentence that named its reset, however long either runs.
+ */
+describe("the transport's words, whole", () => {
+  it("keeps the whole line a failure was read from as its evidence", () => {
+    const padding = "the upstream said more than a line's worth here, ".repeat(20);
+    const line = `stderr: API Error (529 ${OVERLOADED}) ${padding}and this is its last word`;
+    const failure = transportExhaustion([line]);
+    expect(failure?.evidence.length).toBeGreaterThan(500);
+    expect(failure?.evidence.endsWith("and this is its last word")).toBe(true);
+  });
+
+  it("quotes the whole sentence that named the reset", () => {
+    const long = "You've hit your session limit for the plan you are on, " + "which covers every model ".repeat(15);
+    const text = `429 ${long}and resets 4:30am (Europe/London)`;
+    const reset = resetInText(text, new Date("2026-09-25T01:00:00Z"));
+    expect(reset?.quoted.length).toBeGreaterThan(300);
+    expect(reset?.quoted.endsWith("resets 4:30am (Europe/London)")).toBe(true);
   });
 });

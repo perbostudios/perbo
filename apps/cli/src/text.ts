@@ -66,6 +66,27 @@ export function wrap(text: string, indent: number): string[] {
 export const pad = (text: string, width: number) =>
   text.length >= width ? text.slice(0, width) : text + " ".repeat(width - text.length);
 
-/** Nothing on a fixed-column line may push past the width, whatever it says. */
+/**
+ * An identifier held to a fixed column: a rule id or a denial rule, which no
+ * person reads as prose. Text a person reads is never clipped; it goes through
+ * {@link fitted} or {@link labelled} instead (D-NEW-nothing-shown-is-cut).
+ */
 export const clip = (text: string, width: number) =>
   text.length <= Math.max(0, width) ? text : `${text.slice(0, Math.max(1, width - 1))}…`;
+
+/**
+ * A line as it is where it fits the width, and otherwise the same words
+ * wrapped under `indent`: whole either way (D-NEW-nothing-shown-is-cut).
+ */
+export const fitted = (line: string, indent: number): string[] =>
+  line.length <= WIDTH ? [line] : wrap(line, indent);
+
+/**
+ * A value after its label, on the label's line where the two fit the width,
+ * and otherwise under it, wrapped: never cut (D-NEW-nothing-shown-is-cut).
+ */
+export function labelled(label: string, value: string, paint: Paint, style: Style, indent = 6): string[] {
+  return label.length + value.length <= WIDTH
+    ? [label + paint(value, style)]
+    : [label.trimEnd(), ...wrap(value, indent).map((line) => paint(line, style))];
+}

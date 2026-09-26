@@ -728,7 +728,7 @@ export function withoutHeredocBodies(command: string): {
   }
   if (ansi !== -1) {
     unreadable ??=
-      `the $'…' in ${JSON.stringify(command.slice(ansi, ansi + 16).split("\n")[0])} holds an ` +
+      `the $'…' in ${JSON.stringify(command.slice(ansi).split("\n")[0])} holds an ` +
       "escaped quote, which ends it for this guard and not for the shell";
   }
   return { text: kept + command.slice(start), bodies, unreadable };

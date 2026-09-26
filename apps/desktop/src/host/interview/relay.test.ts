@@ -19,11 +19,14 @@ describe("relayed", () => {
     });
   });
 
-  it("says why a line is not one of the chat's events, clipped", () => {
+  it("says in one sentence that a line is not one of the chat's events, with the parser's reason behind the i", () => {
     const read = relayed(line({ type: "unheard-of" }));
     if (read.kind !== "line" || read.line.kind !== "note") throw new Error("expected a note");
-    expect(read.line.text).toContain("it is not one of the chat's events");
-    expect(read.line.text.length).toBeLessThan(2_200);
+    expect(read.line.text).toBe(
+      "The chat wrote a line this build could not read: it is not one of the chat's events.",
+    );
+    expect(read.line.output).toMatch(/\S/);
+    expect(read.line.text).not.toContain(read.line.output!);
   });
 
   it("reads what the session said, and nothing where it said nothing", () => {
@@ -77,25 +80,58 @@ describe("relayed", () => {
     const read = relayed(line(many));
     if (read.kind !== "line" || read.line.kind !== "note") throw new Error("expected a note");
     expect(read.line.text.startsWith("The chat wrote a line this build")).toBe(true);
-    expect(read.line.text.length).toBeLessThan(2_200);
     expect(read.line.text).not.toContain("sk-ant-notreal0123456789");
   });
 
-  it("carries a refusal as refused, with each field clipped", () => {
+  it("says every field a line it cannot read carries that the event does not declare, whole behind the i", () => {
+    const many: Record<string, unknown> = { type: "wrote_spec" };
+    for (let at = 0; at < 300; at += 1) many[`unrecognised_key_${at}`] = "x";
+    const read = relayed(line(many));
+    if (read.kind !== "line" || read.line.kind !== "note") throw new Error("expected a note");
+    expect(read.line.output!.length).toBeGreaterThan(2_200);
+    expect(read.line.output).toContain("unrecognised_key_299");
+    expect(read.line.text).not.toContain("unrecognised_key");
+  });
+
+  it("carries a refusal as refused: its names held to their width, its target and reason whole", () => {
+    const target = `/etc/${"a-directory-with-a-long-name/".repeat(40)}passwd`;
     const read = relayed(
       line({
         type: "refused",
         tool: "t".repeat(400),
         rule: "r".repeat(400),
-        target: "/etc/passwd",
+        target,
         reason: "x".repeat(4000),
       }),
     );
     if (read.kind !== "line" || read.line.kind !== "refused") throw new Error("expected refused");
     expect(read.line.tool).toHaveLength(200);
     expect(read.line.rule).toHaveLength(200);
-    expect(read.line.reason).toHaveLength(2000);
-    expect(read.line.target).toBe("/etc/passwd");
+    expect(read.line.reason).toBe("x".repeat(4000));
+    expect(read.line.target).toBe(target);
+  });
+
+  it("carries what the session said, and what a tool reported, whole (D-NEW-nothing-shown-is-cut)", () => {
+    const long = "A sentence the session wrote at length. ".repeat(400);
+    const read = relayed(said(long));
+    if (read.kind !== "said") throw new Error("expected what the session said");
+    expect(read.text).toBe(long.trim());
+    const tool = relayed(line({ type: "tool", tool: "read_plan", ok: true, detail: long }));
+    if (tool.kind !== "tool") throw new Error("expected a tool");
+    expect(tool.line.detail).toBe(long);
+  });
+
+  it("carries the host's own notes whole: the folders it writes, and why the chat ended", () => {
+    const folder = `specs/${"a-long-folder-name/".repeat(120)}spec.md`;
+    const started = relayed(
+      line({ type: "started", session_id: "s1", spec: folder, adr: "docs/adr", model: null, tools: [] }),
+    );
+    if (started.kind !== "started" || started.note.kind !== "note") throw new Error("expected a started note");
+    expect(started.note.text).toBe(`Writing ${folder} and docs/adr.`);
+    const reason = "the provider refused the session: ".repeat(80).trim();
+    const ended = relayed(line({ type: "ended", session_id: "s1", reason }));
+    if (ended.kind !== "ended" || ended.line.kind !== "note") throw new Error("expected an ending");
+    expect(ended.line.text).toBe(`The chat ended: ${reason}.`);
   });
 
   it("says a plan moved only where an edit tool succeeded", () => {
@@ -170,11 +206,11 @@ describe("relayed", () => {
 });
 
 describe("readable", () => {
-  it("redacts, flattens and clips a model's text, and says nothing where nothing survived", () => {
-    expect(readable("one\n two\tthree", 200)).toBe("one two three");
-    expect(readable("abcdef", 3)).toBe("abc");
-    expect(readable("\u001b[31m", 200)).toBe("");
-    expect(readable("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz", 200)).not.toContain(
+  it("redacts and flattens a model's text, never cuts it, and says nothing where nothing survived", () => {
+    expect(readable("one\n two\tthree")).toBe("one two three");
+    expect(readable("abcdef ".repeat(200))).toBe("abcdef ".repeat(200).trim());
+    expect(readable("\u001b[31m")).toBe("");
+    expect(readable("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz")).not.toContain(
       "sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz",
     );
   });

@@ -150,8 +150,14 @@ export function writeSpecFile(args: {
   repositoryRoot: string;
   /** The repository's spec folder. `specs` unless the configuration names another. */
   folder?: string | undefined;
-  /** The spec being rewritten. Null or absent mints one from the title. */
+  /** The spec being rewritten. Null or absent mints one from `folderName`, else the title. */
   slug?: string | null | undefined;
+  /**
+   * The words a new spec's folder is named from where they are not its title:
+   * the cut of a person's first turn, which names the folder and is no title
+   * (D-118).
+   */
+  folderName?: string | undefined;
   text: SpecText;
   /**
    * The file as this writer last read it, which is what its changes are
@@ -163,12 +169,13 @@ export function writeSpecFile(args: {
    */
   base: SpecText;
 }): WrittenSpec {
-  const slug = args.slug ?? specSlug(args.text.title);
+  const named = args.folderName ?? args.text.title;
+  const slug = args.slug ?? specSlug(named);
   const at = specFolderOf(args.repositoryRoot, slug, args.folder ?? DEFAULT_SPEC_FOLDER);
   const existed = existsSync(at.path);
   if (existed && (args.slug === null || args.slug === undefined)) {
     throw new PlanningError(
-      `${at.relative}/spec.md already exists, and '${args.text.title}' takes the same folder. ` +
+      `${at.relative}/spec.md already exists, and '${named}' takes the same folder. ` +
         "Two pieces of work are two specs: give this one a title of its own, or open the spec " +
         "that is already there",
     );

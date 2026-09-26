@@ -149,6 +149,51 @@ describe("readDrift", () => {
     expect(result.model.turns).toBe(2);
   });
 
+  it("hands a report whose words run past a field back to be condensed, rather than cut (D-NEW-nothing-shown-is-cut)", async () => {
+    const long = { findings: [{ ...finding, difference: "The spec and the plan part here. ".repeat(30) }] };
+    const model = scriptedDrafter([submits(long), submits({ findings: [finding] })]);
+    const result = await readDrift({ spec, plan, model });
+    expect(result.findings).toEqual([finding]);
+    expect(model.requests).toHaveLength(2);
+    const handedBack = JSON.stringify(model.requests[1]!.messages.at(-1)!.content);
+    expect(handedBack).toContain("findings.0.difference runs past the 600 characters it may hold");
+    expect(handedBack).toContain("condensed to fit");
+    expect(handedBack).toContain('"is_error":true');
+
+    // Asked twice, and then the reading fails rather than showing it cut.
+    const stubborn = scriptedDrafter([submits(long), submits(long), submits(long)]);
+    await expect(readDrift({ spec, plan, model: stubborn })).rejects.toThrow(DraftRejectedError);
+    expect(stubborn.requests).toHaveLength(3);
+  });
+
+  it("measures a field as it is shown, so one that redaction lengthens past its length is asked for again, not failed or cut (D-NEW-nothing-shown-is-cut)", async () => {
+    // An eight-character credential is written as the ten of `[redacted]`.
+    const env = { PERBO_TEST_TOKEN: "hunter2x" };
+    const said = "The spec and the plan part here over hunter2x.";
+    const difference = said + "x".repeat(599 - said.length);
+    expect(difference).toHaveLength(599);
+    const leaky = { findings: [{ ...finding, difference }] };
+    const model = scriptedDrafter([submits(leaky), submits({ findings: [finding] })]);
+    const result = await readDrift({ spec, plan, model, env });
+    expect(result.findings).toEqual([finding]);
+    expect(model.requests).toHaveLength(2);
+    const handedBack = JSON.stringify(model.requests[1]!.messages.at(-1)!.content);
+    expect(handedBack).toContain("findings.0.difference runs past the 600 characters it may hold");
+    expect(handedBack).toContain("measured as the person is shown it");
+    // The secret itself is never handed back or kept.
+    expect(handedBack).not.toContain("hunter2x");
+
+    // What is kept is redacted and whole: a field that fits once redacted is
+    // taken as it is shown.
+    const fits = scriptedDrafter([
+      submits({ findings: [{ ...finding, heading: "R1 and hunter2x", difference: "One\n  line." }] }),
+    ]);
+    const kept = await readDrift({ spec, plan, model: fits, env });
+    expect(kept.findings[0]!.heading).toBe("R1 and [redacted]");
+    expect(kept.findings[0]!.difference).toBe("One line.");
+    expect(fits.requests).toHaveLength(1);
+  });
+
   it("releases the model however the reading ended", async () => {
     // The double submits a draft, which is not a report.
     const rejected = disposingDrafter();

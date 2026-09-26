@@ -18,6 +18,7 @@ import {
   retitleSpec,
   specSlug,
   specTitleFromMessage,
+  UNTITLED_SPEC,
   undoGraphEdit,
   type GraphEditOutcome,
   type Spec,
@@ -44,11 +45,14 @@ import {
   interviewProviderFor,
   keepsPersonsTitle,
   REREAD_COULD_NOT_START,
+  readingStateOf,
   sectionsOf,
   specFindings,
+  redraftedSince,
   turnOverlapped,
   type EditingOwner,
   type PromisePair,
+  type SpecReader,
   type TurnMark,
 } from "../shared/contract-editing.js";
 import { ChangeMarks } from "../shared/change-marks.js";
@@ -1217,6 +1221,14 @@ if (specFiles()[stoppedSlug] === undefined)
  */
 export const driftRecords = new Map<string, DriftVerdict>();
 /**
+ * The sample tickets whose plan a person has edited by hand since it was
+ * drafted — on a basic ticket's contract page or in an epic's Graph pane — as
+ * `perbo drift --dismiss` reads it off the edit log in `<KEY>.draft.json`:
+ * the chat's edits are not here, and a re-draft empties it for its ticket.
+ * A dismissal is refused for a ticket in it (D-NEW-basic-and-epic-flows).
+ */
+export const handEdited = new Set<string>();
+/**
  * A sample digest: the shape `perbo drift` keys its record by, over the same
  * bytes, so a verdict holds and lets go exactly when the real one would. Not
  * SHA-256 — the renderer has no synchronous one, and what is being stood in
@@ -1465,6 +1477,13 @@ export function writeGraphEdit(
     log.filter((edit) => edit.author === "you" && !edit.replaced).flatMap((edit) => edit.changes),
   ).size;
   ticket.updated_at = new Date().toISOString();
+  // The plan as it now reads, on every planning over the ticket, as the host
+  // leaves it after an edit: what a confirm compares with the last reading is
+  // the plan the planning holds.
+  const now = detail(key);
+  for (const record of editingRecords())
+    if (record.key === key && record.phase !== "discarded")
+      editing.countNodes(record.id, planNodes(now.contract).length, now.digest, now);
 }
 
 /** `perbo edit --undo <n>`, with D-100's rule about a later edit in the way. */
@@ -1612,14 +1631,15 @@ export function graphView(repoId: string, key: string): GraphView {
 /**
  * What a ticket drafted from a spec is called, as `admit` calls it where
  * nothing drafted a name, which is always here because the sample has no
- * drafter: the spec's title, unless another ticket in the repository carries
- * it, else the plan's outcome (D-127). With `keepTitle`, as `admit
- * --keep-title` calls it, the spec's title is the person's name and stands
- * whatever another ticket is called.
+ * drafter: the spec's title, unless it still says Untitled (D-118) or another
+ * ticket in the repository carries it, else the plan's outcome (D-127). With
+ * `keepTitle`, as `admit --keep-title` calls it, the spec's title is the
+ * person's name and stands whatever another ticket is called.
  * Read after the plan is drafted, which is where the outcome comes from.
  */
 function specTicketName(repo: string, key: string, markdown: string, keepTitle: boolean): string {
-  const title = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
+  const stated = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
+  const title = !keepTitle && stated === UNTITLED_SPEC ? "" : stated;
   const taken =
     !keepTitle &&
     snapshot.tasks.some(
@@ -1682,6 +1702,7 @@ export function draftFromSpec(key: string, markdown: string, slug: string, plann
   // A re-draft replaces the plan the edits were made to (D-103): they stay in
   // the log, marked replaced, and none of them can be undone from here.
   for (const edit of graphEdits.get(key) ?? []) edit.replaced = true;
+  handEdited.delete(key);
   approaches.set(key, {
     ...approaches.get(key)!,
     edges: (plan.nodes?.length ?? 0) > 1 ? [{ from: "node_1", to: "node_2" }] : [],
@@ -1725,6 +1746,7 @@ export const editing = new ContractEditing({
   id: () => crypto.randomUUID(),
   // The sample repository keeps its specs in the default folder.
   specFolder: () => "specs",
+  drafted: (record) => draftedReading(record),
   standing: (id) => standingFor(id),
   setStanding: (id, entries) => {
     writeStanding(id, entries);
@@ -1812,7 +1834,8 @@ export function interviewStatus(id: string): InterviewStatus {
 }
 /**
  * The host's own naming of an unnamed spec from the person's first turn, in
- * the preview's terms: the same title, the same slug, the same note.
+ * the preview's terms: the same folder, the same Untitled title line, the same
+ * note.
  */
 export function nameSpecFromTurn(id: string, text: string): void {
   const session = editing.read(id);
@@ -1830,8 +1853,8 @@ export function nameSpecFromTurn(id: string, text: string): void {
         "Two pieces of work are two specs: give this one a title of its own, or open the spec " +
         "that is already there",
     );
-  saveSpec(slug, renderSpec({ ...EMPTY_SPEC_TEXT, title }, { highWater: 0, existing: [] }).markdown);
-  editing.recordSpec(id, slug, title);
+  saveSpec(slug, renderSpec({ ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC }, { highWater: 0, existing: [] }).markdown);
+  editing.recordSpec(id, slug, UNTITLED_SPEC);
   converse(id, { kind: "note", text: `Named specs/${slug} from your first message.` });
 }
 /**
@@ -2032,21 +2055,56 @@ export const driftEpoch = new Map<string, number>();
 /** A reading's job has settled: the next one owed to the planning starts. */
 export function readingSettled(id: string): void {
   readings.delete(id);
-  if (rereadOwed.delete(id)) void rereadDrift(id);
+  if (rereadOwed.delete(id)) void rereadDrift(id, true);
+}
+
+/** A sample spec as it states itself, as the host reads one for the drafts list. */
+export const sampleSpecText: SpecReader = (_repoId, slug) => {
+  const markdown = specFiles()[slug];
+  if (markdown === undefined) return null;
+  const { text } = readSpecSections(markdown);
+  return { title: text.title, sections: sectionsOf(text) };
+};
+
+/**
+ * The state a plan just drafted from its spec was read at by its drafting, as
+ * the host takes it: where the verdict drafting wrote still holds for the spec
+ * and the plan and found nothing, the plan the record holds; null otherwise.
+ */
+export function draftedReading(record: EditingSession): string | null {
+  if (record.key === null) return null;
+  const held = driftRecords.get(record.key);
+  const keys = driftKeys(record.key);
+  if (held === undefined || keys === null || held.findings.length > 0) return null;
+  if (held.spec !== keys.spec || held.promises !== keys.promises) return null;
+  return readingStateOf(record, sampleSpecText);
+}
+
+/** The state a reading of this planning is of now, as the host takes it for a reading it asks for itself. */
+export function sampleReadingState(id: string): string | null {
+  try {
+    return readingStateOf(editing.read(id), sampleSpecText);
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Read the plan against the spec again, as the host does once a turn ends
- * with a record on the planning: never over a reading already in flight, but
+ * while a problem is open on the planning, or where a reading a turn
+ * overlapped owes one (`owed`): never over a reading already in flight, but
  * never lost either — a turn that ends while one is running is owed its
  * reading, which starts as that one settles, and however many turns end
  * meanwhile owe one reading between them. A reading that cannot be started
- * is said in the chat, because the page is waiting on it.
+ * is said in the chat, because the page is waiting on it. The state it is of
+ * is recorded as the host records it, so the confirm after it reads nothing
+ * again.
  */
-async function rereadDrift(id: string): Promise<void> {
+async function rereadDrift(id: string, owed = false): Promise<void> {
   if (!stillThere(id)) return;
   const session = editing.read(id);
   if (session.drift === null || session.key === null) return;
+  if (!owed && session.drift.open.length === 0) return;
   const key = session.key;
   const live = snapshot.jobs.some((job) => job.kind === "drift" && job.key === key && isLive(job));
   if (readings.has(id) || live) {
@@ -2059,7 +2117,7 @@ async function rereadDrift(id: string): Promise<void> {
     // is between the turn's end and the reading for that long: the same gap
     // here, so the page is held to the same rule.
     await new Promise((done) => setTimeout(done, 0));
-    await answer({ kind: "driftCheck", id, state: null });
+    await answer({ kind: "driftCheck", id, state: sampleReadingState(id) });
   } catch (error) {
     readings.delete(id);
     rereadOwed.delete(id);
@@ -2105,6 +2163,8 @@ export function driftLanded(
   const row = snapshot.tasks.find((each) => each.ticket.key === key);
   if (row === undefined || row.ticket.approved_at) return;
   if (!stillThere(id)) return;
+  // Drafted again while it read, as the host drops it: the plan it read has gone.
+  if (redraftedSince(before, editing.read(id))) return;
   const overlapped = turnOverlapped(before, editing.read(id), isWorking(id));
   if (overlapped && !isWorking(id)) rereadOwed.add(id);
   editing.landDrift(id, verdict, overlapped, (line) => converse(id, line), () => askingChanged(id));

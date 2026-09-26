@@ -125,8 +125,9 @@ code {
   background: var(--paper);
 }
 /* The top bar spans the window: on macOS the traffic lights, then the sidebar toggle, then, in planning, the planning's name, then the current page's header. The rail and the page sit beneath it. */
+/* At least one line's height, and taller where the name in it wraps. */
 .titlebar {
-  height: 48px;
+  min-height: 48px;
   flex: none;
   display: flex;
   align-items: center;
@@ -148,7 +149,7 @@ code {
   display: flex;
   flex: 1;
   min-width: 0;
-  height: 100%;
+  align-self: stretch;
 }
 .titlebar-slot > .page-header {
   flex: 1;
@@ -172,14 +173,13 @@ code {
   color: var(--ink);
   background: rgba(var(--ink-rgb), 0.08);
 }
-/* The name of the planning the page is a pane of, right of the toggle: as much of it as the bar leaves room for. */
+/* The name of the planning the page is a pane of, right of the toggle: whole, wrapping onto more lines where the bar has no room for it on one. */
 .titlebar-name {
   min-width: 0;
   max-width: 40%;
   margin-left: 10px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
   font: 600 calc(13px * var(--text-scale))/1.4 var(--font);
 }
 /* Positioned, so the revealed rail (rail-reveal.tsx) slides over the page from its left edge. */
@@ -487,13 +487,13 @@ code {
   vertical-align: middle;
   filter: var(--ink-filter);
 }
+/* At least one line's height, and taller where its title wraps. */
 .page-header {
-  height: 48px;
   min-height: 48px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 26px;
+  padding: 6px 26px;
   border-bottom: 1.5px solid var(--line);
   flex: none;
 }
@@ -627,9 +627,7 @@ code {
 .dropdown-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .dropdown-trigger > img {
   width: 10px;
@@ -2321,9 +2319,8 @@ textarea {
 }
 .output-changes code {
   font-size: calc(11px * var(--text-scale));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .output-columns--expanded {
   display: flex;
@@ -2627,9 +2624,7 @@ textarea {
 .skill-picker summary,
 .skill-options label > strong {
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .manifest-entries {
@@ -2940,9 +2935,8 @@ textarea {
 
 .task-header-title {
   font-size: calc(15px * var(--text-scale));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 .page-header .header-title {
   min-width: 0;
@@ -3682,9 +3676,7 @@ kbd {
 .tree-row .name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .tree-row.is-dir .name {
   color: var(--ink);
@@ -3763,9 +3755,8 @@ kbd {
 }
 .edit-row span:first-child,
 .standing-row span:nth-child(2) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .edit-row.is-undone {
   color: var(--muted);
@@ -4252,9 +4243,7 @@ kbd {
   grid-column: 1 / -1;
   font: 11px var(--mono);
   color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .sym-empty {
   padding: 8px;
@@ -4808,7 +4797,7 @@ kbd {
   border-radius: var(--radius);
   white-space: pre-wrap;
 }
-.crit-read {
+.crit-edit {
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr);
   gap: 6px 8px;
@@ -4818,9 +4807,16 @@ kbd {
   border: 1.5px solid var(--line);
   border-radius: var(--radius);
 }
-.crit-read .crit-text {
-  margin: 0;
+.crit-edit:focus-within {
+  border-color: var(--ink);
+}
+.crit-edit textarea {
+  border: 0;
+  background: transparent;
+  resize: vertical;
   line-height: 1.45;
+  outline: none;
+  font: inherit;
   color: var(--ink);
 }
 .crit-n {
@@ -4828,12 +4824,14 @@ kbd {
   color: var(--muted);
   padding-top: 2px;
 }
+.kind-seg,
 .seg {
   display: flex;
   gap: 3px;
   margin-top: 6px;
   flex-wrap: wrap;
 }
+.kind-seg button,
 .seg button {
   font: 500 calc(9px * var(--text-scale)) var(--mono);
   letter-spacing: 0.05em;
@@ -4844,6 +4842,7 @@ kbd {
   color: var(--muted);
   background: transparent;
 }
+.kind-seg button[aria-pressed="true"],
 .seg button[aria-pressed="true"] {
   background: var(--ink);
   color: var(--on-ink);
@@ -4999,15 +4998,6 @@ select.add-chip {
   margin-left: auto;
   white-space: nowrap;
 }
-.drift-resolved {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-width: 64ch;
-}
-.drift-resolved h3 {
-  margin: 0;
-}
 /* The last change to the spec and the plan, marked where it stands
    (D-128): what it added highlighted
    green, what it took away red and struck through. Both on the theme's own
@@ -5032,6 +5022,13 @@ select.add-chip {
   color: var(--red);
   text-decoration: line-through;
   text-decoration-color: var(--red-line);
+}
+/* The words as the chat's last change left them, under the box in the inspector that edits them. */
+.crit-change {
+  margin: 2px 0 0;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
+  color: var(--ink);
 }
 /* A criterion the last change took away, struck through where the list ends. */
 .crit-removed {
@@ -5115,15 +5112,13 @@ select.add-chip {
   align-items: baseline;
   gap: 8px;
   font-size: calc(12px * var(--text-scale));
-  /* An edit reads as one line or not at all: a long summary is cut rather
-     than wrapped or pushing the next column off the bar, and a line broken
-     down the middle of a column is not a shorter list. */
-  white-space: nowrap;
-  overflow: hidden;
+  /* A long summary wraps within its column, whole, and an edit is never
+     split across the two columns. */
+  break-inside: avoid;
 }
 .graph-history .hist-line {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .graph-history li.is-undone .hist-line {
   text-decoration: line-through;
@@ -5787,16 +5782,19 @@ select.add-chip {
 .composer-box:focus-within {
   border-color: var(--ink);
 }
-/* A textarea clips what it draws at its padding edge, and this face sets the
-   ink of a T or a W a little left of where the letter starts: at no inline
-   padding the first letter loses its left edge. The padding is room for that
-   ink, and the margin and width give the room back, so the words sit where the
-   box's edge would put them. */
 .composer-box textarea {
   border: 0;
   outline: none;
   resize: none;
   font: inherit;
+}
+/* A textarea clips what it draws at its padding edge, and this face sets the
+   ink of a T or a W a little left of where the letter starts: at no inline
+   padding the first letter loses its left edge. The padding is room for that
+   ink, and the margin and width give the room back, so the words sit where the
+   box's edge would put them. */
+.crit-edit textarea,
+.composer-box textarea {
   padding-block: 0;
   padding-inline: 4px;
   margin-inline: -4px;
@@ -5850,9 +5848,7 @@ select.add-chip {
   max-width: 30%;
   line-height: 24px;
   color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 /* The plan's history: a drawer over the current pane, so the chat stays visible. */
 .hist-scrim {
@@ -5970,12 +5966,10 @@ select.add-chip {
   flex: none;
   padding: 8px 10px;
 }
-/* The contract's outcome, one line reaching the card's other end. */
+/* The contract's outcome, whole, reaching the card's other end and wrapping onto more lines where it is longer. */
 .task-card-description > .task-card-outcome {
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .rail-badge .rail-badge--red {
   background: var(--red);

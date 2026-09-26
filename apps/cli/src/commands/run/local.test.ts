@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   EXIT_CODES,
@@ -30,6 +30,7 @@ import { buildInspectReport } from "../inspect.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
   LocalRunRecordSchema,
+  localRunPath,
   readLocalRunRecord,
   writeLocalRunRecord,
   type LocalRunRecord,
@@ -1830,4 +1831,22 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(localStops.loop_merges.merged).toBe(1);
     });
   }, SPAWN_TEST_TIMEOUT_MS);
+});
+
+describe("a local run record that does not parse", () => {
+  it("names five of what it could not read, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+    const store = mkdtempSync(join(tmpdir(), "perbo-local-record-"));
+    const path = localRunPath(store, "run_broken");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8 }));
+    let said = "";
+    try {
+      readLocalRunRecord(store, "run_broken");
+    } catch (error) {
+      said = error instanceof Error ? error.message : String(error);
+    }
+    const listed = said.split("\n  ").slice(1);
+    expect(listed).toHaveLength(6);
+    expect(listed.at(-1)).toMatch(/^and \d+ more$/);
+  });
 });

@@ -142,7 +142,7 @@ async function cloneInto(spec: RepositorySpec, into: string): Promise<number | n
     timeoutMs: TEN_MINUTES,
   });
   if (result.code !== 0) {
-    throw new Error(`clone failed for ${spec.name}: ${result.stderr.trim().slice(0, 400)}`);
+    throw new Error(`clone failed for ${spec.name}: ${result.stderr.trim()}`);
   }
   return Date.now() - started;
 }

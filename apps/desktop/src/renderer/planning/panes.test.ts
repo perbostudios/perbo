@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkedLanding, confirmRoute, contractState, draftedLanding, flowFor, leftAt, readingState } from "./panes.js";
+import { checkedLanding, confirmRoute, contractState, draftedLanding, flowFor, leftAt } from "./panes.js";
 import type { OpenDraft, Snapshot } from "../../shared/protocol.js";
 
 /** One planning, as the drafts list carries it, with its ticket's row where it has one. */
@@ -52,28 +52,30 @@ describe("the tabs a planning offers (D-NEW-basic-and-epic-flows)", () => {
     expect(tabs(planning({ impact: 2 }), "contract")).toEqual(["Spec", "Explorer", "Impact", "Confirm contract"]);
   });
 
-  it("offers a flat plan Problems only while the reading has some open", () => {
+  it("offers a flat plan Problems only while the reading has some open, as its lowest tab", () => {
     expect(tabs(planning({ drift: null }))).not.toContain("Problems");
     expect(tabs(planning({ drift: { open: 0, resolved: true } }))).not.toContain("Problems");
     expect(tabs(planning({ drift: { open: 1, resolved: false } }))).toEqual(["Spec", "Explorer", "Problems"]);
-    expect(tabs(planning({ impact: 1, drift: { open: 1, resolved: false } }))).toEqual([
+    expect(tabs(planning({ impact: 1, drift: { open: 1, resolved: false } }), "contract")).toEqual([
       "Spec",
       "Explorer",
       "Impact",
+      "Confirm contract",
       "Problems",
     ]);
   });
 
-  it("offers an epic its Graph, the Explorer and Impact, and Problems while any are open", () => {
+  it("offers an epic its Graph, the Explorer and Impact, and Problems while any are open, below the contract", () => {
     expect(tabs(planning({ nodes: 2 }))).toEqual(["Spec", "Graph", "Explorer", "Impact"]);
     expect(tabs(planning({ nodes: 2, drift: { open: 2, resolved: false } }), "contract")).toEqual([
       "Spec",
       "Graph",
       "Explorer",
       "Impact",
-      "Problems",
       "Confirm contract",
+      "Problems",
     ]);
+    expect(tabs(planning({ nodes: 2, drift: { open: 0, resolved: true } }), "contract")).not.toContain("Problems");
   });
 
   it("keeps the contract a tab until something changes, and not after, until it is reached again", () => {
@@ -112,10 +114,9 @@ describe("the tabs a planning offers (D-NEW-basic-and-epic-flows)", () => {
 });
 
 describe("where a plan lands", () => {
-  it("lands a checked basic ticket on Problems, then Impact, then its contract", () => {
-    expect(checkedLanding({ problems: true, flagged: true })).toBe("drift");
-    expect(checkedLanding({ problems: false, flagged: true })).toBe("impact");
-    expect(checkedLanding({ problems: false, flagged: false })).toBe("contract");
+  it("lands a checked basic ticket on Impact where its check flagged paths, else on its contract, and never on Problems", () => {
+    expect(checkedLanding({ flagged: true })).toBe("impact");
+    expect(checkedLanding({ flagged: false })).toBe("contract");
   });
 
   it("lands a plan drafted again on its Graph for an epic and on its contract for a basic ticket, inside the planning", () => {
@@ -125,20 +126,6 @@ describe("where a plan lands", () => {
 });
 
 describe("what a basic ticket's Confirm contract reads (D-NEW-basic-and-epic-flows)", () => {
-  const promise = { outcome: "Signups get one email.", criteria: [{ text: "One email is queued." }, { text: "It is sent within a minute." }] };
-  it("is the spec's sections and the plan's promise, by their words, and nothing of their order", () => {
-    const at = readingState("0011223344556677", promise);
-    expect(readingState("0011223344556677", { ...promise, criteria: [...promise.criteria].reverse() })).toBe(at);
-    expect(readingState("0011223344556677", { outcome: " Signups get one email. ", criteria: promise.criteria })).toBe(at);
-    expect(readingState("ffeeddccbbaa9988", promise)).not.toBe(at);
-    expect(readingState(null, promise)).not.toBe(at);
-    expect(readingState("0011223344556677", { ...promise, outcome: "Signups get two emails." })).not.toBe(at);
-    expect(
-      readingState("0011223344556677", { ...promise, criteria: [{ text: "One email is queued." }, { text: "It is sent within an hour." }] }),
-    ).not.toBe(at);
-    expect(readingState("0011223344556677", { ...promise, criteria: promise.criteria.slice(0, 1) })).not.toBe(at);
-  });
-
   it("goes to a basic ticket's contract, where it is read, and through the reading for an epic", () => {
     const way = { repoId: "repo-1", key: "PRB-1", sessionId: "s-1", approved: false };
     expect(confirmRoute({ ...way, basic: true })).toEqual({ page: "planning", sessionId: "s-1", pane: "contract" });

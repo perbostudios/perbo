@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { InterviewTurnSchema, encodeInterviewTurn, planNodes } from "@perbo/contracts";
-import { redact } from "../process.js";
+import { logTail, redact } from "../process.js";
 import { readLatestDraftEdit } from "../records.js";
 import { ticketPath } from "../repository/layout.js";
 import { mintSpecFromTitle, specPath, specTitles } from "../plan/spec.js";
-import { specTitleFromMessage } from "@perbo/planning";
+import { UNTITLED_SPEC, specTitleFromMessage } from "@perbo/planning";
 import {
   INTERVIEW_NEEDS_A_TITLE,
   INTERVIEW_WROTE_THE_SPEC,
+  INTERVIEWER_NAME,
+  InterviewEntrySchema,
   TaskModelsSchema,
 } from "../../shared/protocol.js";
 import { interviewModelFor, type PromisePair } from "../../shared/contract-editing.js";
@@ -40,6 +42,53 @@ import type {
  * the turn.
  */
 const SPEC_SETTLES_IN_MS = 300;
+
+/**
+ * How many times running the session is asked to condense words of its own
+ * that the chat's record cannot hold before the host stops asking and says so
+ * (D-NEW-nothing-shown-is-cut). Two, so a session that answers the first ask
+ * with a message still too long is asked once more rather than for ever.
+ */
+const CONDENSE_ASKS = 2;
+
+/** Where in an asking a field sits, in the words the session reads it back in. */
+function fieldOf(path: readonly PropertyKey[]): string {
+  const at = (name: string): number => Number(path[path.indexOf(name) + 1]) + 1;
+  const field = String(path.at(-1));
+  if (!path.includes("groups")) return "your last message";
+  const group = `group ${at("groups")}`;
+  if (!path.includes("parts")) return `the title of ${group}`;
+  const question = `question ${at("parts")} of ${group}`;
+  if (!path.includes("options")) return question;
+  const answer = `answer ${at("options")} to ${question}`;
+  return field === "detail" ? `the detail of ${answer}` : answer;
+}
+
+/**
+ * What in a line of the session's own words is longer than the record holds,
+ * as a sentence the session is handed back, or null where it all fits. Only a
+ * length is asked about: anything else a line breaks is not the session's to
+ * condense.
+ */
+function overflowOf(line: InterviewEntry["line"]): string | null {
+  const parsed = InterviewEntrySchema.safeParse({ n: 1, at: new Date().toISOString(), line });
+  if (parsed.success) return null;
+  const long = parsed.error.issues.filter((issue) => issue.code === "too_big" && issue.origin === "string");
+  if (long.length === 0) return null;
+  return long
+    .map((issue) => {
+      const path = issue.path.slice(1);
+      let value: unknown = line;
+      for (const key of path) value = (value as Record<PropertyKey, unknown>)[key];
+      const size = typeof value === "string" ? value.length : 0;
+      const most = "maximum" in issue ? Number(issue.maximum) : 0;
+      return (
+        `${fieldOf(path)} runs to ${size.toLocaleString("en-US")} characters, more than the ` +
+        `${most.toLocaleString("en-US")} the chat shows`
+      );
+    })
+    .join("; ");
+}
 
 export interface InterviewDeps {
   editing: Pick<
@@ -208,6 +257,12 @@ export class InterviewHost {
    * the note is then what the turn says, and said if it does not.
    */
   private readonly heldForNote = new Map<string, string[]>();
+  /**
+   * How many times running each planning's session has been asked to condense
+   * words of its own the record could not hold, since it last wrote some that
+   * fit.
+   */
+  private readonly condensing = new Map<string, number>();
 
   constructor(deps: InterviewDeps) {
     this.deps = deps;
@@ -286,7 +341,8 @@ export class InterviewHost {
       // in prose, and is kept only to say why a session that never started did
       // not start.
       onStderr: (text) => {
-        stderr = (stderr + text).slice(-4000);
+        // A log excerpt, and one that starts on a whole line (D-NEW-nothing-shown-is-cut).
+        stderr = logTail(stderr + text);
       },
       // The child itself has gone while something it started still holds its
       // output, so `onClose` may never come: whatever waits for the child to
@@ -313,9 +369,10 @@ export class InterviewHost {
             ? null
             : {
                 kind: "note",
-                text: `The chat stopped with code ${String(code)}.${
-                  stderr.trim() ? ` ${stderr.trim()}` : ""
-                }`,
+                // What happened in one sentence, and what the chat's process
+                // said behind its `i`, redacted and whole (D-NEW-nothing-shown-is-cut).
+                text: `The chat stopped with code ${String(code)}.`,
+                ...(stderr.trim() ? { output: redact(stderr.trim()) } : {}),
               },
         );
       },
@@ -324,7 +381,7 @@ export class InterviewHost {
         gone();
         this.owed.delete(id);
         this.titleAtTurn.delete(id);
-        this.say(id, { kind: "note", text: redact(error.message).slice(0, 12_000) });
+        this.say(id, { kind: "note", text: "The chat's process failed.", output: redact(error.message) });
       },
     });
     this.live.set(id, { repoId: repo.id, child, model, exited });
@@ -450,8 +507,9 @@ export class InterviewHost {
    * session that has gone while its interview was speaking takes the line with
    * it: there is nowhere left for it to land. A line the record will not hold
    * is said as a note instead of being dropped, because the person is watching
-   * the chat for it — what the line carries is clipped where it is read
-   * ({@link ../records.ts}), so this is the belt rather than the route.
+   * the chat for it — the session's own words that do not fit are asked for
+   * again before they get here ({@link condenseAgain}), so this is the belt
+   * rather than the route.
    */
   say(id: string, line: InterviewEntry["line"] | null): InterviewEntry | null {
     const at = new Date().toISOString();
@@ -465,9 +523,8 @@ export class InterviewHost {
             id,
             {
               kind: "note",
-              text: `A line of the chat could not be recorded: ${redact(
-                error instanceof Error ? error.message : String(error),
-              )}`.slice(0, 12_000),
+              text: "A line of the chat could not be recorded.",
+              output: redact(error instanceof Error ? error.message : String(error)),
             },
             at,
           );
@@ -579,9 +636,10 @@ export class InterviewHost {
    * they have not named it in the Spec pane (D-118).
    *
    * The interview is started with `--spec`, so a planning with no slug has
-   * nowhere to write. The person's own words name it: a title is cut from the
-   * turn, the spec is written, and the slug it mints is recorded exactly as a
-   * save from the Spec pane records one. Nothing a model returned reaches the
+   * nowhere to write. The person's own words name it: words are cut from the
+   * turn to name the folder, the spec is written titled Untitled, since the
+   * cut is no title, and the slug it mints is recorded exactly as a save from
+   * the Spec pane records one, with the title the spec was written with. Nothing a model returned reaches the
    * folder, so it stays the person's own parameter (ADR-0023 §4), and the slug
    * still goes through `safePath` where the argv is built.
    *
@@ -601,7 +659,7 @@ export class InterviewHost {
       throw new Error(INTERVIEW_NEEDS_A_TITLE, { cause: error });
     }
     const written = mintSpecFromTitle(repo, title);
-    this.deps.editing.recordSpec(id, written.slug, title);
+    this.deps.editing.recordSpec(id, written.slug, UNTITLED_SPEC);
     // The folder is minted once and never moves, so the person is told what it
     // was called while the spec is still empty enough to start again.
     // That the title can be changed is what an editable field says by being
@@ -622,6 +680,9 @@ export class InterviewHost {
       // (D-102). Its orientation asks it to end the turn there without a
       // message; this is what makes that true of a model that does not.
       if (this.afterTheNote.has(id)) return;
+      // Words the chat's record cannot hold are asked for again, condensed,
+      // rather than cut to fit (D-NEW-nothing-shown-is-cut).
+      if (this.condenseAgain(id, { kind: "said", text: read.text })) return;
       // Nor before the note, in the moment between the write and the reading
       // that hands the spec over: a closing line arriving there would be said
       // ahead of the note it repeats. Held until the reading says whether there
@@ -710,6 +771,7 @@ export class InterviewHost {
       }
       return;
     }
+    if (this.condenseAgain(id, read.line)) return;
     const asked = this.say(id, read.line);
     // What the person is being put, from the line it arrived on: recorded
     // rather than counted back out of the turns (D-117).
@@ -717,6 +779,46 @@ export class InterviewHost {
       this.deps.editing.beginAsking(id, asked.n);
       this.askingChanged(id);
     }
+  }
+
+  /**
+   * Hand words of the session's own back to it where the record cannot hold
+   * them, as a turn asking for them again, condensed without losing what they
+   * say (D-NEW-nothing-shown-is-cut); true where they are not to be said.
+   *
+   * The turn is the host's own sentence, naming only lengths, so nothing the
+   * session wrote becomes anything but the words it is asked to shorten
+   * (ADR-0023 §4). It is owed an answer like any turn, so the dock says the
+   * session is working until it comes. Past {@link CONDENSE_ASKS} asks
+   * running, or where the session is not listening, the host says so instead:
+   * the words are not shown, and not shown cut either.
+   */
+  private condenseAgain(id: string, line: InterviewEntry["line"]): boolean {
+    const overflow = overflowOf(line);
+    if (overflow === null) {
+      this.condensing.delete(id);
+      return false;
+    }
+    const asked = this.condensing.get(id) ?? 0;
+    const live = this.live.get(id);
+    const text =
+      `Perbo: ${overflow}. Write it again, condensed to fit, and leave out nothing it says.`;
+    if (asked < CONDENSE_ASKS && live?.child.write(encodeInterviewTurn({ type: "turn", text }))) {
+      this.condensing.set(id, asked + 1);
+      this.owed.set(id, (this.owed.get(id) ?? 0) + 1);
+      this.say(id, null);
+      return true;
+    }
+    this.condensing.delete(id);
+    this.say(id, {
+      kind: "note",
+      text:
+        `${INTERVIEWER_NAME} wrote more than the chat shows, and it is not shown: ${overflow}, ` +
+        (live === undefined
+          ? "and the chat is not listening to be asked to condense it."
+          : `and it was asked ${CONDENSE_ASKS} times to condense it.`),
+    });
+    return true;
   }
 
   /** Say this, or hold it where it may yet turn out to be an announcement. */

@@ -237,11 +237,11 @@ export function codexNotificationHandler(attempt: {
       if (item.command && egress.observe(item.command, "command", new Date()).length > 0)
         stop("unlisted_egress_host", "Command requested a host outside the network allow-list");
       // On one line: a command's own newline would otherwise print a line
-      // that reads as one of the run's stages. Bounded as a log excerpt: the
-      // Watch page lists no command, and the attempt's record keeps it whole.
+      // that reads as one of the run's stages. Whole, as the attempt's record
+      // keeps it (D-NEW-nothing-shown-is-cut); the Watch page lists no command.
       if (method === "item/started")
         progress(
-          `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type)).slice(0, 160)}`,
+          `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type))}`,
         );
     }
     // D-106: a subagent's own start is reported to its parent, never announced

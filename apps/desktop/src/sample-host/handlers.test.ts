@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
-import { editing, job, sampleInterviews, saveSpec, snapshot, specFiles } from "./records.js";
+import { editing, job, sampleInterviews, saveSpec, snapshot, specFiles, writeGraphEdit } from "./records.js";
+import { applyGraphEdit } from "@perbo/planning/browser";
 import type { EditingSession, Job } from "../shared/protocol.js";
 import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
 import { unseenAttention } from "../renderer/tasks/ticket-workspace.js";
@@ -260,4 +261,217 @@ it("refuses a move the lifecycle has no row for, and leaves the ticket where it 
     "PRB-412 cannot move from changes_requested to merged: the lifecycle has no row for it.",
   );
   expect(row.ticket).toEqual(before);
+});
+
+/**
+ * A fresh planning drafted from a spec with Generate plan, once it has landed:
+ * one requirement drafts a basic ticket, two an epic the drafter divides.
+ */
+async function draftedFromSpec(slug: string, requirements: string[]): Promise<{ id: string; key: string }> {
+  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+  editing.recordSpec(opened.id, slug);
+  saveSpec(
+    slug,
+    "# Confirmation email\n\n## Outcome\n\nNew users receive a confirmation email.\n\n## Requirements\n\n" +
+      requirements.map((each, index) => `- R${index + 1}: ${each}`).join("\n") +
+      "\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  const key = await submitted(opened.id, "generate");
+  return { id: opened.id, key };
+}
+
+/** Generate plan, or Start over, pressed as the Spec pane presses it, and its plan landed on the planning. */
+async function submitted(id: string, intent: "generate" | "startOver"): Promise<string> {
+  // Opened again, as the page does as it mounts: a landed plan is edited from there.
+  const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "session", id } });
+  const operationId = crypto.randomUUID();
+  await sampleBridge.request({ kind: "editingSubmit", id, revision: session.revision, operationId, intent });
+  return vi.waitFor(
+    () => {
+      const now = editing.read(id);
+      if (now.key === null || now.operation?.id !== operationId || !now.operation.reconciled)
+        throw new Error("not landed yet");
+      return now.key;
+    },
+    { timeout: 5000 },
+  );
+}
+
+const settledJob = (id: string) =>
+  vi.waitFor(
+    () => {
+      const found = snapshot.jobs.find((each) => each.id === id)!;
+      if (found.state === "running" || found.state === "stopping") throw new Error("still running");
+      expect(found.state).toBe("completed");
+    },
+    { timeout: 5000 },
+  );
+
+/** The sample's refusal of a dismissal after a person's edit of the plan, in the CLI's words. */
+const handEditedRefusal = (key: string) =>
+  `${key}'s plan has been edited by hand since it was drafted, so its problems cannot be ` +
+  "dismissed: answer them, or edit the plan until a reading finds none";
+
+it("dismisses the problems of a plan nobody has edited since it was drafted", async () => {
+  const { id } = await draftedFromSpec("dismiss-untouched", ["A signup queues exactly one email."]);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).resolves.toBeNull();
+});
+
+it("dismisses after edits the chat made alone, which move the spec with the plan", async () => {
+  const { id, key } = await draftedFromSpec("dismiss-after-chat", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  // The chat's edit, as the sample interview applies one: through the same
+  // edit path, recorded as the interview's.
+  writeGraphEdit(
+    key,
+    (state) =>
+      applyGraphEdit(
+        state,
+        {
+          op: "set_criterion",
+          id: "ac_1",
+          text: "A signup queues exactly two emails.",
+          expected_verification: { kind: "test", assertion: "two emails" },
+        },
+        [],
+      ),
+    null,
+    undefined,
+    "interview",
+  );
+  await settledJob((await sampleBridge.request({ kind: "driftCheck", id, state: null })).id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).resolves.toBeNull();
+  // The person taking the chat's edit back in the Graph pane is an edit by hand.
+  const undo = await sampleBridge.request({ kind: "graphUndo", repoId, key, edit: 1 });
+  await settledJob(undo.id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).rejects.toThrow(handEditedRefusal(key));
+});
+
+it("refuses the dismissal after a hand edit on a basic ticket's contract page, saying why", async () => {
+  const { id, key } = await draftedFromSpec("dismiss-after-contract", ["A signup queues exactly one email."]);
+  const session = editing.read(id);
+  expect(session.nodes).toBe(0);
+  const { digest } = await sampleBridge.request({ kind: "detail", repoId, key });
+  const draft = session.form.draft;
+  const edit = await sampleBridge.request({
+    kind: "edit",
+    repoId,
+    key,
+    digest,
+    draft: { ...draft, criteria: [{ ...draft.criteria[0]!, text: "A signup queues exactly two emails." }] },
+  });
+  await settledJob(edit.id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).rejects.toThrow(handEditedRefusal(key));
+});
+
+it("refuses the dismissal after a hand edit in an epic's Graph pane, until the plan is drafted again", async () => {
+  const { id, key } = await draftedFromSpec("dismiss-after-graph", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  expect(editing.read(id).nodes).toBeGreaterThan(0);
+  const edit = await sampleBridge.request({
+    kind: "graphEdit",
+    repoId,
+    key,
+    edit: {
+      op: "set_criterion",
+      id: "ac_1",
+      text: "A signup queues exactly two emails.",
+      expected_verification: { kind: "test", assertion: "two emails" },
+    },
+  });
+  await settledJob(edit.id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).rejects.toThrow(handEditedRefusal(key));
+  // Start over drafts the plan again, over the edit.
+  await submitted(id, "startOver");
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).resolves.toBeNull();
+});
+
+/** A reworded criterion the sample reading finds differs from its requirement. */
+function chatRewords(key: string): void {
+  writeGraphEdit(
+    key,
+    (state) =>
+      applyGraphEdit(
+        state,
+        {
+          op: "set_criterion",
+          id: "ac_1",
+          text: "A signup queues exactly two emails.",
+          expected_verification: { kind: "test", assertion: "two emails" },
+        },
+        [],
+      ),
+    null,
+    undefined,
+    "interview",
+  );
+}
+
+const readingsOf = (key: string) => snapshot.jobs.filter((each) => each.kind === "drift" && each.key === key);
+
+it("lands a plan Start over drafts with none of the problems of the plan it replaced, and reads nothing", async () => {
+  const { id, key } = await draftedFromSpec("start-over-over-problems", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  await settledJob((await sampleBridge.request({ kind: "driftCheck", id, state: null })).id);
+  expect(editing.read(id).drift?.open.length).toBeGreaterThan(0);
+  const before = readingsOf(key).length;
+  await submitted(id, "startOver");
+  const landed = editing.read(id);
+  expect(landed.drift).toBeNull();
+  expect(landed.read).not.toBeNull();
+  expect(readingsOf(key)).toHaveLength(before);
+});
+
+it("records nothing of a reading Start over overtook: the plan it read has gone", async () => {
+  const { id, key } = await draftedFromSpec("start-over-under-a-reading", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  const reading = await sampleBridge.request({ kind: "driftCheck", id, state: "0123456789abcdef" });
+  const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "session", id } });
+  await sampleBridge.request({ kind: "editingSubmit", id, revision: session.revision, operationId: crypto.randomUUID(), intent: "startOver" });
+  // The reading lands before the plan drafted again does, and finds the
+  // difference in the plan it read; none of it reaches the planning.
+  await settledJob(reading.id);
+  const now = editing.read(id);
+  expect(now.operation?.reconciled).toBe(false);
+  expect((snapshot.jobs.find((each) => each.id === reading.id)!.result as { findings: unknown[] }).findings.length).toBeGreaterThan(0);
+  expect(now.drift).toBeNull();
+  expect(now.read).not.toBe("0123456789abcdef");
+});
+
+it("refuses to approve a ticket while a planning over it records problems open, in one sentence, and approves it once none is", async () => {
+  const { id, key } = await draftedFromSpec("approve-over-problems", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  await settledJob((await sampleBridge.request({ kind: "driftCheck", id, state: null })).id);
+  expect(editing.read(id).drift?.open.length).toBeGreaterThan(0);
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const runs = () => snapshot.jobs.filter((each) => each.kind === "run" && each.key === key);
+  const { digest } = await sampleBridge.request({ kind: "detail", repoId, key });
+  const approve = () =>
+    sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: true, resumeFrom: null });
+  await expect(approve()).rejects.toThrow(
+    `${key} is not approved while its plan and its spec no longer promise the same thing: resolve each ` +
+      "problem on the Problems tab, or change the plan, and confirm again.",
+  );
+  expect(runs()).toHaveLength(0);
+  expect(ticket().approved_at).toBeNull();
+  // Dismissed at the command line, which the chat's edits allow: none is open, and it approves.
+  await sampleBridge.request({ kind: "driftDismiss", id });
+  expect(editing.read(id).drift).toBeNull();
+  const run = await approve();
+  held.push(run);
+  expect(runs()).toHaveLength(1);
+  expect(ticket().approved_at).not.toBeNull();
 });

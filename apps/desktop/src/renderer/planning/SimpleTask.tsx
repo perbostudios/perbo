@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { Button, InkIcon } from "../ui/index.js";
-import { bridge } from "../workspace/index.js";
 import { impactAsked, impactQuery } from "./ImpactPane.js";
-import { checkedLanding, readingState } from "./panes.js";
-import { useSettled } from "./settled.js";
+import { checkedLanding } from "./panes.js";
 import type { Route } from "../shell/route.js";
 import type { Snapshot } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
@@ -21,19 +18,18 @@ export const SIMPLE_TASK = "The task is simple, so there is no graph.";
  *
  * Only a draft this planning watched settle: a planning opened over a plan
  * that already exists is a person who came to read it, and is left where it
- * opened. An epic lands on its Graph. A basic ticket is checked first — the
- * impact check and the reading of the plan against the spec, side by side —
- * and lands on the Problems pane where the reading found any, else on Impact
- * where the check found paths outside the scope, else on its contract; the
- * pop-up saying the task is simple is put over whichever that is, once per
- * draft, and its Next only puts it away.
+ * opened. Nothing is read here: a plan the model drafted from its spec
+ * counts as satisfying it, and the host records it as read as it lands, so
+ * the first reading is at a confirm, and only of what moved since (D-128).
+ * An epic lands on its Graph at once. A basic ticket's impact is checked,
+ * and it lands on Impact where the check found paths outside the scope, else
+ * on its contract; the pop-up saying the task is simple is put over whichever
+ * that is, once per draft, and its Next only puts it away. Neither lands on
+ * Problems.
  *
  * A draft is watched by its operation: the first one seen is where this
  * planning was when it opened, and one that completes after that — a new
- * operation, or the one seen running — is a draft that landed here. The
- * reading is asked of the state the plan landed at, which the host records,
- * so the ticket's Confirm contract reads nothing again where nothing has
- * moved since.
+ * operation, or the one seen running — is a draft that landed here.
  *
  * A basic plan this planning did not watch land — one drafted again from a
  * stopped run, or one whose impact check was never made — has its impact
@@ -52,7 +48,6 @@ export function useDraftLanding({
   workspace: Pick<Snapshot, "drafts">;
 }): { checking: boolean; notice: boolean; acknowledge: () => void } {
   const client = useQueryClient();
-  const settled = useSettled();
   const [checking, setChecking] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const seen = useRef<{ sessionId: string; operation: string | null; landed: boolean } | null>(null);
@@ -81,38 +76,27 @@ export function useDraftLanding({
     seen.current = now;
     if (before?.sessionId !== sessionId || !landed || key === null) return;
     if (before.operation === now.operation && before.landed) return;
+    // An epic: on its Graph, with nothing to wait for.
     if (nodes > 0) {
       navigate({ page: "planning", sessionId, pane: "graph" });
       return;
     }
-    // A basic ticket: both checks at once, and the landing once both are back.
-    // A check that could not be made says nothing to land on.
+    // A basic ticket: its impact checked, and the landing once it is back. A
+    // check that could not be made says nothing to land on.
     setChecking(sessionId);
     impactFor.current = plan;
     impactAsked(sessionId, key);
-    const flagged = client
+    void client
       .fetchQuery({ ...impactQuery(sessionId), gcTime: Infinity, staleTime: 0 })
       .then((view) => view.warnings.length + view.truncated > 0)
-      .catch(() => false);
-    const problems = bridge
-      .request({
-        kind: "driftCheck",
-        id: sessionId,
-        state: listed === undefined ? null : readingState(listed.spec, session.form.draft),
-      })
-      .then(settled)
-      .then((job) => {
-        const verdict = DriftVerdictSchema.safeParse(job.result);
-        return verdict.success && !verdict.data.dismissed && verdict.data.findings.length > 0;
-      })
-      .catch(() => false);
-    void Promise.all([flagged, problems]).then(([flagged, problems]) => {
-      if (seen.current?.sessionId !== sessionId) return;
-      setChecking(null);
-      setNotice(sessionId);
-      navigate({ page: "planning", sessionId, pane: checkedLanding({ problems, flagged }) });
-    });
-  }, [session, sessionId, operation?.id, landed, key, nodes, navigate, client, settled]);
+      .catch(() => false)
+      .then((flagged) => {
+        if (seen.current?.sessionId !== sessionId) return;
+        setChecking(null);
+        setNotice(sessionId);
+        navigate({ page: "planning", sessionId, pane: checkedLanding({ flagged }) });
+      });
+  }, [session, sessionId, operation?.id, landed, key, nodes, navigate, client]);
   // Opened over a basic plan whose impact was never checked: checked now, in
   // place, once the drafts list says so. Not while a draft is being made,
   // which is checked as it lands. Asked afresh, here and on landing, since an

@@ -419,8 +419,9 @@ export async function mergeLoopPullRequest(request: LoopMergeRequest): Promise<L
     if (merged.code !== 0) {
       // `gh` says what it refused on a later line than the one that says it
       // refused — "Base branch was modified" arrives under "not mergeable" —
-      // so the stop carries several, joined the way `mergeUp` joins git's.
-      const said = (merged.stderr || merged.stdout).trim().split("\n").slice(0, 4).join("; ").slice(0, 400);
+      // so the stop carries every line, whole, joined the way `mergeUp` joins
+      // git's (D-NEW-nothing-shown-is-cut).
+      const said = (merged.stderr || merged.stdout).trim().split("\n").join("; ");
       return stopped(
         { rule_id: "merge.refused_by_github", statement: `\`gh pr merge\` failed: ${said || "no output"}` },
         head,

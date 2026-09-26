@@ -1,4 +1,4 @@
-import { interviewSessionArgs, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
+import { interviewSessionArgs, readingState, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -31,6 +31,7 @@ import type {
 } from "../shared/protocol.js";
 import { CriterionEvidenceBindingSchema } from "@perbo/contracts";
 import type { GraphEdit } from "@perbo/contracts";
+import { driftHash, promiseTexts, writeDriftRecord } from "@perbo/planning";
 import { disposeFixtures, fixture, scratchDirectory, trackService } from "./test-support/host-fixture.js";
 import { Profile } from "./profile/store.js";
 
@@ -2797,10 +2798,13 @@ readline.createInterface({ input: process.stdin })
       "--spec",
       "specs/dark-mode-toggle",
     ]);
-    // The cut is on the file's title line and recorded as the cut, so the
-    // planning is listed with no title until another is written (D-118).
-    expect((await service.request({ kind: "editingRead", id: fresh.id })).specCut).toBe("Dark mode toggle");
-    expect(readFileSync(join(repo, "specs", "dark-mode-toggle", "spec.md"), "utf8").split("\n")[0]).toBe("# Dark mode toggle");
+    // The cut names the folder only: the file's title line says Untitled and
+    // is recorded as the host's, so the planning is listed with no title
+    // until another is written, and the cut's words are no title (D-118).
+    expect((await service.request({ kind: "editingRead", id: fresh.id })).specCut).toBe("Untitled");
+    const written = readFileSync(join(repo, "specs", "dark-mode-toggle", "spec.md"), "utf8");
+    expect(written.split("\n")[0]).toBe("# Untitled");
+    expect(written).not.toContain("Dark mode toggle");
     expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === fresh.id)?.title).toBeNull();
     // The naming is said, and the turn it came from is part of the conversation.
     const lines = await spoken(service, fresh.id, (entries) =>
@@ -3323,6 +3327,47 @@ readline.createInterface({ input: process.stdin })
       return job;
     };
 
+    /** Generate plan as the Spec pane presses it: an operation on the planning, which lands on it. */
+    const submitGenerate = async (service: DesktopService, id: string): Promise<void> => {
+      const session = await service.request({ kind: "editingRead", id });
+      await service.request({ kind: "editingSubmit", id, revision: session.revision, operationId: randomUUID(), intent: "generate" });
+    };
+    /** The planning's reading state as the confirm computes it, off the drafts list and the session, once its draft has landed. */
+    const landed = async (service: DesktopService, id: string) => {
+      const until = Date.now() + 20_000;
+      while (Date.now() < until) {
+        const session = await service.request({ kind: "editingRead", id });
+        if (session.operation?.reconciled && session.key !== null) {
+          const listed = (await service.request({ kind: "drafts" })).find((draft) => draft.id === id)!;
+          return { session, state: readingState(listed.spec, session.form.draft) };
+        }
+        await delay(20);
+      }
+      throw new Error("The draft never landed");
+    };
+
+    it("records a plan drafted from the spec as read by its drafting where the verdict admission wrote holds (D-NEW-basic-and-epic-flows)", async () => {
+      // A plan just drafted agrees with its spec by construction (D-128): it is
+      // recorded as read at the state it landed at, so its first confirm reads
+      // nothing, and no reading runs for it here.
+      let repo = "";
+      const made = await writing(seeding(() => repo, naming(() => repo, "Welcome emails")));
+      repo = made.repo;
+      await submitGenerate(made.service, made.id);
+      const { session, state } = await landed(made.service, made.id);
+      expect(session.read).toBe(state);
+      expect((await made.service.snapshot()).jobs.filter((job) => job.kind === "drift")).toEqual([]);
+    });
+
+    it("records no reading for a plan drafted where no verdict holds for its spec", async () => {
+      let repo = "";
+      const made = await writing(naming(() => repo, "Welcome emails"));
+      repo = made.repo;
+      await submitGenerate(made.service, made.id);
+      const { session } = await landed(made.service, made.id);
+      expect(session.read).toBeNull();
+    });
+
     it("keeps the name the person gave the spec for the ticket and the spec", async () => {
       const { service, repo, repoId, id, asked } = await titled();
       expect((await service.request({ kind: "editingRead", id })).named).toEqual({
@@ -3785,6 +3830,12 @@ readline.createInterface({ input: process.stdin })
     })).toMatchObject({ state: "completed", error: null });
     const reworded = await read();
     expect(reworded!.by).toBe("person");
+    // And the planning holds the plan as the edit left it, which is what its
+    // confirm compares with the last reading (D-128).
+    expect((await service.request({ kind: "editingRead", id })).form.draft.criteria.map((each) => each.text)).toEqual([
+      "A signup queues exactly one email",
+      "A failed send is retried",
+    ]);
     expect(reworded!.spec).toBeNull();
     expect(reworded!.plan!.before.criteria.map((each) => each.text)).toEqual(["A signup queues one email", "A failed send is retried"]);
     expect(reworded!.plan!.after.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried"]);
@@ -5008,6 +5059,30 @@ function naming(repo: () => string, proposed: string, asked: string[][] = []): t
   };
 }
 
+/**
+ * `admit --from-spec` as a runner stands in for it, followed by the verdict
+ * `admit` writes beside a plan it drafts from a spec (D-128): keyed by the
+ * spec's bytes as it left them, and finding nothing.
+ */
+function seeding(repo: () => string, runner: typeof runProcess): typeof runProcess {
+  return async (binary, args, options) => {
+    const result = await runner(binary, args, options);
+    const at = args.indexOf("--from-spec");
+    if (args[1] !== "admit" || at < 0 || result.code !== 0) return result;
+    const { ticket } = JSON.parse(result.stdout) as { ticket: { key: string } };
+    writeDriftRecord(join(repo(), ".perbo"), ticket.key, {
+      spec: driftHash(readFileSync(join(repo(), args[at + 1]!))),
+      promises: `sha256:${"d".repeat(64)}`,
+      origin: "drafted",
+      findings: [],
+      dismissed: false,
+      checked_at: new Date().toISOString(),
+      model: null,
+    });
+    return result;
+  };
+}
+
 describe("the plan read against the spec (D-128)", () => {
   /** What `perbo drift KEY --json` prints, as the canned CLI answers it. */
   const verdict = (findings: unknown[], dismissed = false) => ({
@@ -5407,33 +5482,44 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "interviewStop", id });
   });
 
-  it("forgets the problems when the person goes on past them, and when the plan is approved", async () => {
-    const { service, repo } = canned(verdict([finding]));
+  it("forgets the problems when they are dismissed, refuses approval while one is open, and forgets them when the plan is approved", async () => {
+    let reply: unknown = verdict([finding]);
+    const { service, repo } = canned(() => reply);
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
     await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
     await service.request({ kind: "driftDismiss", id });
     expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
-    // Open again, then approved: what the plan promises is settled with it.
+    // Open again: approving is refused, in one sentence, before anything
+    // starts (D-NEW-basic-and-epic-flows).
     await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
     const detail = await service.detail(registered.id, "PRB-1");
-    const ran = await finished(
-      service,
-      (
-        await service.request({
-          kind: "run",
-          repoId: registered.id,
-          key: "PRB-1",
-          digest: detail.digest,
-          approve: true,
-          publish: false,
-          resumeFrom: null,
-        })
-      ).id,
+    const approve = async () =>
+      service.request({
+        kind: "run",
+        repoId: registered.id,
+        key: "PRB-1",
+        digest: detail.digest,
+        approve: true,
+        publish: false,
+        resumeFrom: null,
+      });
+    await expect(approve()).rejects.toThrow(
+      "PRB-1 is not approved while its plan and its spec no longer promise the same thing: resolve each " +
+        "problem on the Problems tab, or change the plan, and confirm again.",
     );
+    expect((await service.snapshot()).jobs.filter((job) => job.kind === "run")).toEqual([]);
+    expect((await service.detail(registered.id, "PRB-1")).ticket.approved_at).toBeNull();
+    // Resolved by a reading that finds none: approved, and what the plan
+    // promises is settled with it.
+    reply = verdict([]);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift).toEqual({ open: [], resolved: true });
+    const ran = await finished(service, (await approve()).id);
     expect(ran.error).toBeNull();
+    expect((await service.detail(registered.id, "PRB-1")).ticket.approved_at).not.toBeNull();
     expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
   });
 
@@ -5452,7 +5538,29 @@ readline.createInterface({ input: process.stdin })
     return { promise, release };
   }
 
-  it("reads again after a resolved round, and problems found then re-open the record", async () => {
+  it("records the state a re-read after an answer was of, so the confirm after it reads nothing again (D-NEW-basic-and-epic-flows)", async () => {
+    const root = scratchDirectory("perbo-drift-");
+    let reply: unknown = verdict([finding]);
+    const { service, repo, drifts } = canned(() => reply, fakeAnswering(root));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
+    expect((await service.request({ kind: "editingRead", id })).read).toBeNull();
+    // The answer closes it, and the host reads the plan again on its own.
+    reply = verdict([]);
+    await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
+    await settled(service, id);
+    await driftJobs(service, 2);
+    expect(drifts).toHaveLength(2);
+    const session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [], resolved: true });
+    // Recorded at the state the confirm compares, off the drafts list and the session.
+    const listed = (await service.request({ kind: "drafts" })).find((draft) => draft.id === id)!;
+    expect(session.read).toBe(readingState(listed.spec, session.form.draft));
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("reads nothing after a chat turn once the round is resolved, and the confirm's reading re-opens the record (D-128)", async () => {
     const root = scratchDirectory("perbo-drift-");
     let reply: unknown = verdict([finding]);
     const { service, repo, drifts } = canned(() => reply, fakeAnswering(root));
@@ -5466,12 +5574,16 @@ readline.createInterface({ input: process.stdin })
     await driftJobs(service, 2);
     let session = await service.request({ kind: "editingRead", id });
     expect(session.drift).toEqual({ open: [], resolved: true });
-    // A turn after that — a hand rewording, say, told to the interview — is
-    // read again all the same: the record is resolved, and a resolved record
-    // is exactly what cannot know about an edit since.
+    // A turn after that, with nothing open, is not read after: the chat's
+    // edits are read when the person confirms (D-128).
     reply = verdict([second]);
     await service.request({ kind: "interviewTurn", id, text: "reword criterion 2 to promise a retry" });
     await settled(service, id);
+    await delay(300);
+    expect(drifts).toHaveLength(2);
+    expect((await service.request({ kind: "editingRead", id })).drift).toEqual({ open: [], resolved: true });
+    // The confirm's reading is, and what it finds re-opens the record.
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     const jobs = await driftJobs(service, 3);
     expect(jobs.map((job) => job.state)).toEqual(["completed", "completed", "completed"]);
     expect(drifts).toHaveLength(3);
@@ -5715,7 +5827,7 @@ readline.createInterface({ input: process.stdin })
     let session = await service.request({ kind: "editingRead", id });
     expect(session.drift).toBeNull();
     expect(problemsPut(session.conversation)).toHaveLength(0);
-    // Gone past while the model read: the person went on to the contract.
+    // Dismissed while the model read: the problems were set aside at this state.
     const again = held<unknown>();
     const other = canned((args: string[]) => (args.includes("--dismiss") ? verdict([finding], true) : again.promise));
     const elsewhere = await other.service.registerRepository(other.repo);
@@ -5957,6 +6069,96 @@ readline.createInterface({ input: process.stdin })
  * from, which mints a second ticket beside the stopped one, or it is deleted
  * whole (D-129).
  */
+describe("dismissing the problems after a hand edit (D-NEW-basic-and-epic-flows)", () => {
+  /**
+   * PRB-1 drafted from a spec, as `admit --from-spec` records it, with the
+   * verdict it holds at the state it is at and a planning over it: every
+   * command the bundled CLI, `perbo drift --dismiss` included.
+   */
+  async function drafted() {
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const specPath = join(repo, "specs", "retry-on-failure", "spec.md");
+    mkdirSync(dirname(specPath), { recursive: true });
+    writeFileSync(specPath, "# Retry on failure\n\n## Outcome\n\nThe user can retry.\n\n## Requirements\n\n- R1: The user can retry.\n");
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as { admission: Record<string, unknown> };
+    ticket.admission["spec"] = {
+      path: "specs/retry-on-failure/spec.md",
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket, null, 2));
+    const contract = JSON.parse(readFileSync(join(repo, ".perbo", "tickets", "PRB-1.contract.json"), "utf8")) as {
+      outcome: string;
+      acceptance_criteria: { text: string }[];
+    };
+    writeDriftRecord(join(repo, ".perbo"), "PRB-1", {
+      spec: driftHash(readFileSync(specPath)),
+      promises: driftHash(JSON.stringify(promiseTexts({ outcome: contract.outcome, criteria: contract.acceptance_criteria }))),
+      origin: "read",
+      findings: [],
+      dismissed: false,
+      checked_at: new Date().toISOString(),
+      model: null,
+    });
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "planning", repoId: registered.id, key: "PRB-1" },
+    });
+    return { service, repoId: registered.id, id: session.id };
+  }
+  const REFUSED =
+    "PRB-1's plan has been edited by hand since it was drafted, so its problems cannot be dismissed: " +
+    "answer them, or edit the plan until a reading finds none";
+
+  it("is refused by the CLI after an edit on a basic ticket's contract page, and the host says why", async () => {
+    const { service, repoId, id } = await drafted();
+    // Nobody has edited the plan: the dismissal goes through.
+    expect(await service.request({ kind: "driftDismiss", id })).toBeNull();
+    const { digest } = await service.request({ kind: "detail", repoId, key: "PRB-1" });
+    const edited = await finished(
+      service,
+      (
+        await service.request({
+          kind: "edit",
+          repoId,
+          key: "PRB-1",
+          digest,
+          draft: { ...draft, criteria: [{ ...draft.criteria[0]!, text: "The user can retry twice" }] },
+        })
+      ).id,
+    );
+    expect(edited.state).toBe("completed");
+    await expect(service.request({ kind: "driftDismiss", id })).rejects.toThrow(REFUSED);
+  });
+
+  it("is refused by the CLI after a hand edit in the Graph pane, and the host says why", async () => {
+    const { service, repoId, id } = await drafted();
+    const edited = await finished(
+      service,
+      (
+        await service.request({
+          kind: "graphEdit",
+          repoId,
+          key: "PRB-1",
+          edit: {
+            op: "set_criterion",
+            id: "ac_1",
+            text: "The user can retry twice",
+            expected_verification: { kind: "test", assertion: "The retry button is visible after failure" },
+          },
+        })
+      ).id,
+    );
+    expect(edited.state).toBe("completed");
+    await expect(service.request({ kind: "driftDismiss", id })).rejects.toThrow(REFUSED);
+  });
+});
+
 describe("a stopped run's ticket", () => {
   const slug = "retire-the-legacy-csv-importer";
   const spec = `specs/${slug}/spec.md`;
@@ -6085,6 +6287,100 @@ describe("a stopped run's ticket", () => {
     ) as { state: string; admission: { spec: { path: string } } };
     expect(minted.state).toBe("plan_review");
     expect(minted.admission.spec.path).toBe(spec);
+  });
+
+  it("records a basic plan drafted again as read by its drafting, and a criterion edited after it is what the confirm's reading judges (D-NEW-basic-and-epic-flows)", async () => {
+    let repo = "";
+    // What each reading was handed: the criteria in the contract as `perbo
+    // drift` reads them, off the ticket store at the moment it is asked.
+    const seen: string[][] = [];
+    const drifts: string[][] = [];
+    const drafted = seeding(() => repo, drafting(() => repo));
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] !== "drift") return drafted(binary, args, options);
+      drifts.push(args.slice(1, args.indexOf("--repo")));
+      const key = args[2]!;
+      const contract = JSON.parse(readFileSync(join(repo, ".perbo", "tickets", `${key}.contract.json`), "utf8")) as {
+        acceptance_criteria: { text: string }[];
+      };
+      const texts = contract.acceptance_criteria.map((each) => each.text);
+      seen.push(texts);
+      // The reading's own judgement: a criterion that no longer says what R1 asks.
+      const findings = texts
+        .filter((text) => text !== "An upload of either dialect is read")
+        .map((text, at) => ({
+          heading: `Criterion ${at + 1} and R1`,
+          difference: `R1 asks that an upload of either dialect is read; the criterion promises "${text}".`,
+          options: [
+            { label: "Reword the criterion to say an upload of either dialect is read.", detail: null, recommended: true },
+            { label: `Change R1 in the spec to say: ${text}`, detail: null, recommended: false },
+          ],
+        }));
+      const printed = {
+        key,
+        spec: `sha256:${"a".repeat(64)}`,
+        promises: `sha256:${"b".repeat(64)}`,
+        origin: "read",
+        findings,
+        dismissed: false,
+        checked_at: new Date().toISOString(),
+        model: null,
+        cached: false,
+      };
+      return { code: 0, stdout: JSON.stringify(printed), stderr: "", cancelled: false };
+    };
+    const made = await stopped(runner);
+    repo = made.repo;
+    const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+    expect(opened.nodes).toBe(0);
+    const id = opened.sessionId;
+    /** The state the confirm compares, off the drafts list and the session, as the contract page reads it. */
+    const now = async () => {
+      const session = await made.service.request({ kind: "editingRead", id });
+      const listed = (await made.service.request({ kind: "drafts" })).find((draft) => draft.id === id)!;
+      return { session, state: readingState(listed.spec, session.form.draft) };
+    };
+    // Read by its drafting: the confirm of it unchanged reads nothing.
+    const first = await now();
+    expect(first.session.read).toBe(first.state);
+    expect(drifts).toEqual([]);
+    expect((await made.service.snapshot()).jobs.filter((job) => job.kind === "drift")).toEqual([]);
+    // The criterion edited on the contract, as the page writes it: the form
+    // saved, then compiled into the contract.
+    const form = {
+      ...first.session.form,
+      draft: {
+        ...first.session.form.draft,
+        criteria: [{ ...first.session.form.draft.criteria[0]!, text: "An upload of the old dialect is refused" }],
+      },
+    };
+    const saved = await made.service.request({ kind: "editingSave", id, revision: first.session.revision, repoId: made.repoId, form });
+    await made.service.request({ kind: "editingSubmit", id, revision: saved.revision, operationId: randomUUID(), intent: "compile" });
+    const until = Date.now() + 20_000;
+    while ((await now()).session.operation?.reconciled !== true && Date.now() < until) await delay(20);
+    const edited = await now();
+    expect(edited.session.form.draft.criteria.map((each) => each.text)).toEqual(["An upload of the old dialect is refused"]);
+    // The state moved, so the confirm owes a reading, asked of that state.
+    expect(edited.state).not.toBe(edited.session.read);
+    const reading = await finished(made.service, (await made.service.request({ kind: "driftCheck", id, state: edited.state })).id);
+    // `perbo drift` was asked, and read the edited criteria off the contract.
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]!.slice(0, 2)).toEqual(["drift", opened.key]);
+    expect(seen).toEqual([["An upload of the old dialect is refused"]]);
+    // And its result decides: the problem is on the planning, and the state
+    // it read is recorded as read.
+    expect(reading.result).toMatchObject({ cached: false, findings: [{ heading: "Criterion 1 and R1" }] });
+    const after = await made.service.request({ kind: "editingRead", id });
+    expect(after.drift?.open.map((finding) => finding.heading)).toEqual(["Criterion 1 and R1"]);
+    expect(after.read).toBe(edited.state);
+  });
+
+  it("records no reading for a plan drafted again where no verdict holds for its spec", async () => {
+    let repo = "";
+    const made = await stopped(drafting(() => repo));
+    repo = made.repo;
+    const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+    expect((await made.service.request({ kind: "editingRead", id: opened.sessionId })).read).toBeNull();
   });
 
   it("drafts again under the name the person gave the spec, where the planning that records it is still there (D-127)", async () => {

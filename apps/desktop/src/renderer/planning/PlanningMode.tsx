@@ -38,7 +38,8 @@ const DriftPane = lazy(() =>
  * checked once when the plan first arrives and by its button after that; the
  * Problems pane, on the way from the plan to the contract, reads the plan
  * against the spec and puts each place the two have parted, one at a time
- * (D-128); and the contract, the last tab, where the one approval is. Which
+ * (D-128), the lowest tab while a problem is open; and the contract, above
+ * it, where the one approval is. Which
  * of them a planning offers is `flowFor`'s (D-NEW-basic-and-epic-flows).
  *
  * One pane at a time, with the interview docked beside it (D-102) and the
@@ -160,13 +161,14 @@ export function PlanningMode({
     pane === null ? (
       <Opening what="planning" />
     ) : landing.checking ? (
-      // A basic ticket's fresh plan, checked before it lands anywhere: what
-      // it disturbs, and whether it still promises what the spec does.
+      // A fresh basic plan, checked for what it disturbs before it lands on
+      // Impact or the contract. Nothing reads it against the spec here: the
+      // model drafted it from the spec (D-NEW-basic-and-epic-flows).
       <WaitScreen
         bare
-        title="Checking the plan"
-        description="Reading what the plan is likely to touch outside its scope, and reading it against the spec. Neither changes anything."
-        status="Checking the plan…"
+        title="Checking the impact"
+        description="Reading what the plan is likely to touch outside its scope. This changes nothing."
+        status="Checking the impact…"
       />
     ) : pane === "contract" ? (
       <Suspense fallback={<Opening what="the contract" />}>
@@ -186,9 +188,9 @@ export function PlanningMode({
         <GraphPane workspace={workspace} navigate={navigate} editor={editor} />
       </Suspense>
     ) : pane === "drift" ? (
-      // The step from the plan to the contract: the plan read against the
-      // spec, and each problem put on its own, as a card whose answer is a
-      // turn (D-128).
+      // The problems a reading of the plan against the spec found, each put
+      // on its own, as a card whose answer is a turn, and an epic's step from
+      // the plan to the contract (D-128).
       <Suspense fallback={<Opening what="the problems" />}>
         <DriftPane key={sessionId} workspace={workspace} navigate={navigate} editor={editor} />
       </Suspense>

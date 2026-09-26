@@ -69,6 +69,16 @@ describe("an approval across a re-level", () => {
     expect(decision.statement).toContain("inside the change's own scope");
   });
 
+  it("names five of the paths the base touched whole, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+    const paths = [1, 2, 3, 4, 5, 6, 7].map((n) => `src/feature-${n}.ts`);
+    const decision = loopMergeDecision({
+      mode: "loop",
+      observed: observed({ carried_approvals: [{ head: APPROVED, content_equal: true, scope_touched: paths }] }),
+    });
+    if (decision.merge) throw new Error("unreachable");
+    expect(decision.statement).toContain("src/feature-5.ts and 2 more inside the change's own scope");
+  });
+
   it("fails closed where the runner could not read the branch", () => {
     for (const carried of [undefined, []] as const) {
       const decision = loopMergeDecision({

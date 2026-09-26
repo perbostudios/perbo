@@ -21,7 +21,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(): { worktree: string; binary: string; env: NodeJS.ProcessEnv } {
+function fixture(extra = ""): { worktree: string; binary: string; env: NodeJS.ProcessEnv } {
   const root = mkdtempSync(join(tmpdir(), "perbo-codex-spoken-"));
   roots.push(root);
   const worktree = join(root, "worktree");
@@ -48,6 +48,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     send({method:'item/completed',params:{threadId:'thread',turnId:'turn',item:{id:'m1',type:'agentMessage',text:'Reading the mailer.\nThe key sk-live-SECRET stays out.'}}});
     send({method:'item/started',params:{threadId:'thread',turnId:'turn',item:{id:'sa1',type:'subAgentActivity',kind:'started',agentPath:'/root/child_1',agentThreadId:'child-1'}}});
     send({method:'item/completed',params:{threadId:'child-1',turnId:'turn',item:{id:'m2',type:'agentMessage',text:'A child summary.'}}});
+    ${extra}
     send({method:'item/completed',params:{threadId:'thread',turnId:'turn',item:{id:'final',type:'agentMessage',text:'Finished'}}});
     send({method:'turn/completed',params:{turn:{id:'turn',status:'completed'}}});
   }
@@ -92,6 +93,33 @@ describe("the executor's words on Codex, as the run prints them", () => {
         ["A child summary.", true],
         ["Finished", false],
       ]);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "prints a command it runs whole, on one line (D-NEW-nothing-shown-is-cut)",
+    async () => {
+      const command = `ls ${"a-directory-with-a-long-name/".repeat(12)}\nls the-second-line`;
+      const f = fixture(
+        `send({method:'item/started',params:{threadId:'thread',turnId:'turn',item:{id:'c1',type:'commandExecution',command:${JSON.stringify(command)}}}});`,
+      );
+      const lines: string[] = [];
+      await runCodexAgent({
+        binary: f.binary,
+        worktree: f.worktree,
+        prompt: "You are implementing one approved ticket in a Git worktree.",
+        model: "test-model",
+        profile: buildPermissionProfile({ worktree: f.worktree }),
+        ceilings: new AttemptCeilings(LimitsTableSchema.parse({ organisation: "test", limits: {} }), () => 0),
+        env: f.env,
+        onProgress: (line) => lines.push(line),
+      });
+      const printed = lines.find((line) => line.startsWith("Codex ls "));
+      expect(command.length).toBeGreaterThan(160);
+      expect(printed).toBeDefined();
+      expect(printed).not.toMatch(/[\n\r]/);
+      expect(printed!.endsWith("ls the-second-line")).toBe(true);
     },
     SPAWN_TEST_TIMEOUT_MS,
   );

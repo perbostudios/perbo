@@ -224,7 +224,7 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
     });
     return result.code === 0
       ? { ok: true, detail: `fetched ${base_ref}` }
-      : { ok: false, detail: (result.stderr || result.stdout).trim().split("\n").slice(0, 2).join("; ").slice(0, 300) };
+      : { ok: false, detail: (result.stderr || result.stdout).trim().split("\n").join("; ") };
   },
 
   async sync({ key, merge, onLine }) {
@@ -289,7 +289,7 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
       { timeoutMs: GIT_TIMEOUT_MS },
     );
     if (result.code !== 0) {
-      return { ok: false, detail: (result.stderr || result.stdout).trim().split("\n")[0]?.slice(0, 300) || "gh failed" };
+      return { ok: false, detail: (result.stderr || result.stdout).trim().split("\n").join("; ") || "gh failed" };
     }
     // An answer larger than the read holds arrives as a list of issues shaped
     // exactly like the whole of one, short by the issues that were cut.
@@ -344,9 +344,6 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   };
 }
 
-/** As long as a reason on a ticket's record may be: the queue's own bound on what it keeps of a child's words. */
-const REASON_LIMIT = 300;
-
 /**
  * What a run that completed said, from the record it writes to stdout when
  * that is a pipe (`run --json`'s document): its outcome and detail as one
@@ -363,7 +360,7 @@ function runDocumentAnswer(stdout: string): string | null {
   return parsed.success ? `${parsed.data.outcome} — ${parsed.data.detail}` : null;
 }
 
-/** Tracker text on one line of this queue's stderr: line breaks and control characters become spaces, and it is cut short. */
+/** Tracker text on one line of this queue's stderr, whole: line breaks and control characters become spaces (D-NEW-nothing-shown-is-cut). */
 const oneLine = (text: string): string =>
   Array.from(text, (char) => {
     const code = char.charCodeAt(0);
@@ -371,8 +368,7 @@ const oneLine = (text: string): string =>
   })
     .join("")
     .replace(/ {2,}/g, " ")
-    .trim()
-    .slice(0, 120);
+    .trim();
 
 /**
  * `.perbo/config.json`'s `tracker`: the repository whose open issues carrying
@@ -711,7 +707,7 @@ async function runTick(queue: Queue): Promise<ServeTick> {
                 base_tip: tip,
                 exit_code: result.code ?? -1,
                 at: queue.clock().toISOString(),
-                reason: said === null ? null : said.slice(0, REASON_LIMIT),
+                reason: said,
               };
         try {
           const after = readTicket(dir, ticket.key);

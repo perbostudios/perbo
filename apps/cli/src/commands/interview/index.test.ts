@@ -1316,12 +1316,12 @@ describe("the orientation asks for the spec's title as a title", () => {
   it("asks for a title, not a sentence or a cut of the message, when it first writes the spec", () => {
     expect(oriented).toMatch(/The spec's one `#` heading is its title/);
     expect(oriented).toMatch(
-      /Where that line is\nthe person's first message cut down to name the folder, and only then, make it a title when you\nfirst write the spec/,
+      /Where that line is\nUntitled — the folder was named from the person's first message, and the work has no title\nyet — and only then, make it a title when you first write the spec/,
     );
-    expect(oriented).toMatch(/as a noun phrase and not a sentence or a cut of\nwhat they said/);
+    expect(oriented).toMatch(/as a noun\nphrase and not a sentence or a cut of what they said/);
     expect(oriented).toMatch(/tell it apart from every name in the names block below/);
     expect(oriented).toMatch(/The folder keeps its name/);
-    expect(oriented).toMatch(/Once a\nplan is drafted the title is the ticket's name and follows it/);
+    expect(oriented).toMatch(/Once a plan is drafted the title is\nthe ticket's name and follows it/);
   });
 
   it("is shown every ticket's name but the one drafted from its own spec", async () => {

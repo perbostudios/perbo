@@ -2,6 +2,7 @@ import { DriftVerdictSchema, type DriftVerdict } from "@perbo/planning";
 import { redact, requireSuccess } from "../process.js";
 import {
   REREAD_COULD_NOT_START,
+  redraftedSince,
   turnMark,
   turnOverlapped,
   type TurnMark,
@@ -31,6 +32,11 @@ export interface DriftDeps {
   cli: Pick<Cli, "run">;
   /** The models this ticket drafts with: its own where the contract page chose them, else the settings'. */
   models(repoId: string, key: string): TaskModels | Settings;
+  /**
+   * The state a reading of this planning is of now, as `readingStateOf` in
+   * `shared/contract-editing.ts` states it, or null where it cannot be read.
+   */
+  state(id: string): string | null;
   /** The planning's chat, which a reading lands in. */
   interview: {
     working(id: string): boolean;
@@ -137,20 +143,20 @@ export class DriftReadings {
         const verdict = DriftVerdictSchema.parse(job.result);
         // And what the model said goes to the person redacted and flattened,
         // because it is the model's text about the spec and the plan, and a
-        // secret either quoted would otherwise land in the record and on the
-        // page. The model was held to each field's length as it wrote, and
-        // nothing is cut to fit here: a word cut short is a sentence the
-        // person reads as something it did not say. Redaction can empty a
-        // field outright (a heading that was only escape codes), or lengthen
-        // it past what the field holds (a short secret written as
-        // `[redacted]`), and a card with no heading or no difference, or with
-        // one cut short, is not one to put, so the reading fails rather than
-        // showing it; a detail is the one field that may go, whole.
+        // secret either quoted would otherwise land on the page. `perbo drift`
+        // redacted it before measuring it, and asked the model again for a
+        // field that redaction lengthened past its length, so nothing here is
+        // cut to fit: a word cut short is a sentence the person reads as
+        // something it did not say (D-NEW-nothing-shown-is-cut). This host's
+        // redaction knows credentials the CLI's environment may not hold, so
+        // it can still empty a field outright (a heading that was only escape
+        // codes) or lengthen it past what the field holds; a card with no
+        // heading or no difference, or with any field cut short or left out,
+        // is not one to put, so the reading fails, saying why. A detail that
+        // redaction empties is the one field that may go, since it said
+        // nothing.
         const shown = (text: string): string => redact(text).replace(/\s+/g, " ").trim();
-        const required = (text: string, cap: number, field: string): string => {
-          const kept = shown(text);
-          if (kept.length === 0)
-            throw new Error(`The reading's ${field} did not survive redaction.`);
+        const fits = (kept: string, cap: number, field: string): string => {
           if (kept.length > cap)
             throw new Error(
               `The reading's ${field} is longer than the ${cap} characters it may hold once a secret in it is ` +
@@ -158,9 +164,15 @@ export class DriftReadings {
             );
           return kept;
         };
-        const optional = (text: string | null, cap: number): string | null => {
+        const required = (text: string, cap: number, field: string): string => {
+          const kept = shown(text);
+          if (kept.length === 0)
+            throw new Error(`The reading's ${field} did not survive redaction.`);
+          return fits(kept, cap, field);
+        };
+        const optional = (text: string | null, cap: number, field: string): string | null => {
           const kept = text === null ? "" : shown(text);
-          return kept.length === 0 || kept.length > cap ? null : kept;
+          return kept.length === 0 ? null : fits(kept, cap, field);
         };
         const landed = DriftVerdictSchema.parse({
           ...verdict,
@@ -169,7 +181,7 @@ export class DriftReadings {
             difference: required(finding.difference, 600, "difference"),
             options: finding.options.map((option) => ({
               label: required(option.label, 200, "option"),
-              detail: optional(option.detail, 600),
+              detail: optional(option.detail, 600, "option's detail"),
               recommended: option.recommended,
             })),
           })),
@@ -189,7 +201,7 @@ export class DriftReadings {
   /** A reading's job has settled: the next one owed to the planning starts. */
   private settled(id: string): void {
     this.readings.delete(id);
-    if (this.rereadOwed.delete(id)) void this.reread(id);
+    if (this.rereadOwed.delete(id)) void this.reread(id, true);
   }
 
   /**
@@ -233,6 +245,8 @@ export class DriftReadings {
       // record it on.
       return;
     }
+    // Drafted again while the model read: the plan it read has gone.
+    if (redraftedSince(before, session)) return;
     const working = this.deps.interview.working(id);
     const overlapped = turnOverlapped(before, session, working);
     // A turn that ended before this landed may have owed nothing, having found
@@ -251,11 +265,19 @@ export class DriftReadings {
 
   /**
    * Read the plan against the spec again, once the interview has finished a
-   * turn with a record of problems on the planning: the turn was the person's
-   * answer to one, or a hand edit after a resolved round, and whether it closed
-   * or re-opened one is what the next reading says. `perbo drift` prints the
-   * verdict it holds without a model where neither the spec nor the plan
-   * moved, so a turn that changed nothing costs nothing.
+   * turn while a problem is open on the planning: the turn was the person's
+   * answer to one, and whether it closed it is what the next reading says.
+   * `perbo drift` prints the verdict it holds without a model where neither
+   * the spec nor the plan moved, so a turn that changed nothing costs nothing.
+   * A turn with no problem open starts no reading: the chat's edits are read
+   * when the person confirms, where anything the reading judges has moved
+   * since the last one (D-128). `owed` is a reading owed by one a turn
+   * overlapped, which is read whatever the record says.
+   *
+   * The state it is of is recorded as a reading asked for by a page is, where
+   * no turn overlaps it, so a basic ticket's Confirm contract after the
+   * problems are resolved compares the state it is at with this reading's and
+   * reads nothing again (D-NEW-basic-and-epic-flows).
    *
    * Never over a reading already in flight for the planning — the pane asks for
    * one on arrival, and two would land on top of each other — but never lost
@@ -272,7 +294,7 @@ export class DriftReadings {
    * delete checks, holds the repository so the ticket is refused its delete.
    * Both deletes mark the planning thrown away before they stop its chat.
    */
-  async reread(id: string): Promise<void> {
+  async reread(id: string, owed = false): Promise<void> {
     let session;
     try {
       session = this.deps.editing.read(id);
@@ -280,6 +302,7 @@ export class DriftReadings {
       return;
     }
     if (session.drift === null || session.key === null || session.phase === "discarded") return;
+    if (!owed && session.drift.open.length === 0) return;
     const key = session.key;
     const live = this.deps.jobs
       .live()
@@ -293,7 +316,7 @@ export class DriftReadings {
     // start a second reading over this one.
     this.readings.add(id);
     try {
-      await this.check(id, null);
+      await this.check(id, this.deps.state(id));
     } catch (error) {
       // No job, so nothing settles: the flag comes off here, and a reading owed
       // in the gap would fail the same way.
@@ -307,18 +330,20 @@ export class DriftReadings {
   }
 
   /**
-   * The person went on to the contract with the findings open. Recorded on the
-   * verdict at the current state, so the same reading is not put to them again
-   * until the spec or the plan moves; the CLI refuses it where nothing has been
-   * read at this state. Not a job: nothing runs but a write to the record, and
-   * the page navigates on the answer.
+   * The findings dismissed, which no page asks for: recorded on the verdict at
+   * the current state, so the same reading is not put again until the spec or
+   * the plan moves; the CLI refuses it where nothing has been read at this
+   * state, where the ticket has no record of the edits made to its plan since
+   * it was drafted, and once a person has edited the plan by hand since then,
+   * and that refusal is this request's, in the CLI's words
+   * (D-NEW-basic-and-epic-flows). Not a job: nothing runs but a write to the
+   * record.
    */
   async dismiss(id: string): Promise<null> {
     const { repo, key } = await this.target(id);
     requireSuccess(await this.deps.cli.run(["drift", key, "--dismiss", "--json"], repo));
-    // And the problems the session held go with it: the person has gone on past
-    // them, so the pane comes out of the rail and the ticket lands on the plan
-    // again.
+    // And the problems the session held go with it: none is open any more, so
+    // the pane comes out of the rail and the ticket lands on the plan again.
     this.forget(repo.id, key, id);
     return null;
   }

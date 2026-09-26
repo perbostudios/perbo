@@ -2284,7 +2284,8 @@ export function readAttemptsFile(path: string): AttemptsFile {
         parsed.error.issues
           .slice(0, 5)
           .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-          .join("\n  "),
+          .join("\n  ") +
+        (parsed.error.issues.length > 5 ? `\n  and ${parsed.error.issues.length - 5} more` : ""),
     );
   }
   return parsed.data;

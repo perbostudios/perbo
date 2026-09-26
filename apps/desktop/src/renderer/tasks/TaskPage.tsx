@@ -66,7 +66,8 @@ export function TaskPage({
   //
   // For `auto`, and for the contract asked for by name: a plan waiting for
   // approval in the planning curating it has its contract inside that
-  // planning, as its last tab (D-NEW-basic-and-epic-flows).
+  // planning, as one of its tabs (D-NEW-basic-and-epic-flows), where approving
+  // is held while a problem is open.
   const planning = (workspace.drafts ?? []).find(
     (draft) => draft.repoId === repoId && draft.key === taskKey && draft.phase !== "discarded",
   );
@@ -82,7 +83,7 @@ export function TaskPage({
   const plannable = (view === "auto" || view === "contract") && !edit && awaiting;
   // The contract asked for by name, in the planning curating it. Otherwise
   // the problems first, whatever the plan's shape: they are what the planning
-  // is about until each is resolved or the person goes on past them
+  // is about until each is resolved, by an answer or an edit of the plan
   // (D-128). Then where the planning was
   // left, the contract included, where it is the planning curating this plan:
   // coming back to it is coming back to that pane

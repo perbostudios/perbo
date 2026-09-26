@@ -102,6 +102,7 @@ export {
   decodeInterviewTurn,
   encodeInterviewEvent,
   encodeInterviewTurn,
+  INTERVIEW_SAID_MAX_CHARS,
   InterviewEventSchema,
   InterviewQuestionGroupSchema,
   interviewSaidMessage,

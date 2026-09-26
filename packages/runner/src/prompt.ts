@@ -1,4 +1,5 @@
 import {
+  EXECUTOR_ACCOUNT_MAX_CHARS,
   admittedWriteGlobs,
   redactCredentials,
   type AcceptanceCriterion,
@@ -96,7 +97,11 @@ import { allowedPathsSentence, prohibitedPathsSentence } from "./shell/index.js"
  * brief that named only the former name described a refusal the executor
  * could not connect to the call it makes.
  */
-export const EXECUTOR_PROMPT_VERSION = "executor_v13";
+/**
+ * v14 (D-NEW-nothing-shown-is-cut): the account's request states the most the
+ * record holds, so the executor writes it to fit rather than past it.
+ */
+export const EXECUTOR_PROMPT_VERSION = "executor_v14";
 
 /**
  * The brief a resumed attempt gets (SCP-154): `EXECUTOR_PROMPT_VERSION` plus
@@ -105,7 +110,7 @@ export const EXECUTOR_PROMPT_VERSION = "executor_v13";
  * different documents — a record that called them both the same would say the
  * executor was told the same thing when it was not.
  */
-export const RESUMED_EXECUTOR_PROMPT_VERSION = "executor_resumed_v2";
+export const RESUMED_EXECUTOR_PROMPT_VERSION = "executor_resumed_v3";
 
 /**
  * The prior attempt a resumed one is briefed about, every field from the
@@ -252,8 +257,9 @@ Finish your last message with this heading, and put the account under it:
 
 ${EXECUTOR_ACCOUNT_HEADING}
 
-A few lines: the files you touched and why, the tests you wrote, and what you
-actually ran to verify them. Say what you left undone or were unsure of. The
+A few lines, and at most ${EXECUTOR_ACCOUNT_MAX_CHARS.toLocaleString("en-US")} characters, which is all the record
+holds: the files you touched and why, the tests you wrote, and what you actually
+ran to verify them. Say what you left undone or were unsure of. The
 runner seals it with your change set, and a remediation round on this ticket is
 handed it instead of reading the repository again — so an accurate account is
 worth more than a reassuring one. The reviewer never sees it.`;

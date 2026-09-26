@@ -55,7 +55,7 @@ export function suppliedDestination(
       ? `${supplied.wrapper} appends the words it reads from standard input to this command`
       : `${supplied.wrapper} substitutes the words it reads from standard input for ${supplied.placeholder}`;
   return {
-    detail: `${label} cannot be resolved — ${how}, and they are not on the line: ${segment.slice(0, 200)}`,
+    detail: `${label} cannot be resolved — ${how}, and they are not on the line: ${segment}`,
     target: null,
     resolved: null,
   };
@@ -112,7 +112,7 @@ export function suppliedAsOption(
             : `put -- before it, or a prefix such as ./${placeholder}`
       }`;
   return {
-    detail: `${how}, ${read}: ${context.segment.slice(0, 200)}`,
+    detail: `${how}, ${read}: ${context.segment}`,
     target: null,
     resolved: null,
   };

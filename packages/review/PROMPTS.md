@@ -19,7 +19,7 @@ the same version must have been produced by the same reviewer (`prompt.ts:28-34`
 
 A third prompt sits beside these two but outside this package: `packages/runner/src/prompt.ts`
 briefs the *executor* — the coding agent making the change — and is versioned separately
-(`EXECUTOR_PROMPT_VERSION`, currently `executor_v11`, plus `RESUMED_EXECUTOR_PROMPT_VERSION`). It is
+(`EXECUTOR_PROMPT_VERSION`, currently `executor_v14`, plus `RESUMED_EXECUTOR_PROMPT_VERSION`). It is
 not a reviewer prompt and this document does not catalogue it.
 
 ## How a version is chosen at run time

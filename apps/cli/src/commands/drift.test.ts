@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES, hasAcceptanceCriteria } from "@perbo/contracts";
 import { SUBMIT_REVIEW_TOOL, type Model, type ModelRequest, type ModelTurn } from "@perbo/model";
 import { DriftVerdictSchema, driftRecordPath, type DriftFinding } from "@perbo/planning";
@@ -27,6 +27,7 @@ import { editCommandLine } from "./edit/index.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-drift-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+afterEach(() => vi.unstubAllEnvs());
 
 const SPEC = `# Activation email
 
@@ -137,13 +138,18 @@ const finding: DriftFinding = {
   ],
 };
 
-async function admitFromSpec(repo: string, specPath: string, extra: string[] = []): Promise<void> {
+async function admitFromSpec(
+  repo: string,
+  specPath: string,
+  extra: string[] = [],
+  draft: object = drafted,
+): Promise<void> {
   const streams = recordStreams();
   const code = await runCommandLine(admitCommandLine, {
     argv: ["--repo", repo, "--from-spec", specPath, ...extra],
     streams,
     cwd: repo,
-    deps: { model: scripted([submits(drafted)]) },
+    deps: { model: scripted([submits(draft)]) },
   });
   if (code !== EXIT_CODES.approve) throw new Error(`admission failed:\n${streams.err()}`);
 }
@@ -282,6 +288,24 @@ describe("perbo drift", () => {
     expect((await drift(repo, unreachable())).verdict.cached).toBe(true);
   });
 
+  it("redacts the reading before it measures it, so a field redaction lengthens is asked for again and recorded whole (D-NEW-nothing-shown-is-cut)", async () => {
+    const { repo, dir } = await drafted1();
+    await reword(repo, "A signup POST queues exactly two activation emails.");
+    // A credential in this process's own environment, eight characters long,
+    // which redaction writes as the ten of `[redacted]`.
+    vi.stubEnv("PERBO_DRIFT_TEST_TOKEN", "hunter2x");
+    const said = "The spec asks for one email and the plan for two, hunter2x.";
+    const leaky = { ...finding, difference: said + "x".repeat(600 - said.length) };
+    const model = scripted([submits({ findings: [leaky] }), submits({ findings: [finding] })]);
+    const read = await drift(repo, model);
+    expect(read.code).toBe(0);
+    expect(model.requests).toHaveLength(2);
+    const handedBack = JSON.stringify(model.requests[1]!.messages.at(-1)!.content);
+    expect(handedBack).toContain("findings.0.difference runs past the 600 characters it may hold");
+    expect(read.verdict.findings).toEqual([finding]);
+    expect(readFileSync(driftRecordPath(dir, "PRB-1"), "utf8")).not.toContain("hunter2x");
+  });
+
   it("lets a hand edit of the spec go, and reads again", async () => {
     const { repo, specPath, dir } = await drafted1();
     writeFileSync(specPath, SPEC.replace("exactly one activation email", "exactly two activation emails"));
@@ -297,8 +321,10 @@ describe("perbo drift", () => {
   });
 
   it("with --dismiss records going on with the differences open, at this state and no other", async () => {
-    const { repo, dir } = await drafted1();
-    await reword(repo, "A signup POST queues exactly two activation emails.");
+    // The differences come from a hand edit of the spec, which is not an edit
+    // of the plan: dismissing them is allowed.
+    const { repo, specPath, dir } = await drafted1();
+    writeFileSync(specPath, SPEC.replace("exactly one activation email", "exactly two activation emails"));
     await drift(repo, scripted([submits({ findings: [finding] })]));
 
     const dismissed = await drift(repo, unreachable(), ["--dismiss"]);
@@ -311,13 +337,97 @@ describe("perbo drift", () => {
     expect((await drift(repo, unreachable())).verdict.dismissed).toBe(true);
 
     // The state moved: what was dismissed was a reading of other words.
-    await reword(repo, "A signup POST queues exactly three activation emails.");
+    writeFileSync(specPath, SPEC.replace("exactly one activation email", "exactly three activation emails"));
     await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(UsageError);
     await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(/nothing has been read at this state/);
     expect(readDriftRecord(dir, "PRB-1")?.dismissed).toBe(true);
     const read = await drift(repo, scripted([submits({ findings: [] })]));
     expect(read.verdict.cached).toBe(false);
     expect(read.verdict.dismissed).toBe(false);
+  });
+
+  /** The refusal of a dismissal after a person's edit of the plan, as it is said. */
+  const HAND_EDITED =
+    "PRB-1's plan has been edited by hand since it was drafted, so its problems cannot be " +
+    "dismissed: answer them, or edit the plan until a reading finds none";
+
+  it("dismisses a plan nobody has edited since it was drafted", async () => {
+    const { repo, dir } = await drafted1();
+    const dismissed = await drift(repo, unreachable(), ["--dismiss"]);
+    expect(dismissed.code).toBe(0);
+    expect(dismissed.verdict.dismissed).toBe(true);
+    expect(readDriftRecord(dir, "PRB-1")?.dismissed).toBe(true);
+  });
+
+  it("dismisses after edits the interview made alone, which moved the spec with the plan", async () => {
+    const { repo, dir } = await drafted1();
+    const code = await runCommandLine(editCommandLine, {
+      argv: [
+        "PRB-1", "--repo", repo, "--author", "interview", "--graph-edit",
+        JSON.stringify({
+          op: "set_criterion",
+          id: "ac_1",
+          text: "A signup POST queues exactly two activation emails.",
+          expected_verification: { kind: "test", assertion: "one message is on the queue after a single signup" },
+        }),
+      ],
+      streams: recordStreams(),
+      cwd: repo,
+    });
+    expect(code).toBe(EXIT_CODES.approve);
+    await drift(repo, scripted([submits({ findings: [finding] })]));
+    const dismissed = await drift(repo, unreachable(), ["--dismiss"]);
+    expect(dismissed.verdict.dismissed).toBe(true);
+    expect(dismissed.verdict.findings).toEqual([finding]);
+    expect(readDriftRecord(dir, "PRB-1")?.dismissed).toBe(true);
+  });
+
+  it("refuses the dismissal after a person's edit in the Graph pane, saying why", async () => {
+    const { repo, dir } = await drafted1();
+    await reword(repo, "A signup POST queues exactly two activation emails.");
+    await drift(repo, scripted([submits({ findings: [finding] })]));
+    await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(UsageError);
+    await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(HAND_EDITED);
+    expect(readDriftRecord(dir, "PRB-1")?.dismissed).toBe(false);
+  });
+
+  it("refuses the dismissal after perbo edit rewrites the criteria, as a basic ticket's contract page does", async () => {
+    // A plan the drafter left flat: a basic ticket, whose criteria its
+    // contract page writes back with --criterion.
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, [], { ...drafted, nodes: [], edges: [] });
+    const dir = storeDir(repo, null);
+    const code = await runCommandLine(editCommandLine, {
+      argv: [
+        "PRB-1", "--repo", repo,
+        "--criterion", "A signup POST queues exactly two activation emails. :: two messages are on the queue",
+        "--criterion", "A duplicate signup inside five minutes queues nothing. :: a second signup queues nothing",
+        "--criterion", "A failed send is retried three times. :: three attempts are recorded",
+      ],
+      streams: recordStreams(),
+      cwd: repo,
+    });
+    expect(code).toBe(EXIT_CODES.approve);
+    await drift(repo, scripted([submits({ findings: [finding] })]));
+    await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(HAND_EDITED);
+    expect(readDriftRecord(dir, "PRB-1")?.dismissed).toBe(false);
+  });
+
+  it("counts only the edits since the plan was last drafted: a re-draft replaces a person's earlier edit", async () => {
+    const { repo, specPath } = await drafted1();
+    await reword(repo, "A signup POST queues exactly two activation emails.");
+    await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(HAND_EDITED);
+    await admitFromSpec(repo, specPath, ["--start-over", "PRB-1"]);
+    expect((await drift(repo, unreachable(), ["--dismiss"])).verdict.dismissed).toBe(true);
+  });
+
+  it("refuses the dismissal where nothing records who edited the plan", async () => {
+    const { repo, dir } = await drafted1();
+    rmSync(join(dir, "tickets", "PRB-1.draft.json"));
+    await expect(drift(repo, unreachable(), ["--dismiss"])).rejects.toThrow(
+      "PRB-1 has no record of the edits made to its plan since it was drafted, so its problems " +
+        "cannot be dismissed: answer them, or edit the plan until a reading finds none",
+    );
   });
 
   it("leaves a record for the same state written while it read, and prints that one", async () => {

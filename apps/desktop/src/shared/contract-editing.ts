@@ -51,6 +51,15 @@ export interface EditingIO {
   /** The repository's standing prohibited list (D-105), which the always box writes. */
   standing(repoId: string): StandingProhibitedEntry[];
   setStanding(repoId: string, entries: StandingProhibitedEntry[]): void;
+  /**
+   * The state a plan just drafted from its spec was read at by its drafting,
+   * as {@link readingStateOf} states it: admission writes an agreeing verdict
+   * beside the ticket (D-128), so where that verdict holds for the spec as it
+   * now is, the plan the record holds has been read. Null where it does not,
+   * and the plan is read when the person confirms it. Absent where the host
+   * keeps no verdict.
+   */
+  drafted?(record: EditingSession): string | null;
 }
 
 export type DraftMark = "allowed" | "prohibited" | null;
@@ -129,6 +138,31 @@ export function sameProblems(
 export const REREAD_COULD_NOT_START = "The plan could not be read against the spec again";
 
 /**
+ * Why approving a ticket's contract is refused, in one sentence, while a
+ * planning over it records problems open from a reading of its plan against
+ * its spec; null where none does. Both hosts refuse a `run` that approves by
+ * it, for an epic as for a basic ticket, so the hold the pages keep is not
+ * the renderer's alone: the only ways past a problem are answering it on the
+ * Problems page or changing the plan (D-NEW-basic-and-epic-flows).
+ */
+export function problemsHoldApproval(
+  records: readonly EditingSession[],
+  repoId: string,
+  key: string,
+): string | null {
+  const held = records.some(
+    (record) =>
+      record.phase !== "discarded" &&
+      record.repoId === repoId &&
+      record.key === key &&
+      (record.drift?.open.length ?? 0) > 0,
+  );
+  return held
+    ? `${key} is not approved while its plan and its spec no longer promise the same thing: resolve each problem on the Problems tab, or change the plan, and confirm again.`
+    : null;
+}
+
+/**
  * Where a planning's interview stood as a reading of its plan started: whether
  * a turn was in flight, and the last turn the person sent, by its entry's
  * number, or 0 before any.
@@ -136,10 +170,30 @@ export const REREAD_COULD_NOT_START = "The plan could not be read against the sp
 export interface TurnMark {
   working: boolean;
   turn: number;
+  /** The planning's operation as the reading started: a draft after it replaces the plan read. */
+  operation: string | null;
 }
 const lastTurnSent = (session: EditingSession): number =>
   session.conversation.findLast((entry) => entry.line.kind === "turn")?.n ?? 0;
-export const turnMark = (session: EditingSession, working: boolean): TurnMark => ({ working, turn: lastTurnSent(session) });
+export const turnMark = (session: EditingSession, working: boolean): TurnMark => ({
+  working,
+  turn: lastTurnSent(session),
+  operation: session.operation?.id ?? null,
+});
+/**
+ * Whether the plan was drafted again — Generate plan or Start over pressed —
+ * since a reading that started at `mark`: what it read is a plan that has
+ * gone, and a plan the model drafts from its spec is not read as it lands,
+ * so both hosts record nothing of it (D-NEW-basic-and-epic-flows).
+ */
+export const redraftedSince = (mark: TurnMark, session: EditingSession): boolean => {
+  const operation = session.operation;
+  return (
+    operation != null &&
+    operation.id !== mark.operation &&
+    (operation.intent === "generate" || operation.intent === "startOver")
+  );
+};
 /**
  * Whether an interview turn overlapped a reading that started at `mark`: in
  * flight as it started or as it lands, or sent between the two
@@ -288,6 +342,35 @@ export function fingerprint(text: string): string {
     b = Math.imul(b ^ code, 0x5bd1e995);
   }
   return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * The state a reading of the plan against its spec is of: the spec's
+ * sections, as the host fingerprints them onto the drafts list, and the
+ * plan's promise — its outcome and each criterion's words, sorted, which is
+ * what the reading reads and all it reads of the plan (D-128). While it is the
+ * state recorded as the last reading's (`read`), nothing that reading judged
+ * has moved, and a basic ticket's Confirm contract needs no reading of its own
+ * (D-NEW-basic-and-epic-flows).
+ */
+export function readingState(
+  spec: string | null,
+  promise: { outcome: string; criteria: readonly { text: string }[] },
+): string {
+  return fingerprint(
+    JSON.stringify([spec, promise.outcome.trim(), promise.criteria.map((criterion) => criterion.text.trim()).sort()]),
+  );
+}
+
+/**
+ * {@link readingState} of a planning as its record holds it now: the spec's
+ * fingerprint as the drafts list carries it, and the plan the session holds.
+ * The state a host records a reading it asked for itself at — a re-read owed
+ * once a turn ends, and the reading of a plan drafted again from a stopped
+ * run — so the confirm, which compares the same two, reads nothing again.
+ */
+export function readingStateOf(record: EditingSession, spec: SpecReader): string {
+  return readingState(openDrafts([record], spec)[0]?.spec ?? null, record.form.draft);
 }
 
 /**
@@ -530,8 +613,8 @@ export class ContractEditing {
   /**
    * Which spec this planning writes (D-103), so reopening the session opens the
    * same one. Set by the host the first time a spec is saved; the text itself
-   * lives in the repository, not here. `cut` is the title the host cut from
-   * the person's first turn where that is what named the folder (D-118).
+   * lives in the repository, not here. `cut` is the title line the host wrote,
+   * Untitled, where the person's first turn is what named the folder (D-118).
    */
   recordSpec(id: string, slug: string, cut: string | null = null): EditingSession {
     return this.update(id, (session) => {
@@ -568,9 +651,10 @@ export class ContractEditing {
 
   /**
    * A turn of the chat left this planning's spec with a title other than the
-   * one it began with: the Architect titled it. A title that is still the cut
-   * names nobody's work (D-118), and one that is already the recorded name was
-   * not changed by the turn, whoever saved it while the turn ran.
+   * one it began with: the Architect titled it. A title that is still the one
+   * the host wrote as it named the folder names nobody's work (D-118), and one
+   * that is already the recorded name was not changed by the turn, whoever
+   * saved it while the turn ran.
    */
   architectTitled(id: string, title: string): void {
     const written = oneLineTitle(title);
@@ -835,8 +919,8 @@ export class ContractEditing {
   }
 
   /**
-   * Forget the problems: the person went on to the contract with them open,
-   * or approved the plan, and either way there is nothing left to put to them.
+   * Forget the problems: they were dismissed at the command line, or the plan
+   * was approved, and either way there is nothing left to put to anyone.
    */
   clearDrift(id: string): void {
     this.update(id, (session) => {
@@ -852,7 +936,7 @@ export class ContractEditing {
    * same card and either answers it with a turn. None found, after some were,
    * is the reading that resolved them: recorded so, and said as a note —
    * once, since a reading that finds none after that is nothing new. A
-   * reading the person went on past clears them, and problems found again
+   * dismissed reading clears them, and problems found again
    * after a resolved round re-open them: a hand rewording after the round is
    * what that is.
    *
@@ -1217,12 +1301,16 @@ export class ContractEditing {
               next.nodes = planNodes(detail.contract).length;
               next.form = { ...next.form, draft: contractDraft(detail), editing: null, newPath: null };
               // A plan drafted afresh has had no impact check: the last one
-              // was of the plan it replaces.
-              // Nor a reading of its own: the last one was of the plan it
-              // replaces.
+              // was of the plan it replaces. It counts as satisfying the spec
+              // the model drafted it from: its reading is the one its drafting
+              // wrote, where that still holds, so its first confirm unchanged
+              // reads nothing again, and the problems a reading found in the
+              // plan it replaces go with that plan, so it never lands on
+              // Problems (D-NEW-basic-and-epic-flows).
               if (operation.intent !== "compile") {
                 next.impact = null;
-                next.read = null;
+                next.read = this.io.drafted?.(next) ?? null;
+                next.drift = null;
               }
               // Every operation lands on a contract: the session now holds a Ticket.
               next.phase = "ready";

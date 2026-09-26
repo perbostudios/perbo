@@ -2,7 +2,7 @@ import { Button, IconButton, InkIcon, Notice, PageFooter } from "../ui/index.js"
 import { WaitScreen, WizardHeader } from "./wizard.js";
 import { useEffect, useRef } from "react";
 import { CriteriaEditor } from "./CriteriaEditor.js";
-import { DraftSchema } from "../../shared/protocol.js";
+import { DraftSchema, TYPED_PATH_MAX_CHARS } from "../../shared/protocol.js";
 import type { Detail, Draft, EditingTarget } from "../../shared/protocol.js";
 import { useContractEditing } from "../contract-editor.js";
 import type { PageProps } from "../shell/route.js";
@@ -148,6 +148,7 @@ export function Composer({
                 >
                   <input
                     aria-label="New allowed path"
+                    maxLength={TYPED_PATH_MAX_CHARS}
                     placeholder="packages/example/**"
                     autoFocus
                     value={newPath}

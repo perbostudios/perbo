@@ -13,6 +13,7 @@ import {
   SpecConflict,
   specSlug,
   specTitleFromMessage,
+  UNTITLED_SPEC,
   type SpecText,
 } from "./spec-text.js";
 import { readSpecText, retitleSpecFile, writeSpecFile, type WrittenSpec } from "./spec-write.js";
@@ -104,6 +105,30 @@ describe("writing a spec", () => {
     expect(parsed.no_gos).toEqual(["Nothing is sent to an address that has unsubscribed."]);
     expect(parsed.rabbit_holes).toEqual(["Templating: the existing template stays."]);
     expect(parsed.notes).toBe("The queue package already has a sender.");
+  });
+
+  it("names a new spec's folder from words that are not its title, and writes only the title on its title line (D-118)", () => {
+    const root = repository();
+    const written = writeSpecFile({
+      repositoryRoot: root,
+      slug: null,
+      folderName: "Dark mode toggle",
+      text: { ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC },
+      base: EMPTY_SPEC_TEXT,
+    });
+    expect(written.slug).toBe("dark-mode-toggle");
+    expect(readSpecText(written.path).text.title).toBe("Untitled");
+    expect(readFileSync(written.path, "utf8")).not.toContain("Dark mode toggle");
+    // A second spec from the same words is refused in their words, not the title's.
+    expect(() =>
+      writeSpecFile({
+        repositoryRoot: root,
+        slug: null,
+        folderName: "Dark mode toggle",
+        text: { ...EMPTY_SPEC_TEXT, title: UNTITLED_SPEC },
+        base: EMPTY_SPEC_TEXT,
+      }),
+    ).toThrow("'Dark mode toggle' takes the same folder");
   });
 
   it("writes a folder named by the configured spec folder instead of specs/", () => {

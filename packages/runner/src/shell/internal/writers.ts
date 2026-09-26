@@ -256,7 +256,7 @@ function destinationFindings(
   const unread = (label: string, how: string): WriteFinding => ({
     detail:
       `${label} cannot be resolved — ${how}, and they are not on the line: ` +
-      `${context.segment.slice(0, 200)}`,
+      `${context.segment}`,
     target: null,
     resolved: null,
   });

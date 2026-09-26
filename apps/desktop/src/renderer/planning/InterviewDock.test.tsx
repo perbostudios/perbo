@@ -2,8 +2,18 @@
 import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
-import { QuestionCard, ToolCard, askedSubjects, foldAllowList, handedOver, sayWorking, waitsOnWords } from "./InterviewDock.js";
+import { INTERVIEW_WROTE_THE_SPEC, RequestSchema, TYPED_TEXT_MAX_CHARS } from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
+import {
+  NoteLine,
+  QuestionCard,
+  ToolCard,
+  askedSubjects,
+  foldAllowList,
+  handedOver,
+  sayWorking,
+  waitsOnWords,
+} from "./InterviewDock.js";
 
 afterEach(cleanup);
 
@@ -191,6 +201,41 @@ describe("the two answers every part carries", () => {
     expect(radio(/Something else/).checked).toBe(false);
   });
 
+  it("holds the person's own words to what a turn carries, where they are typed, and sends them whole without a refusal (D-NEW-nothing-shown-is-cut)", () => {
+    const sent: string[] = [];
+    render(
+      <QuestionCard group={group} number={1} of={1} standing="interview" busy={false} onSend={(turn) => sent.push(turn)} />,
+    );
+    fireEvent.click(radio(/Something else/));
+    const box = answer(/Something else/).querySelector("textarea")!;
+    typeInto(box, "o".repeat(TYPED_TEXT_MAX_CHARS + 50));
+    expect(box.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(sent).toEqual(["o".repeat(TYPED_TEXT_MAX_CHARS)]);
+    expect(RequestSchema.safeParse({ kind: "interviewTurn", id: crypto.randomUUID(), text: sent[0] }).success).toBe(true);
+  });
+
+  it("holds a lettered part's own words to the room the group's one turn leaves, and sends the group without a refusal", () => {
+    const two = {
+      ...group,
+      parts: [group.parts[0]!, { ...group.parts[0]!, question: "And where does the retry go?" }],
+    };
+    const sent: string[] = [];
+    render(<QuestionCard group={two} number={1} of={1} standing="interview" busy={false} onSend={(turn) => sent.push(turn)} />);
+    const parts = screen.getAllByRole("radio", { name: /Split at the read/ });
+    fireEvent.click(parts[0]!);
+    fireEvent.click(screen.getAllByRole("radio", { name: /Something else/ })[1]!);
+    const box = screen.getByRole("textbox", { name: "Your own words for 1b" }) as HTMLTextAreaElement;
+    typeInto(box, "o".repeat(TYPED_TEXT_MAX_CHARS + 50));
+    // The first part's answer and the two letters take their share of the turn.
+    const first = "a) Split at the read\nb) ";
+    expect(box.value).toHaveLength(TYPED_TEXT_MAX_CHARS - first.length);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(sent).toEqual([first + box.value]);
+    expect(sent[0]).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    expect(RequestSchema.safeParse({ kind: "interviewTurn", id: crypto.randomUUID(), text: sent[0] }).success).toBe(true);
+  });
+
   it("takes a pick back when it is clicked again, the pair's as the offered ones'", () => {
     card();
     for (const named of [/Architect's call/, /Split at the write/]) {
@@ -314,5 +359,24 @@ describe("what the asked line says the questions are about", () => {
     expect(askedSubjects(["x".repeat(121)])).toBeNull();
     expect(askedSubjects(["x".repeat(121), "Rollout"])).toBeNull();
     expect(askedSubjects([])).toBeNull();
+  });
+});
+
+describe("a note about a tool's output (D-NEW-nothing-shown-is-cut)", () => {
+  it("says what happened in its one sentence, with the whole output behind an i", () => {
+    const stderr = "the provider said a great deal about why it would not serve this session. ".repeat(1_000).trim();
+    render(<NoteLine line={{ kind: "note", text: "The chat stopped with code 2.", output: stderr }} />);
+    const note = document.querySelector<HTMLElement>(".msg--note")!;
+    expect(note.firstChild?.textContent).toBe("The chat stopped with code 2.");
+    const hint = within(note).getByRole("button", { name: "What it said" });
+    expect(hint.textContent).toBe("i");
+    expect(within(note).getByRole("tooltip", { hidden: true }).textContent).toBe(stderr);
+  });
+
+  it("puts no i under a note with no output", () => {
+    render(<NoteLine line={{ kind: "note", text: "Named specs/dark-mode-toggle from your first message." }} />);
+    const note = document.querySelector<HTMLElement>(".msg--note")!;
+    expect(note.textContent).toBe("Named specs/dark-mode-toggle from your first message.");
+    expect(within(note).queryByRole("button")).toBeNull();
   });
 });

@@ -53,6 +53,10 @@ class FakeInterview {
   stderr(text: string): void {
     this.options.onStderr?.(text);
   }
+  /** The child could not be run at all. */
+  fail(error: Error): void {
+    this.options.onError?.(error);
+  }
   /** The child itself gone, with its output still held by something it started. */
   exit(): void {
     this.options.onExit?.();
@@ -217,12 +221,16 @@ describe("a person's turn", () => {
     const session = await w.open();
     await w.interviews.turn(session.id, "Retry a failed run without losing its records");
     expect(w.editing.read(session.id).specSlug).toBe("retry-a-failed-run-without-losing-its-records");
-    expect(
-      readFileSync(
-        join(repo.path, "specs", "retry-a-failed-run-without-losing-its-records", "spec.md"),
-        "utf8",
-      ),
-    ).toContain("Retry a failed run");
+    // The cut names the folder only: the title line says Untitled until the
+    // Architect or the person names the work, and that is what is recorded as
+    // the host's (D-118).
+    const spec = readFileSync(
+      join(repo.path, "specs", "retry-a-failed-run-without-losing-its-records", "spec.md"),
+      "utf8",
+    );
+    expect(spec.split("\n")[0]).toBe("# Untitled");
+    expect(spec).not.toContain("Retry a failed run");
+    expect(w.editing.read(session.id).specCut).toBe("Untitled");
     expect(w.conversation(session.id).some((entry) => entry.line.kind === "turn")).toBe(true);
   });
 
@@ -336,8 +344,8 @@ describe("stopping", () => {
     const last = w.conversation(session.id).at(-1)?.line;
     expect(last).toMatchObject({ kind: "note" });
     if (last?.kind !== "note") throw new Error("expected a note");
-    expect(last.text).toContain("The chat stopped with code 2.");
-    expect(last.text).toContain("no provider is signed in");
+    expect(last.text).toBe("The chat stopped with code 2.");
+    expect(last.output).toBe("no provider is signed in");
   });
 
   it("says nothing extra where it was stopped by the person", async () => {
@@ -424,5 +432,145 @@ describe("stopping", () => {
     w.interviews.shutdown();
     expect(w.spawned.every((entry) => entry.child.stopped)).toBe(true);
     expect(w.interviews.running()).toEqual([]);
+  });
+});
+
+/**
+ * Nothing the chat shows is cut (D-NEW-nothing-shown-is-cut): the session's own
+ * words that run past what the record holds are asked for again, condensed,
+ * and the host's own notes carry what they quote whole.
+ */
+describe("words that do not fit the chat", () => {
+  const saying = (text: string) => ({
+    type: "message",
+    message: { type: "assistant", message: { content: [{ type: "text", text }] } },
+  });
+  async function running() {
+    const w = host(repository());
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    await w.interviews.start(session.id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    return { w, id: session.id, child };
+  }
+  const asks = (child: FakeInterview): string[] =>
+    child.written.map((line) => JSON.parse(line) as { text: string }).map((turn) => turn.text).filter((text) => text.startsWith("Perbo:"));
+
+  it("asks the session again for a message longer than the chat shows, and says the condensed one", async () => {
+    const { w, id, child } = await running();
+    const long = "A sentence the session wrote at length. ".repeat(400).trim();
+    child.say(saying(long));
+    expect(w.conversation(id).some((entry) => entry.line.kind === "said")).toBe(false);
+    expect(asks(child)).toEqual([
+      `Perbo: your last message runs to ${long.length.toLocaleString("en-US")} characters, more than the 12,000 ` +
+        "the chat shows. Write it again, condensed to fit, and leave out nothing it says.",
+    ]);
+    // The ask is owed an answer like any turn, so the dock says the session is working.
+    expect(w.interviews.working()).toEqual([id]);
+    child.say(saying("The condensed answer."));
+    child.say({ type: "idle", turns: 1 });
+    expect(w.conversation(id).at(-1)?.line).toEqual({ kind: "said", text: "The condensed answer." });
+    expect(w.interviews.working()).toEqual([]);
+  });
+
+  it("stops asking after twice running, and says what it did not show", async () => {
+    const { w, id, child } = await running();
+    const long = "x".repeat(12_001);
+    child.say(saying(long));
+    child.say(saying(long));
+    child.say(saying(long));
+    expect(asks(child)).toHaveLength(2);
+    const last = w.conversation(id).at(-1)?.line;
+    if (last?.kind !== "note") throw new Error("expected a note");
+    expect(last.text).toBe(
+      "The Architect wrote more than the chat shows, and it is not shown: your last message runs to 12,001 " +
+        "characters, more than the 12,000 the chat shows, and it was asked 2 times to condense it.",
+    );
+    expect(w.conversation(id).some((entry) => entry.line.kind === "said")).toBe(false);
+  });
+
+  it("says so where the session is not listening to be asked", async () => {
+    const { w, id, child } = await running();
+    child.accepts = false;
+    child.say(saying("y".repeat(12_500)));
+    const last = w.conversation(id).at(-1)?.line;
+    if (last?.kind !== "note") throw new Error("expected a note");
+    expect(last.text).toContain("your last message runs to 12,500 characters");
+    expect(asks(child)).toEqual([]);
+  });
+
+  it("asks again for a question redaction lengthened past what the chat shows", async () => {
+    const { w, id, child } = await running();
+    const opening = "Keep MY_API_KEY=abcdefghijklmnopqrst as it is? ";
+    const question = opening + "y".repeat(600 - opening.length);
+    child.say({
+      type: "asked",
+      groups: [{ title: null, parts: [{ question, options: [{ label: "Yes" }, { label: "No" }] }] }],
+    });
+    expect(w.conversation(id).some((entry) => entry.line.kind === "asked")).toBe(false);
+    expect(asks(child)).toEqual([
+      "Perbo: question 1 of group 1 runs to 605 characters, more than the 600 the chat shows. Write it again, " +
+        "condensed to fit, and leave out nothing it says.",
+    ]);
+  });
+
+  it("says in one sentence why a chat could not run, and why one stopped, with what its process said whole behind the i", async () => {
+    const { w, id, child } = await running();
+    const stderr = "the provider said a great deal about why it would not serve this session. ".repeat(200);
+    child.stderr(stderr);
+    child.close(2);
+    const stopped = w.conversation(id).at(-1)?.line;
+    if (stopped?.kind !== "note") throw new Error("expected a note");
+    expect(stopped.text).toBe("The chat stopped with code 2.");
+    expect(stopped.output).toBe(stderr.trim());
+
+    const again = await running();
+    const why = "spawn failed: ".repeat(1_200).trim();
+    again.child.fail(new Error(why));
+    const failed = again.w.conversation(again.id).at(-1)?.line;
+    if (failed?.kind !== "note") throw new Error("expected a note");
+    expect(failed.text).toBe("The chat's process failed.");
+    expect(failed.output).toBe(why);
+  });
+
+  it("redacts a credential in what a stopped chat's process said", async () => {
+    const { w, id, child } = await running();
+    child.stderr("the key sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz was refused\n");
+    child.close(2);
+    const stopped = w.conversation(id).at(-1)?.line;
+    if (stopped?.kind !== "note") throw new Error("expected a note");
+    expect(stopped.output).toContain("was refused");
+    expect(stopped.output).not.toContain("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz");
+  });
+
+  it("says why a line could not be recorded, whole", async () => {
+    const { w, id, child } = await running();
+    const why = "the record refused the line for a reason it gives at length; ".repeat(300).trim();
+    const converse = w.editing.converse.bind(w.editing);
+    let refused = false;
+    w.editing.converse = (...args: Parameters<typeof converse>) => {
+      if (!refused) {
+        refused = true;
+        throw new Error(why);
+      }
+      return converse(...args);
+    };
+    child.say({ type: "tool", tool: "read_plan", ok: true, detail: "read" });
+    const last = w.conversation(id).at(-1)?.line;
+    if (last?.kind !== "note") throw new Error("expected a note");
+    expect(last.text).toBe("A line of the chat could not be recorded.");
+    expect(last.output).toBe(why);
+  });
+
+  it("records a refusal and a tool's report whole", async () => {
+    const { w, id, child } = await running();
+    const target = `/etc/${"a-directory-with-a-long-name/".repeat(60)}passwd`;
+    const reason = "the guard refused it for a reason it gives at length; ".repeat(60).trim();
+    child.say({ type: "refused", tool: "Bash", rule: "write_outside_worktree", target, reason });
+    expect(w.conversation(id).at(-1)?.line).toEqual({ kind: "refused", tool: "Bash", rule: "write_outside_worktree", target, reason });
+    const detail = "read_plan reported every node of the plan. ".repeat(400).trim();
+    child.say({ type: "tool", tool: "read_plan", ok: true, detail });
+    expect(w.conversation(id).at(-1)?.line).toMatchObject({ kind: "tool", detail });
   });
 });

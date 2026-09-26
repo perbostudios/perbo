@@ -2,14 +2,15 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
-import { WizardHeader } from "./wizard.js";
+import { WaitScreen, WizardHeader } from "./wizard.js";
 import { Rename } from "./Rename.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useDiscardTicket } from "../shell/create.js";
 import { displayKey } from "./ticket-workspace.js";
 import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/browser";
-import { contractState, curates, leftAt, planPaneFor, problemsOpen, readingState } from "../planning/panes.js";
+import { confirmRoute, contractState, curates, leftAt, planPaneFor, problemsOpen } from "../planning/panes.js";
+import { readingState } from "../../shared/contract-editing.js";
 import { useSettled } from "../planning/settled.js";
 import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { CriteriaEditor } from "./CriteriaEditor.js";
@@ -22,9 +23,9 @@ import type { TaskContext } from "./task-context.js";
 const ContractGraph = lazy(() =>
   import("../planning/GraphPane.js").then((module) => ({ default: module.ContractGraph })),
 );
-/** Why a basic ticket's Confirm contract is refused while the reading has problems open. */
+/** Why a confirm is refused while a reading of the plan against its spec has problems open, for either shape. */
 export const PROBLEMS_HOLD =
-  "The plan and the spec no longer promise the same thing. Resolve each problem on the Problems tab, or change the criteria here, then confirm again.";
+  "The plan and the spec no longer promise the same thing. Resolve each problem on the Problems tab, or change the plan, then confirm again.";
 /** What a confirm the reading could not be made for says after why, where no problem is open. */
 const CONFIRM_WITHOUT = "Confirm again to go ahead without the reading.";
 /** Why a basic ticket's Confirm contract waits while the drafts list does not yet carry its planning. */
@@ -51,10 +52,11 @@ type Editor = ReturnType<typeof useContractEditing>;
 
 /**
  * The contract, and the one approval there is. Inside planning (`planning`)
- * it is the planning's last tab (D-NEW-basic-and-epic-flows):
- * the tabs are the way back, and a basic ticket's criteria are edited here,
- * each change written into the contract as it is made, and the plan read
- * against the spec as the person confirms (D-128).
+ * it is one of the planning's tabs, above Problems
+ * (D-NEW-basic-and-epic-flows): the tabs are the way back, and a basic
+ * ticket's criteria are edited here, each change written into the contract as
+ * it is made, and the plan read against the spec as the person confirms
+ * (D-128). An open problem holds the confirm for either shape.
  */
 export function ContractScreen(context: TaskContext & { planning?: { editor: Editor } }) {
   const { detail, repoId, navigate, show, workspace, planning } = context;
@@ -238,9 +240,38 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     listed === undefined &&
     session.specSlug !== null &&
     ticket.admission.spec !== null;
+  // Whether a planning over this ticket records problems open. Any open
+  // problem holds approving, for an epic as for a basic ticket, whichever
+  // route reached this page: the only ways past are answering on the Problems
+  // page or changing the plan (D-NEW-basic-and-epic-flows). Both hosts refuse
+  // the approval too.
+  const problemsHeld =
+    ticket.approved_at === null &&
+    (workspace.drafts ?? []).some(
+      (draft) => draft.repoId === repoId && draft.key === ticket.key && problemsOpen(workspace.drafts, draft.id),
+    );
+  // An epic's plan is read at Confirm the plan, by way of the Problems pane.
+  // One whose spec or criteria moved since the last reading goes back that
+  // way from here, so the reading runs as it does there, and the pane lands
+  // on this tab again where it finds nothing open.
+  const epicUnread =
+    shows === "graph" &&
+    ticket.approved_at === null &&
+    planning !== undefined &&
+    session !== null &&
+    listed !== undefined &&
+    session.specSlug !== null &&
+    ticket.admission.spec !== null &&
+    listed.read !== readingState(listed.spec, session.form.draft);
   const confirm = async (): Promise<void> => {
     if (unlisted) return setHolding(NOT_LISTED);
-    if (!reads || readAt === null || session === null || listed === undefined) return start();
+    if (epicUnread && session !== null)
+      return navigate(confirmRoute({ repoId, key: ticket.key, sessionId: session.id, approved: false, basic: false }));
+    if (!reads || readAt === null || session === null || listed === undefined) {
+      if (problemsHeld) setHolding(PROBLEMS_HOLD);
+      else start();
+      return;
+    }
     setHolding(null);
     // Problems still open hold the confirm whatever else is true: a reading
     // that could not be made lets it go ahead only where none is open.
@@ -288,6 +319,18 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   const approving = busy || action.isPending || pending !== null || writing !== null || confirming;
   useShortcut("approve", approving ? null : () => void confirm());
   useShortcut("rename", () => setRenaming(true));
+  // While the confirm's reading runs, that is the page: the contract is not
+  // pressed again under it, and approving follows only where it finds nothing
+  // open (D-NEW-basic-and-epic-flows).
+  if (confirming)
+    return (
+      <WaitScreen
+        bare
+        title="Checking for drift"
+        description="Reading the plan against the spec, where either has moved since it was last read, for anything they no longer promise alike. Nothing is changed by the reading."
+        status="Reading the plan against the spec…"
+      />
+    );
   return (
     <section className="screen" data-screen="s11">
       <WizardHeader>

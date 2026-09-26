@@ -22,7 +22,7 @@ import { discoverModels } from "./model-catalog.js";
 import { ModelCatalogs } from "./providers/catalogs.js";
 import { ChangeMarks } from "./plan/marks.js";
 import { DriftReadings } from "./plan/drift.js";
-import { repositorySpecs, specTexts } from "./plan/spec.js";
+import { draftedReading, repositorySpecs, specTexts } from "./plan/spec.js";
 import { draftedFrom } from "./tickets/work.js";
 import { probeProviders } from "./providers/status.js";
 import { readStanding, specFolder, writeStanding } from "./repository/config.js";
@@ -31,6 +31,7 @@ import type { SpecDeps } from "./plan/spec.js";
 import {
   ContractEditing,
   openDrafts,
+  readingStateOf,
   type EditingOwner,
 } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "./workspace-reads.js";
@@ -219,6 +220,13 @@ export class DesktopService {
       jobs: this.jobs,
       cli: this.cli,
       models: (repoId, key) => this.state.taskModels[repoId + ":" + key] ?? this.state.settings,
+      state: (id) => {
+        try {
+          return readingStateOf(this.editing.read(id), specTexts((repoId) => this.repository(repoId)));
+        } catch {
+          return null;
+        }
+      },
       interview: {
         working: (id) => this.interviews.isWorking(id),
         say: (id, line) => this.interviews.say(id, line),
@@ -261,6 +269,7 @@ export class DesktopService {
       },
       id: randomUUID,
       specFolder: (repoId) => specFolder(this.repository(repoId)),
+      drafted: (record) => draftedReading((id) => this.repository(id), record),
       standing: (repoId) => readStanding(this.repository(repoId)),
       setStanding: (repoId, entries) => {
         const repo = this.repository(repoId);

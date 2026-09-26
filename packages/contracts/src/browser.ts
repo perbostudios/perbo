@@ -27,6 +27,7 @@ export type { GraphEdit } from "./graph-edit.js";
 export { CriterionIdSchema } from "./ids.js";
 export {
   answersGroup,
+  INTERVIEW_SAID_MAX_CHARS,
   InterviewOptionSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
   MAX_QUESTION_GROUPS,
