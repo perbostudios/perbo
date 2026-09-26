@@ -17,7 +17,7 @@ import { editingForm } from "../../shared/contract-editing.js";
 import { bridge } from "../workspace/index.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { Composer } from "./Composer.js";
-import { ContractScreen } from "./ContractScreen.js";
+import { ContractScreen, turnHeld } from "./ContractScreen.js";
 import type { TaskContext } from "./task-context.js";
 
 let client: QueryClient;
@@ -149,6 +149,35 @@ describe("what the scope does not cover, where it is approved", () => {
     } finally {
       asked.mockRestore();
     }
+  });
+});
+
+describe("approving while another ticket's run is under way", () => {
+  // Runs take one at a time (D-101), so approving waits for the one under way
+  // elsewhere; a button held with nothing said reads as a contract that cannot
+  // be confirmed, so the page names the run it waits for.
+  it("holds the button and names the run it waits for", async () => {
+    const context = await contextFor([criterion()]);
+    const other = context.workspace.tasks.find((task) => task.ticket.key !== context.detail.ticket.key)!;
+    context.workspace.jobs = [
+      {
+        id: "run-elsewhere", repoId: other.repoId, key: other.ticket.key, kind: "run", label: "Run engineering loop",
+        state: "running", startedAt: new Date().toISOString(), endedAt: null, log: "", error: null, resultKey: null, result: null,
+      },
+    ];
+    mount(<ContractScreen {...context} />);
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(turnHeld({ key: other.ticket.key, label: "Run engineering loop" }))).toBeTruthy();
+    expect(turnHeld({ key: other.ticket.key, label: "Run engineering loop" })).toContain("#" + other.ticket.key.replace(/^PRB-/, ""));
+  });
+
+  it("says nothing of a turn once no run is under way", async () => {
+    const context = await contextFor([criterion()]);
+    mount(<ContractScreen {...context} />);
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByText(/take one at a time/)).toBeNull();
   });
 });
 

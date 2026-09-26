@@ -11,6 +11,7 @@ import { displayKey } from "./ticket-workspace.js";
 import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/browser";
 import { confirmRoute, contractState, curates, leftAt, planPaneFor, problemsOpen } from "../planning/panes.js";
 import { readingState } from "../../shared/contract-editing.js";
+import { exclusiveJob } from "../../shared/jobs.js";
 import { useSettled } from "../planning/settled.js";
 import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { CriteriaEditor } from "./CriteriaEditor.js";
@@ -18,7 +19,7 @@ import { ReadingFailedNotice } from "../planning/ReadingFailed.js";
 import { changeKey, chatChange, criteriaChange } from "../planning/change-marks.js";
 import type { useContractEditing } from "../contract-editor.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
-import { TaskModelsSchema, type Detail, type PlanningPane, type TaskModels } from "../../shared/protocol.js";
+import { TaskModelsSchema, type Detail, type Job, type PlanningPane, type TaskModels } from "../../shared/protocol.js";
 import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 const ContractGraph = lazy(() =>
@@ -29,6 +30,9 @@ export const PROBLEMS_HOLD =
   "The plan and the spec no longer promise the same thing. Resolve each problem on the Problems tab, or change the plan, then confirm again.";
 /** Why a basic ticket's Confirm contract waits while the drafts list does not yet carry its planning. */
 export const NOT_LISTED = "The planning is still being read. Confirm again in a moment.";
+/** Why approving waits while another run, decision or publication is under way: they take one at a time (D-101). */
+export const turnHeld = (job: Pick<Job, "key" | "label">): string =>
+  `${job.label}${job.key === null ? "" : " on " + displayKey(job.key)} is under way, and runs, decisions and publishing take one at a time. This button comes back once it finishes or is stopped.`;
 
 /** An approved contract's effort, where one was chosen; the provider's own default says nothing. */
 const effortText = (effort: EffortLevel | null): string =>
@@ -315,6 +319,9 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     retry: false,
   });
   const outside = impact.data?.warnings.length ?? 0;
+  // A run, a decision or a publication under way elsewhere holds the button,
+  // and the page names it, since nothing on this page shows it.
+  const turn = exclusiveJob(workspace.jobs);
   const approving =
     busy || action.isPending || pending !== null || writing !== null || confirming || failedReading !== null;
   useShortcut("approve", approving ? null : () => void confirm());
@@ -634,6 +641,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
                 </p>
               )}
               {holding !== null && <Notice tone="warning">{holding}</Notice>}
+              {turn !== undefined && <Notice tone="warning">{turnHeld(turn)}</Notice>}
               <Button variant="primary" disabled={approving} onClick={() => void confirm()}>
                 {ticket.approved_at
                   ? "Start the loop"
