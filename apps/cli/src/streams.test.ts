@@ -31,6 +31,23 @@ const HOME = "src/streams.ts";
 /** The suffix a specifier for the home module ends in, whatever the depth. */
 const HOME_SPECIFIER = "streams.js";
 
+/**
+ * The compiler functions the walks call, read off the module once. The
+ * `typescript` module exports each of them as a getter, and a walk that reads
+ * `ts.isImportDeclaration` at every one of several hundred thousand nodes
+ * spends most of its time in those getters rather than in the checks.
+ */
+const {
+  forEachChild,
+  isExportDeclaration,
+  isImportDeclaration,
+  isInterfaceDeclaration,
+  isNamedExports,
+  isNamedImports,
+  isStringLiteral,
+  isTypeAliasDeclaration,
+} = ts;
+
 /** A file as the scan reads it: its path from the package root, and its text. */
 interface Source {
   readonly path: string;
@@ -60,24 +77,74 @@ function sources(): Source[] {
   return found;
 }
 
-function parse(source: Source): ts.SourceFile {
-  return ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true);
+/**
+ * An escape in an identifier or a string literal, and what it stands for:
+ * `\u{…}` and `\uXXXX` (identifiers and strings), `\xXX` and a legacy octal
+ * escape (strings), a line continuation (strings, standing for nothing), and
+ * any other escaped character, which stands for itself (`"Stre\ams"` is
+ * `Streams`). A single escape such as `\t` maps to its letter rather than its
+ * control character, which can only let a file through that did not need to be.
+ */
+const ESCAPE =
+  /\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([0-7]{1,3})|(\r\n|[\r\n\u2028\u2029])|([\s\S]))/g;
+
+function unescaped(text: string): string {
+  return text.replace(
+    ESCAPE,
+    (_, braced?: string, four?: string, two?: string, octal?: string, continuation?: string, other?: string) => {
+      const hex = braced ?? four ?? two;
+      if (hex !== undefined) {
+        const point = Number.parseInt(hex, 16);
+        return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+      }
+      if (octal !== undefined) return String.fromCharCode(Number.parseInt(octal, 8));
+      if (continuation !== undefined) return "";
+      return other ?? "";
+    },
+  );
+}
+
+/**
+ * Whether a file can declare, import or re-export the name at all, read from
+ * its text before anything is parsed. A declaration binds the name as an
+ * identifier, and an import or re-export binds it as an identifier or a string
+ * (`import { "Streams" as Writes }`), so either way the name is spelled in the
+ * file's text, once escapes are undone: an identifier may spell a letter as
+ * `\u0061`, and a string as `\x61`, `\141`, `\a` or across a line
+ * continuation, and the parser reads each of those as the name. Undoing escapes
+ * never removes a literal occurrence, because the name opens with `S`, which is
+ * not a digit that a `\x`, `\u` or octal escape before it could consume. So a
+ * file this returns false for has no token that is the name, and parsing it
+ * could find nothing.
+ */
+function mayBind(text: string): boolean {
+  return text.includes(NAME) || unescaped(text).includes(NAME);
+}
+
+/**
+ * Each file that may bind the name, parsed once. Parent pointers are not set,
+ * since neither scan walks upward.
+ */
+function parsed(sources: readonly Source[]): ts.SourceFile[] {
+  return sources
+    .filter((source) => mayBind(source.text))
+    .map((source) => ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, false));
 }
 
 /** Every file that declares the name as an interface or a type alias. */
-function declarations(sources: readonly Source[]): string[] {
+function declarations(files: readonly ts.SourceFile[]): string[] {
   const found: string[] = [];
-  for (const source of sources) {
+  for (const file of files) {
     const visit = (node: ts.Node): void => {
       if (
-        (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) &&
+        (isInterfaceDeclaration(node) || isTypeAliasDeclaration(node)) &&
         node.name.text === NAME
       ) {
-        found.push(source.path);
+        found.push(file.fileName);
       }
-      ts.forEachChild(node, visit);
+      forEachChild(node, visit);
     };
-    ts.forEachChild(parse(source), visit);
+    forEachChild(file, visit);
   }
   return found.sort();
 }
@@ -91,37 +158,43 @@ function bindsName(element: ts.ImportSpecifier | ts.ExportSpecifier): boolean {
  * Every import or re-export of the name that names a module other than the
  * home, as `<file>: <specifier>`.
  */
-function reachesElsewhere(sources: readonly Source[]): string[] {
+function reachesElsewhere(files: readonly ts.SourceFile[]): string[] {
   const found: string[] = [];
-  for (const source of sources) {
+  for (const file of files) {
     const visit = (node: ts.Node): void => {
-      const bindings = ts.isImportDeclaration(node)
+      const bindings = isImportDeclaration(node)
         ? node.importClause?.namedBindings
-        : ts.isExportDeclaration(node) && node.moduleSpecifier
+        : isExportDeclaration(node) && node.moduleSpecifier
           ? node.exportClause
           : undefined;
       const specifier =
-        ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+        isImportDeclaration(node) || isExportDeclaration(node)
           ? node.moduleSpecifier
           : undefined;
       if (
         bindings &&
         specifier &&
-        ts.isStringLiteral(specifier) &&
-        (ts.isNamedImports(bindings) || ts.isNamedExports(bindings)) &&
+        isStringLiteral(specifier) &&
+        (isNamedImports(bindings) || isNamedExports(bindings)) &&
         bindings.elements.some((element) => bindsName(element)) &&
         !specifier.text.endsWith(HOME_SPECIFIER)
       ) {
-        found.push(`${source.path}: ${specifier.text}`);
+        found.push(`${file.fileName}: ${specifier.text}`);
       }
-      ts.forEachChild(node, visit);
+      forEachChild(node, visit);
     };
-    ts.forEachChild(parse(source), visit);
+    forEachChild(file, visit);
   }
   return found.sort();
 }
 
-const FILES = sources();
+/**
+ * The package's files that may bind the name, read and parsed once when this
+ * module loads and shared by both properties. The parse is most of the scan's
+ * cost and grows with the package, and no test's timeout counts the time a
+ * module takes to load, so what each test pays is a walk of trees it is given.
+ */
+const FILES = parsed(sources());
 
 describe("the three writes every command is given", () => {
   it("is declared once, in streams.ts", () => {
@@ -134,7 +207,7 @@ describe("the three writes every command is given", () => {
 });
 
 describe("what the scan refuses", () => {
-  const planted = (path: string, text: string): Source[] => [{ path, text }];
+  const planted = (path: string, text: string): ts.SourceFile[] => parsed([{ path, text }]);
 
   it("names a second declaration", () => {
     expect(
@@ -176,5 +249,31 @@ describe("what the scan refuses", () => {
         ...planted("src/commands/run/local.ts", `import type { ${NAME} } from "../../streams.js";`),
       ]),
     ).toEqual([]);
+  });
+
+  it("sees a declaration that spells the name with an escape", () => {
+    expect(
+      declarations(planted("src/commands/admit.ts", "interface Stre\\u0061ms { isTTY: boolean }")),
+    ).toEqual(["src/commands/admit.ts"]);
+  });
+
+  it("sees an import that spells the name as an escaped string", () => {
+    expect(
+      reachesElsewhere([
+        ...planted("src/commands/a.ts", 'import type { "Stre\\x61ms" as Writes } from "./admit.js";'),
+        ...planted("src/commands/b.ts", 'import type { "Stre\\ams" as Writes } from "./admit.js";'),
+        ...planted("src/commands/c.ts", 'import type { "\\123treams" as Writes } from "./admit.js";'),
+        ...planted("src/commands/d.ts", 'import type { "Stre\\\nams" as Writes } from "./admit.js";'),
+      ]),
+    ).toEqual([
+      "src/commands/a.ts: ./admit.js",
+      "src/commands/b.ts: ./admit.js",
+      "src/commands/c.ts: ./admit.js",
+      "src/commands/d.ts: ./admit.js",
+    ]);
+  });
+
+  it("leaves unparsed a file whose text cannot spell the name", () => {
+    expect(planted("src/commands/sync.ts", "export const streams = { isTTY: true };")).toEqual([]);
   });
 });
