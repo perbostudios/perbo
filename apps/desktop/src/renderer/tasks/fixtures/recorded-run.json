@@ -1,9 +1,9 @@
 {
-  "log": "  ceilings  stall 20m · remediation rounds 6 · provider wait 6h · per-token cost $5.00 · per-token ticket budget $60.00\n  base      main — branch: the branch this checkout is on\n  run recorded in /tmp/perbo-capture/capture-NU8DxJ/.perbo/runs/ticket_local_98572de4cd59.run.json\n  worktree /tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830 on prb/local-98572de4cd59/the-feature-module-exports-a-com at df6774d60fb3af1b88b8189a4cb9d954dce7fc17\n  verify: node -e process.exit(0)\n  df6774d60fb3 passes the manifest's verify\n  executing\n  agent ready: 0 tool servers, 0 skills, credential subscription\n  tally: 0 commands, 0 files, 0 input tokens, 0 output tokens, 0 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 0 commands, 0 files, 7 input tokens, 2 output tokens, 0 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 1 commands, 0 files, 7 input tokens, 2 output tokens, 4000 micro-dollars priced, 0 unpriced, 0 partial\n  sealing the change set\n  check unit: node -e process.exit(0)\n  tally: 1 commands, 1 files, 7 input tokens, 2 output tokens, 4000 micro-dollars priced, 0 unpriced, 0 partial\n  review round 0\n  reviewer says: No test exercises total(); nothing establishes ac_1.\n  tally: 1 commands, 1 files, 8 input tokens, 3 output tokens, 4000 micro-dollars priced, 1 unpriced, 0 partial\n  branch carries 1 commit(s) sealed before this attempt\n  remediation round 1 of at most 6\n  agent ready: 0 tool servers, 0 skills, credential subscription\n  tally: 1 commands, 1 files, 8 input tokens, 3 output tokens, 4000 micro-dollars priced, 2 unpriced, 0 partial\n  tally: 1 commands, 1 files, 15 input tokens, 5 output tokens, 4000 micro-dollars priced, 2 unpriced, 0 partial\n  tally: 2 commands, 1 files, 15 input tokens, 5 output tokens, 8000 micro-dollars priced, 1 unpriced, 0 partial\n  sealing the change set\n  check unit: node -e process.exit(0)\n  verifying closures, round 1\n  tally: 2 commands, 1 files, 16 input tokens, 6 output tokens, 8030 micro-dollars priced, 1 unpriced, 0 partial\n  recorded 2 attempt(s) as run 1 of local_98572de4cd59; 2 on record\n\ncost      $0.2180 — 4 of 4 priced, 2 reported, 1 estimated\nread it back with: perbo inspect ticket_local_98572de4cd59 --repo /tmp/perbo-capture/capture-NU8DxJ\n",
+  "log": "  ceilings  stall 20m · remediation rounds 6 · provider wait 6h · per-token cost $5.00 · per-token ticket budget $60.00\n  base      main — branch: the branch this checkout is on\n  run recorded in /tmp/perbo-capture/capture-repo/.perbo/runs/ticket_local_2470de8a5376.run.json\n  worktree /tmp/perbo-capture/capture-worktrees/att_832f19c4feea6065 on prb/local-2470de8a5376/the-feature-module-exports-a-com at 8049f3df1bb50e56aae867562dbb83831b20f036\n  verify: node -e process.exit(0)\n  8049f3df1bb5 passes the manifest's verify\n  executing\n  agent ready: 0 tool servers, 0 skills, credential subscription\n  tally: 0 commands, 0 files, 0 input tokens, 0 output tokens, 0 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 0 commands, 0 files, 7 input tokens, 2 output tokens, 0 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 0 commands, 0 files, 7 input tokens, 2 output tokens, 4000 micro-dollars priced, 0 unpriced, 0 partial\n  tally: 1 commands, 1 files, 7 input tokens, 2 output tokens, 4000 micro-dollars priced, 0 unpriced, 0 partial\n  sealing the change set\n  check unit: node -e process.exit(0)\n  review round 0\n  reviewer says: No test exercises total(); nothing establishes ac_1.\n  tally: 1 commands, 1 files, 8 input tokens, 3 output tokens, 214000 micro-dollars priced, 0 unpriced, 0 partial\n  branch carries 1 commit(s) sealed before this attempt\n  remediation round 1 of at most 6\n  agent ready: 0 tool servers, 0 skills, credential subscription\n  tally: 1 commands, 1 files, 8 input tokens, 3 output tokens, 214000 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 1 commands, 1 files, 15 input tokens, 5 output tokens, 214000 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 1 commands, 1 files, 15 input tokens, 5 output tokens, 218000 micro-dollars priced, 0 unpriced, 0 partial\n  tally: 2 commands, 1 files, 15 input tokens, 5 output tokens, 218000 micro-dollars priced, 0 unpriced, 0 partial\n  sealing the change set\n  check unit: node -e process.exit(0)\n  verifying closures, round 1\n  tally: 2 commands, 1 files, 16 input tokens, 6 output tokens, 218030 micro-dollars priced, 0 unpriced, 0 partial\n  recorded 2 attempt(s) as run 1 of local_2470de8a5376; 2 on record\n\ncost      $0.2180 — 4 of 4 priced, 3 reported, 1 estimated\nread it back with: perbo inspect ticket_local_2470de8a5376 --repo /tmp/perbo-capture/capture-repo\n",
   "report": {
     "kind": "local",
-    "ticket": "local_98572de4cd59",
-    "ticket_id": "ticket_local_98572de4cd59",
+    "ticket": "local_2470de8a5376",
+    "ticket_id": "ticket_local_2470de8a5376",
     "title": null,
     "outcome": "The feature module exports a computed total",
     "contract_source": {
@@ -40,16 +40,16 @@
     "edges": null,
     "approach_problem": null,
     "size": null,
-    "attempts_path": "/tmp/perbo-capture/capture-NU8DxJ/.perbo/state/ticket_local_98572de4cd59.attempts.json",
+    "attempts_path": "/tmp/perbo-capture/capture-repo/.perbo/state/ticket_local_2470de8a5376.attempts.json",
     "attempts": [
       {
-        "attempt_id": "att_01d7a6dc3d3cb830",
+        "attempt_id": "att_832f19c4feea6065",
         "run": 1,
         "sequence": 1,
         "round": 0,
-        "started_at": "2026-09-27T00:37:29.048Z",
+        "started_at": "2026-09-27T00:37:01.000Z",
         "wait": null,
-        "ended_at": "2026-09-27T00:37:30.406Z",
+        "ended_at": "2026-09-27T00:37:03.000Z",
         "outcome": "review remediable",
         "termination": {
           "reason": "completed",
@@ -57,7 +57,7 @@
         },
         "agent": {
           "model": "double",
-          "binary_version": "fake-agent 1.0.0",
+          "binary_version": "capture-agent 1.0.0",
           "adapter": "claude-code",
           "credential_class": "subscription"
         },
@@ -82,7 +82,7 @@
           },
           {
             "resource": "attempt_wall_clock_ms",
-            "used": 1358,
+            "used": 1000,
             "ceiling": null,
             "hit": false
           },
@@ -113,8 +113,8 @@
           "micros": 214000,
           "components": 2,
           "priced": 2,
-          "reported": 1,
-          "estimated": 1,
+          "reported": 2,
+          "estimated": 0,
           "unavailable": 0,
           "partial": 0
         },
@@ -127,7 +127,7 @@
             "summary": "exited 0",
             "command": "node -e process.exit(0)",
             "detail": null,
-            "duration_ms": 43,
+            "duration_ms": 1000,
             "source": "file",
             "failing_tests": [],
             "reruns": 0,
@@ -140,15 +140,15 @@
           "schema_version": 1,
           "review_id": "rev_0000000000000001",
           "resumed_from": null,
-          "created_at": "2026-09-04T00:00:00.000Z",
+          "created_at": "2026-09-27T00:37:00.000Z",
           "target": {
             "type": "changeset",
-            "id": "cs_ef222516fa208c95",
-            "base_commit": "abc1234",
-            "head_commit": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+            "id": "cs_cd0006c590b9435c",
+            "base_commit": "ee78ce6",
+            "head_commit": "83df68a53a600331a200febc8b84603a4d12e9db",
             "prior_commits": []
           },
-          "plan_id": "plan_x",
+          "plan_id": "plan_capture",
           "plan_version": 1,
           "planned_risk": "P1",
           "actual_risk": "P1",
@@ -181,7 +181,7 @@
           ],
           "findings": [
             {
-              "key": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "key": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
               "rule_id": "test.missing_for_criterion",
               "source": "semantic",
               "criterion_id": "ac_1",
@@ -216,7 +216,7 @@
           "remediation": null,
           "confidence": 0.9,
           "cost_micros": 210000,
-          "latency_ms": 100,
+          "latency_ms": 1000,
           "model": {
             "provider": "stub",
             "model_id": "stub",
@@ -225,7 +225,7 @@
             "cache_read_input_tokens": 0,
             "cache_creation_input_tokens": 0,
             "output_tokens": 1,
-            "cost_basis": "provider_list_estimate"
+            "cost_basis": "transport_reported"
           },
           "error": null
         },
@@ -239,23 +239,23 @@
         "bundles": [
           {
             "schema_version": 1,
-            "bundle_id": "bundle_1ac88d727957b4b2",
+            "bundle_id": "bundle_e960d896ec67571c",
             "kind": "execution",
-            "created_at": "2026-09-27T00:37:30.458Z",
-            "subject_id": "att_01d7a6dc3d3cb830",
-            "ticket_id": "ticket_local_98572de4cd59",
+            "created_at": "2026-09-27T00:37:04.000Z",
+            "subject_id": "att_832f19c4feea6065",
+            "ticket_id": "ticket_local_2470de8a5376",
             "inputs": {
-              "plan_id": "plan_local_98572de4cd59",
+              "plan_id": "plan_local_2470de8a5376",
               "plan_version": 1,
-              "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+              "base_commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
               "merged_base": null,
               "round_kind": "execute",
-              "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
+              "branch": "prb/local-2470de8a5376/the-feature-module-exports-a-com",
               "remediation_round": 0,
               "findings_given": "",
               "findings_given_count": 0,
-              "invocation_shape": "6df07883483ed9370da19365d4e8b8852e58e903eedf5638a213942cbbb1a7db",
-              "binary_version": "fake-agent 1.0.0",
+              "invocation_shape": "9f8c161504d93a192e3fe25b05d46d56d7cf051516326df4befe9ff49ac217d7",
+              "binary_version": "capture-agent 1.0.0",
               "termination": "completed",
               "resumed_from_bundle": null,
               "resumed_from_attempt": null,
@@ -269,48 +269,48 @@
               "prompt": "executor_v14",
               "policy": "A2b",
               "model": "double",
-              "tool": "fake-agent 1.0.0"
+              "tool": "capture-agent 1.0.0"
             },
             "usage": {
               "input_tokens": 7,
               "output_tokens": 2,
               "cost_micros": 4000,
               "cost_basis": "transport_reported",
-              "wall_clock_ms": 1358
+              "wall_clock_ms": 1000
             },
             "artifacts": [
               {
                 "name": "attempt.json",
-                "sha256": "608e063048025c519aafcce2971b71e494c113b862c6808128d19636a1387d9f",
-                "bytes": 10172,
+                "sha256": "c440b8efabd2b427313ac646b9d3b4a91775da2a396b0952e3c69e7416e92d79",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               },
               {
                 "name": "transcript.jsonl",
-                "sha256": "2188da6f7d75486f37e8d51db18b2d462e9d980d0b9e9e16bc850e4f87eefe36",
-                "bytes": 447,
+                "sha256": "bae316fbb4cc49edc1b8116442fd28fcb5bb9a22193382f6df20bb19aa126938",
+                "bytes": 1000,
                 "media_type": "application/x-ndjson",
                 "retained": true
               },
               {
                 "name": "prompt.txt",
-                "sha256": "e6336d75625bb34c4c7bf49ef935ed45a378e469c4fc92c452b88b72f01b9304",
-                "bytes": 5878,
+                "sha256": "658ec0b2dd6cb5ff163c22a87f9886cffc2106bea05950f7a112a5691f70b913",
+                "bytes": 1000,
                 "media_type": "text/plain",
                 "retained": true
               },
               {
                 "name": "checks.json",
-                "sha256": "68bd756bfdbcad9ed24796d5fdfad67deb00e980f6c497db8535920e2bab9658",
-                "bytes": 386,
+                "sha256": "e04adf84a168acd1d68c4cdc84f34e003fe3bb967626c33c213fe5883bdcf77d",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               },
               {
                 "name": "change.diff",
-                "sha256": "1a27a0b139188c53f4364a3061f50897321c4d4ceaa34bdc46d37cee4b0af6ee",
-                "bytes": 163,
+                "sha256": "e1fc77e4011223bcd5af33766c58831612e6974ca97ab1fb47c1a3be0a831f71",
+                "bytes": 1000,
                 "media_type": "text/x-diff",
                 "retained": true
               }
@@ -318,13 +318,13 @@
             "errors": [],
             "transitions": [
               {
-                "at": "2026-09-27T00:37:29.048Z",
+                "at": "2026-09-27T00:37:01.000Z",
                 "from": "PROVISIONING",
                 "to": "EXECUTING",
                 "reason": "worktree materialized"
               },
               {
-                "at": "2026-09-27T00:37:30.458Z",
+                "at": "2026-09-27T00:37:04.000Z",
                 "from": "EXECUTING",
                 "to": "VERIFYING",
                 "reason": "completed"
@@ -345,16 +345,16 @@
           },
           {
             "schema_version": 1,
-            "bundle_id": "bundle_327e0c5e63df84cc",
+            "bundle_id": "bundle_2c47c77396a018b4",
             "kind": "review",
-            "created_at": "2026-09-27T00:37:30.469Z",
+            "created_at": "2026-09-27T00:37:05.000Z",
             "subject_id": "rev_0000000000000001",
-            "ticket_id": "ticket_local_98572de4cd59",
+            "ticket_id": "ticket_local_2470de8a5376",
             "inputs": {
-              "attempt_id": "att_01d7a6dc3d3cb830",
-              "changeset_id": "cs_ef222516fa208c95",
-              "base_commit": "abc1234",
-              "head_commit": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+              "attempt_id": "att_832f19c4feea6065",
+              "changeset_id": "cs_cd0006c590b9435c",
+              "base_commit": "ee78ce6",
+              "head_commit": "83df68a53a600331a200febc8b84603a4d12e9db",
               "decision": "remediable",
               "remediation_round": 0,
               "remediation_available": true
@@ -371,28 +371,28 @@
               "input_tokens": 1,
               "output_tokens": 1,
               "cost_micros": 210000,
-              "cost_basis": "unavailable",
-              "wall_clock_ms": 100
+              "cost_basis": "transport_reported",
+              "wall_clock_ms": 1000
             },
             "artifacts": [
               {
                 "name": "review.json",
-                "sha256": "71d8c9bf7e9023251ecfd2690d841d3b7d52b288acfbccf8a7733f1879f62cc8",
-                "bytes": 2059,
+                "sha256": "89866d490b08f69b35b1c34e6d2072164c14207d4c60fd65bc33ba0af8242d94",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               },
               {
                 "name": "node-reviews.json",
-                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-                "bytes": 2,
+                "sha256": "4f2ff54c238bea8f63dfd3822ab6fe64dee237642e14cf6e4d5e7541fab2bfc3",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               },
               {
                 "name": "reviewer-system-prompt.txt",
-                "sha256": "043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89",
-                "bytes": 1,
+                "sha256": "785a58aa9c09a2ee71a3726d5162681086160836bf8043a3ad7a229be3dd4cc0",
+                "bytes": 1000,
                 "media_type": "text/plain",
                 "retained": true
               }
@@ -400,7 +400,7 @@
             "errors": [],
             "transitions": [
               {
-                "at": "2026-09-27T00:37:30.469Z",
+                "at": "2026-09-27T00:37:05.000Z",
                 "from": "VERIFYING",
                 "to": "INDEPENDENT_REVIEW",
                 "reason": "remediable"
@@ -430,21 +430,21 @@
         ],
         "record": {
           "schema_version": 1,
-          "attempt_id": "att_01d7a6dc3d3cb830",
-          "root_attempt_id": "att_01d7a6dc3d3cb830",
+          "attempt_id": "att_832f19c4feea6065",
+          "root_attempt_id": "att_832f19c4feea6065",
           "continues_attempt_id": null,
           "remediation_round": 0,
-          "created_at": "2026-09-27T00:37:29.048Z",
-          "ticket_id": "ticket_local_98572de4cd59",
-          "plan_id": "plan_local_98572de4cd59",
+          "created_at": "2026-09-27T00:37:01.000Z",
+          "ticket_id": "ticket_local_2470de8a5376",
+          "plan_id": "plan_local_2470de8a5376",
           "plan_version": 1,
           "planned_risk": "P1",
-          "repository_id": "repo_capture-NU8DxJ",
+          "repository_id": "repo_capture-repo",
           "base_ref": "main",
-          "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+          "base_commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
           "provider": "local_worktree",
-          "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
-          "worktree_path": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+          "branch": "prb/local-2470de8a5376/the-feature-module-exports-a-com",
+          "worktree_path": "/tmp/perbo-capture/capture-worktrees/att_832f19c4feea6065",
           "autonomy_class": "A2b",
           "permission_profile": {
             "autonomy_class": "A2b",
@@ -517,7 +517,7 @@
               "WebFetch",
               "WebSearch"
             ],
-            "path_jail_root": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+            "path_jail_root": "/tmp/perbo-capture/capture-worktrees/att_832f19c4feea6065",
             "env_allow_list": [
               "PATH",
               "HOME",
@@ -565,9 +565,9 @@
           },
           "agent": {
             "adapter": "claude-code",
-            "binary_path": "/tmp/perbo-capture/agent-capture-R37nOH/agent.cjs",
-            "binary_version": "fake-agent 1.0.0",
-            "binary_sha256": "549c2c672f179170466ceae0bf936dcc0ab5d82c9afe011aac3c5340efc5d8b7",
+            "binary_path": "/tmp/perbo-capture/agent/agent.cjs",
+            "binary_version": "capture-agent 1.0.0",
+            "binary_sha256": "4d04e2df7f555238bff354b4ad457f6bd6526d6656757cbfd8242986049cf703",
             "model": "double",
             "credential_class": "subscription",
             "argv": [
@@ -582,7 +582,7 @@
               "--mcp-config",
               "{\"mcpServers\":{}}",
               "--settings",
-              "/tmp/perbo-guard-0Btj2t/settings.json",
+              "/tmp/perbo-guard-XXXXXX/settings.json",
               "--disable-slash-commands",
               "--permission-mode",
               "manual",
@@ -598,7 +598,7 @@
               "{\"perbo-explorer\":{\"description\":\"Reads the worktree and answers one question about it. Asked to write nothing; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are an explorer inside one approved ticket's worktree. Read the code and answer the question you were given. Write nothing: your answer is your whole output. Quote paths and line numbers so the answer can be checked.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-implementer\":{\"description\":\"Writes one part of the change, and the tests that prove it.\",\"prompt\":\"You are implementing one part of an approved ticket in a Git worktree. Make the change you were given and the tests that prove it, and nothing beyond it. The runner's write guard judges every write you make against the ticket's scope, so a refusal is the contract speaking and not a fault to work around. Do not commit, push, or open a pull request. End by saying which files you touched and what you ran.\",\"tools\":[\"Read\",\"Edit\",\"Write\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-verifier\":{\"description\":\"Runs checks and reports what passed and what failed. Asked to change nothing it is judging; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are verifying work in one approved ticket's worktree. Run the checks you were asked to run and report exactly what passed and what failed, quoting the output that says so. Write nothing and change nothing: a verifier that edits the code it is judging is worth nothing.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]}}",
               "--no-session-persistence"
             ],
-            "shape_sha256": "6df07883483ed9370da19365d4e8b8852e58e903eedf5638a213942cbbb1a7db",
+            "shape_sha256": "9f8c161504d93a192e3fe25b05d46d56d7cf051516326df4befe9ff49ac217d7",
             "neutralisation": {
               "suppressed_at_invocation": [
                 "--setting-sources user",
@@ -626,7 +626,7 @@
           },
           "executor_skills": [],
           "environment": {
-            "manifest_hash": "sha256:76828232896a521b99b58dc5381c6a5940bc835d6efca32726b6836159a3a07f",
+            "manifest_hash": "sha256:1775ea300681d4a611aa1b2e34af008e7f60db0df69dddb11443235a4178eb5d",
             "install_pinned": true,
             "materialized_paths": [],
             "secret_content_sha256": [],
@@ -647,22 +647,22 @@
               "TMP",
               "TEMP"
             ],
-            "env_names_dropped": 86
+            "env_names_dropped": 49
           },
           "commands": [
             {
               "sequence": 0,
-              "tool": "Bash",
-              "detail": "echo 'export const total = 1;' >> src/feature.ts",
+              "tool": "Write",
+              "detail": "Write src/feature.ts",
               "decision": "allowed",
               "denial_reason": null,
               "denial_rule": null,
               "denial_target": null,
-              "cwd": ".",
-              "decided_by": "pre_execution_hook",
+              "cwd": null,
+              "decided_by": "transcript_reading",
               "second_reading": null,
               "agent": null,
-              "at": "2026-09-27T00:37:29.780Z"
+              "at": "2026-09-27T00:37:02.000Z"
             }
           ],
           "egress": [],
@@ -676,7 +676,7 @@
             "cost_micros": 4000,
             "cost_basis": "transport_reported",
             "token_ceiling_tokens": 9,
-            "wall_clock_ms": 1358,
+            "wall_clock_ms": 1000,
             "commands": 1,
             "iterations": 1
           },
@@ -684,8 +684,8 @@
             "reason": "completed",
             "detail": ""
           },
-          "changeset_id": "cs_ef222516fa208c95",
-          "head_commit": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+          "changeset_id": "cs_cd0006c590b9435c",
+          "head_commit": "83df68a53a600331a200febc8b84603a4d12e9db",
           "prior_commits": [],
           "change_set_origin": "attempt",
           "executor_account": null,
@@ -695,11 +695,11 @@
           "spec_commit": null,
           "swept_processes": [],
           "base_verification": {
-            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
             "verified": true
           },
           "provisioning_verify": {
-            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
             "verified": true
           },
           "wait": null,
@@ -707,21 +707,21 @@
         }
       },
       {
-        "attempt_id": "att_c970757a1df1c922",
+        "attempt_id": "att_753abba76924d907",
         "run": 1,
         "sequence": 2,
         "round": 1,
-        "started_at": "2026-09-27T00:37:30.477Z",
+        "started_at": "2026-09-27T00:37:06.000Z",
         "wait": null,
-        "ended_at": "2026-09-27T00:37:31.497Z",
-        "outcome": "closures verified",
+        "ended_at": "2026-09-27T00:37:08.000Z",
+        "outcome": "carried_forward · closures verified",
         "termination": {
           "reason": "completed",
-          "detail": ""
+          "detail": "the executor added nothing to the 1 commit(s) already on the branch; that change set is what was checked and reviewed"
         },
         "agent": {
           "model": "double",
-          "binary_version": "fake-agent 1.0.0",
+          "binary_version": "capture-agent 1.0.0",
           "adapter": "claude-code",
           "credential_class": "subscription"
         },
@@ -746,7 +746,7 @@
           },
           {
             "resource": "attempt_wall_clock_ms",
-            "used": 1020,
+            "used": 1000,
             "ceiling": null,
             "hit": false
           },
@@ -791,7 +791,7 @@
             "summary": "exited 0",
             "command": "node -e process.exit(0)",
             "detail": null,
-            "duration_ms": 49,
+            "duration_ms": 1000,
             "source": "file",
             "failing_tests": [],
             "reruns": 0,
@@ -807,7 +807,7 @@
           "prompt_version": "closure_verify_v1",
           "per_finding": [
             {
-              "finding_key": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "finding_key": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
               "status": "closed",
               "pointer": "src/feature.ts"
             }
@@ -821,10 +821,10 @@
         "ladder": {
           "kind": "remediate",
           "given": [
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127"
           ],
           "closed": [
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127"
           ],
           "open": []
         },
@@ -834,23 +834,23 @@
         "bundles": [
           {
             "schema_version": 1,
-            "bundle_id": "bundle_f5913bc00e1a8e8a",
+            "bundle_id": "bundle_f9c0b0a439fae94f",
             "kind": "execution",
-            "created_at": "2026-09-27T00:37:31.552Z",
-            "subject_id": "att_c970757a1df1c922",
-            "ticket_id": "ticket_local_98572de4cd59",
+            "created_at": "2026-09-27T00:37:09.000Z",
+            "subject_id": "att_753abba76924d907",
+            "ticket_id": "ticket_local_2470de8a5376",
             "inputs": {
-              "plan_id": "plan_local_98572de4cd59",
+              "plan_id": "plan_local_2470de8a5376",
               "plan_version": 1,
-              "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+              "base_commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
               "merged_base": null,
               "round_kind": "remediate",
-              "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
+              "branch": "prb/local-2470de8a5376/the-feature-module-exports-a-com",
               "remediation_round": 1,
-              "findings_given": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "findings_given": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
               "findings_given_count": 1,
-              "invocation_shape": "47c3abb7319970430dcde2d54ffe8d2e052eea11a8dfdf267516c5e3a97cbd32",
-              "binary_version": "fake-agent 1.0.0",
+              "invocation_shape": "e40778981556301f9b77502acceb5ed54d551d16e2b2e41c011bb4ebdf33ce64",
+              "binary_version": "capture-agent 1.0.0",
               "termination": "completed",
               "resumed_from_bundle": null,
               "resumed_from_attempt": null,
@@ -864,48 +864,48 @@
               "prompt": "executor_remediation_v8",
               "policy": "A2b",
               "model": "double",
-              "tool": "fake-agent 1.0.0"
+              "tool": "capture-agent 1.0.0"
             },
             "usage": {
               "input_tokens": 7,
               "output_tokens": 2,
               "cost_micros": 4000,
               "cost_basis": "transport_reported",
-              "wall_clock_ms": 1020
+              "wall_clock_ms": 1000
             },
             "artifacts": [
               {
                 "name": "attempt.json",
-                "sha256": "acaa67a83f52dd756031be6080041561188223e3507c808439d25d600c7d46aa",
-                "bytes": 10305,
+                "sha256": "e1d708f361c4f9cf3049ed8c532f6dfb55b7afbf423e73df4df55291e3591ef6",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               },
               {
                 "name": "transcript.jsonl",
-                "sha256": "2188da6f7d75486f37e8d51db18b2d462e9d980d0b9e9e16bc850e4f87eefe36",
-                "bytes": 447,
+                "sha256": "0a8a92e7f5292246a935005362d3e89c04e5a6d52bdc91155fd99a81f93bb864",
+                "bytes": 1000,
                 "media_type": "application/x-ndjson",
                 "retained": true
               },
               {
                 "name": "prompt.txt",
-                "sha256": "ebedf36e8d0ce313ef1c26f30b5db18819c8f8862884de64be76699f03bff3d6",
-                "bytes": 7727,
+                "sha256": "b46316d956610718d9409dd4da07312415577ad616113886a620ea277cd04d7a",
+                "bytes": 1000,
                 "media_type": "text/plain",
                 "retained": true
               },
               {
                 "name": "checks.json",
-                "sha256": "70319f42de76fd36d138658fc4786c8270480f9b4b944a19a224eaf4e96d3f8b",
-                "bytes": 386,
+                "sha256": "a864ece136f30785abc576401471016fded389c93cfac32a60517f82df03573e",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               },
               {
                 "name": "change.diff",
-                "sha256": "9c0ee567011889ce3988ffacf40d249dee7b802838cf7b64d72979c58ba17b84",
-                "bytes": 190,
+                "sha256": "6cb575772d109182f6873a38df995a9df70a5a19f8a183d378aac47b7e85b610",
+                "bytes": 1000,
                 "media_type": "text/x-diff",
                 "retained": true
               }
@@ -913,13 +913,13 @@
             "errors": [],
             "transitions": [
               {
-                "at": "2026-09-27T00:37:30.477Z",
+                "at": "2026-09-27T00:37:06.000Z",
                 "from": "PROVISIONING",
                 "to": "EXECUTING",
                 "reason": "worktree materialized"
               },
               {
-                "at": "2026-09-27T00:37:31.552Z",
+                "at": "2026-09-27T00:37:09.000Z",
                 "from": "EXECUTING",
                 "to": "VERIFYING",
                 "reason": "completed"
@@ -940,22 +940,22 @@
           },
           {
             "schema_version": 1,
-            "bundle_id": "bundle_673a7757532afda0",
+            "bundle_id": "bundle_c7e89eb7a7983c3d",
             "kind": "review",
-            "created_at": "2026-09-27T00:37:31.557Z",
-            "subject_id": "cv_att_c970757a1df1c922",
-            "ticket_id": "ticket_local_98572de4cd59",
+            "created_at": "2026-09-27T00:37:10.000Z",
+            "subject_id": "cv_att_753abba76924d907",
+            "ticket_id": "ticket_local_2470de8a5376",
             "inputs": {
-              "changeset_id": "cs_149fa550fd34b431",
-              "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
-              "head_commit": "6bf2d42002b89510e29f1a715d171e6f3ca51578",
+              "changeset_id": "cs_cd0006c590b9435c",
+              "base_commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
+              "head_commit": "83df68a53a600331a200febc8b84603a4d12e9db",
               "remediation_round": 1,
               "round_kind": "remediate",
               "verification": true,
               "all_closed": true,
               "deterministic_failure": null,
-              "findings_given": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-              "findings_closed": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "findings_given": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
+              "findings_closed": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
               "findings_open": ""
             },
             "context_manifest": [],
@@ -971,13 +971,13 @@
               "output_tokens": 1,
               "cost_micros": 30,
               "cost_basis": "provider_list_estimate",
-              "wall_clock_ms": 0
+              "wall_clock_ms": 1000
             },
             "artifacts": [
               {
                 "name": "verification.json",
-                "sha256": "a082b54bcb5c5975281eabdd512fcef1ed07f82bec068741f81d9ad6e4603f2d",
-                "bytes": 501,
+                "sha256": "7247f96ae1b29996e14f465321abf00e202ce62bd3171ee8bb51c549df5244fa",
+                "bytes": 1000,
                 "media_type": "application/json",
                 "retained": true
               }
@@ -985,7 +985,7 @@
             "errors": [],
             "transitions": [
               {
-                "at": "2026-09-27T00:37:31.557Z",
+                "at": "2026-09-27T00:37:10.000Z",
                 "from": "VERIFYING",
                 "to": "INDEPENDENT_REVIEW",
                 "reason": "closures verified"
@@ -1009,27 +1009,27 @@
           {
             "path": "src/feature.ts",
             "change_kind": "added",
-            "additions": 2,
+            "additions": 1,
             "deletions": 0
           }
         ],
         "record": {
           "schema_version": 1,
-          "attempt_id": "att_c970757a1df1c922",
-          "root_attempt_id": "att_01d7a6dc3d3cb830",
-          "continues_attempt_id": "att_01d7a6dc3d3cb830",
+          "attempt_id": "att_753abba76924d907",
+          "root_attempt_id": "att_832f19c4feea6065",
+          "continues_attempt_id": "att_832f19c4feea6065",
           "remediation_round": 1,
-          "created_at": "2026-09-27T00:37:30.477Z",
-          "ticket_id": "ticket_local_98572de4cd59",
-          "plan_id": "plan_local_98572de4cd59",
+          "created_at": "2026-09-27T00:37:06.000Z",
+          "ticket_id": "ticket_local_2470de8a5376",
+          "plan_id": "plan_local_2470de8a5376",
           "plan_version": 1,
           "planned_risk": "P1",
-          "repository_id": "repo_capture-NU8DxJ",
+          "repository_id": "repo_capture-repo",
           "base_ref": "main",
-          "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+          "base_commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
           "provider": "local_worktree",
-          "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
-          "worktree_path": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+          "branch": "prb/local-2470de8a5376/the-feature-module-exports-a-com",
+          "worktree_path": "/tmp/perbo-capture/capture-worktrees/att_832f19c4feea6065",
           "autonomy_class": "A2b",
           "permission_profile": {
             "autonomy_class": "A2b",
@@ -1102,7 +1102,7 @@
               "WebFetch",
               "WebSearch"
             ],
-            "path_jail_root": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+            "path_jail_root": "/tmp/perbo-capture/capture-worktrees/att_832f19c4feea6065",
             "env_allow_list": [
               "PATH",
               "HOME",
@@ -1150,9 +1150,9 @@
           },
           "agent": {
             "adapter": "claude-code",
-            "binary_path": "/tmp/perbo-capture/agent-capture-R37nOH/agent.cjs",
-            "binary_version": "fake-agent 1.0.0",
-            "binary_sha256": "549c2c672f179170466ceae0bf936dcc0ab5d82c9afe011aac3c5340efc5d8b7",
+            "binary_path": "/tmp/perbo-capture/agent/agent.cjs",
+            "binary_version": "capture-agent 1.0.0",
+            "binary_sha256": "4d04e2df7f555238bff354b4ad457f6bd6526d6656757cbfd8242986049cf703",
             "model": "double",
             "credential_class": "subscription",
             "argv": [
@@ -1167,7 +1167,7 @@
               "--mcp-config",
               "{\"mcpServers\":{}}",
               "--settings",
-              "/tmp/perbo-guard-7Qjo9Q/settings.json",
+              "/tmp/perbo-guard-XXXXXX/settings.json",
               "--disable-slash-commands",
               "--permission-mode",
               "manual",
@@ -1183,7 +1183,7 @@
               "{\"perbo-explorer\":{\"description\":\"Reads the worktree and answers one question about it. Asked to write nothing; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are an explorer inside one approved ticket's worktree. Read the code and answer the question you were given. Write nothing: your answer is your whole output. Quote paths and line numbers so the answer can be checked.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-implementer\":{\"description\":\"Writes one part of the change, and the tests that prove it.\",\"prompt\":\"You are implementing one part of an approved ticket in a Git worktree. Make the change you were given and the tests that prove it, and nothing beyond it. The runner's write guard judges every write you make against the ticket's scope, so a refusal is the contract speaking and not a fault to work around. Do not commit, push, or open a pull request. End by saying which files you touched and what you ran.\",\"tools\":[\"Read\",\"Edit\",\"Write\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-verifier\":{\"description\":\"Runs checks and reports what passed and what failed. Asked to change nothing it is judging; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are verifying work in one approved ticket's worktree. Run the checks you were asked to run and report exactly what passed and what failed, quoting the output that says so. Write nothing and change nothing: a verifier that edits the code it is judging is worth nothing.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]}}",
               "--no-session-persistence"
             ],
-            "shape_sha256": "47c3abb7319970430dcde2d54ffe8d2e052eea11a8dfdf267516c5e3a97cbd32",
+            "shape_sha256": "e40778981556301f9b77502acceb5ed54d551d16e2b2e41c011bb4ebdf33ce64",
             "neutralisation": {
               "suppressed_at_invocation": [
                 "--setting-sources user",
@@ -1211,7 +1211,7 @@
           },
           "executor_skills": [],
           "environment": {
-            "manifest_hash": "sha256:76828232896a521b99b58dc5381c6a5940bc835d6efca32726b6836159a3a07f",
+            "manifest_hash": "sha256:1775ea300681d4a611aa1b2e34af008e7f60db0df69dddb11443235a4178eb5d",
             "install_pinned": true,
             "materialized_paths": [],
             "secret_content_sha256": [],
@@ -1232,22 +1232,22 @@
               "TMP",
               "TEMP"
             ],
-            "env_names_dropped": 86
+            "env_names_dropped": 49
           },
           "commands": [
             {
               "sequence": 0,
-              "tool": "Bash",
-              "detail": "echo 'export const total = 1;' >> src/feature.ts",
+              "tool": "Write",
+              "detail": "Write src/feature.ts",
               "decision": "allowed",
               "denial_reason": null,
               "denial_rule": null,
               "denial_target": null,
-              "cwd": ".",
-              "decided_by": "pre_execution_hook",
+              "cwd": null,
+              "decided_by": "transcript_reading",
               "second_reading": null,
               "agent": null,
-              "at": "2026-09-27T00:37:30.983Z"
+              "at": "2026-09-27T00:37:07.000Z"
             }
           ],
           "egress": [],
@@ -1261,23 +1261,23 @@
             "cost_micros": 4000,
             "cost_basis": "transport_reported",
             "token_ceiling_tokens": 9,
-            "wall_clock_ms": 1020,
+            "wall_clock_ms": 1000,
             "commands": 1,
             "iterations": 1
           },
           "termination": {
             "reason": "completed",
-            "detail": ""
+            "detail": "the executor added nothing to the 1 commit(s) already on the branch; that change set is what was checked and reviewed"
           },
-          "changeset_id": "cs_149fa550fd34b431",
-          "head_commit": "6bf2d42002b89510e29f1a715d171e6f3ca51578",
+          "changeset_id": "cs_cd0006c590b9435c",
+          "head_commit": "83df68a53a600331a200febc8b84603a4d12e9db",
           "prior_commits": [
             {
-              "sha": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
-              "attempt_id": "att_01d7a6dc3d3cb830"
+              "sha": "83df68a53a600331a200febc8b84603a4d12e9db",
+              "attempt_id": "att_832f19c4feea6065"
             }
           ],
-          "change_set_origin": "attempt",
+          "change_set_origin": "carried_forward",
           "executor_account": null,
           "brief_reinjections": [],
           "resumed_from": null,
@@ -1285,11 +1285,11 @@
           "spec_commit": null,
           "swept_processes": [],
           "base_verification": {
-            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
             "verified": true
           },
           "provisioning_verify": {
-            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "commit": "8049f3df1bb50e56aae867562dbb83831b20f036",
             "verified": true
           },
           "wait": null,
@@ -1301,8 +1301,8 @@
       "micros": 218030,
       "components": 4,
       "priced": 4,
-      "reported": 2,
-      "estimated": 2,
+      "reported": 3,
+      "estimated": 1,
       "unavailable": 0,
       "partial": 0
     },

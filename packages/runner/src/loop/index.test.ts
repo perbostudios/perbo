@@ -9,6 +9,7 @@ import {
   SecretIndex,
   type MaterializationManifest,
   type PlanContract,
+  type ReviewArtifact,
 } from "@perbo/contracts";
 import type { Model } from "@perbo/model";
 import { runReview } from "@perbo/review";
@@ -16,6 +17,7 @@ import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../adapter.js";
 import { EgressLog } from "../egress.js";
 import { BundleStore } from "../bundle.js";
+import { parkedWait } from "../attempts.js";
 import { RunLockedError, acquireRunLock, readRunLock, runLockPath } from "../lock.js";
 import { TicketRunConfigSchema, runTicket } from "./index.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../transport.js";
@@ -1138,8 +1140,83 @@ describe("a review that did not complete", () => {
     });
 
     expect(result.outcome).toBe("review_failed");
+    expect(result.detail).toContain("The provider resets at 2026-09-04T03:30:00.000Z (Europe/London)");
+    expect(result.detail).toContain("limits.limits.wait_for_provider_ms");
+    expect(result.detail).toContain("(currently 3600000 ms)");
     expect(waited).toEqual([]);
     expect(double.judged).toHaveLength(1);
+  }, 60_000);
+
+  /**
+   * The park is on the ticket's record before the sleep, as an attempt's own
+   * park is: the attempt the review judged is written carrying the wait, so a
+   * run restarted mid-wait reads the instant (`parkedWait`) rather than
+   * spending a review against a limit still in force.
+   */
+  it("writes the attempt it judged, carrying the wait, to the ticket's record before it sleeps", async () => {
+    const { contract, config, agent } = setUp();
+    const RESETS_AT = "2026-09-04T03:30:00.000Z";
+    const double = scripted([() => outage("429 rate limited · resets 4:30am (Europe/London)"), approval]);
+    const attemptsFile = join(config.state_root, `${contract.ticket_id}.attempts.json`);
+    let onDiskWhileWaiting: { attempts: Array<{ attempt_id: string; wait: { until: string } | null }> } | null = null;
+    const result = await runTicket({
+      config,
+      contract,
+      now: () => new Date("2026-09-04T00:15:00.000Z"),
+      sleep: async () => {
+        onDiskWhileWaiting = existsSync(attemptsFile) ? JSON.parse(readFileSync(attemptsFile, "utf8")) : null;
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("approved");
+    const judged = result.rounds[0]!.attempt;
+    const held = onDiskWhileWaiting as { attempts: Array<{ attempt_id: string; wait: { until: string } | null }> } | null;
+    expect(held?.attempts.map((attempt) => attempt.attempt_id)).toEqual([judged.attempt_id]);
+    expect(parkedWait(held as never)?.until).toBe(RESETS_AT);
+    // Written once: the run's own write at the end appends nothing twice.
+    const after = JSON.parse(readFileSync(attemptsFile, "utf8")) as { attempts: Array<{ attempt_id: string }> };
+    expect(after.attempts.map((attempt) => attempt.attempt_id)).toEqual([judged.attempt_id]);
+    expect(judged.wait?.until).toBe(RESETS_AT);
+  }, 60_000);
+
+  it("adds the refused review's usage to the bundle of the review taken once more", async () => {
+    const { contract, config, agent } = setUp();
+    const withUsage = <T extends { artifact: ReviewArtifact }>(
+      answer: T,
+      usage: { input: number; output: number; micros: number; ms: number },
+    ): T => ({
+      ...answer,
+      artifact: {
+        ...answer.artifact,
+        cost_micros: usage.micros,
+        latency_ms: usage.ms,
+        model: { ...answer.artifact.model, input_tokens: usage.input, output_tokens: usage.output, cost_basis: "transport_reported" },
+      },
+    });
+    const double = scripted([
+      () => withUsage(outage("HTTP 529 after 3 attempts"), { input: 1_000, output: 20, micros: 3_000, ms: 400 }),
+      () => withUsage(approval(), { input: 5_000, output: 700, micros: 90_000, ms: 9_000 }),
+    ]);
+    const result = await runTicket({
+      config,
+      contract,
+      sleep: async () => {},
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("approved");
+    const reviews = new BundleStore({ root: config.bundle_root, retainContext: true })
+      .forTicket(contract.ticket_id)
+      .filter((bundle) => bundle.kind === "review");
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]!.usage).toMatchObject({
+      input_tokens: 6_000,
+      output_tokens: 720,
+      cost_micros: 93_000,
+      cost_basis: "transport_reported",
+      wall_clock_ms: 9_400,
+    });
   }, 60_000);
 
   it("reviews once only where the review failed for anything but its provider", async () => {

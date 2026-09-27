@@ -487,9 +487,9 @@ describe("deleting from the Archive", () => {
     const dialog = screen.getByRole("dialog", { name: "Delete ticket" });
     expect(dialog.querySelector("p")?.textContent).toBe(
       "Delete “Retry the invoice webhook”? It is archived: its ticket, contract and plan, every attempt it " +
-        "recorded and the evidence those attempts sealed all go, and nothing of this is kept. This leaves " +
-        "the branch perbo/409-webhook-retry in git and its pull request on GitHub, and any worktree a run " +
-        "left, which is reclaimed later.",
+        "recorded and the evidence those attempts sealed all go. This leaves the branch " +
+        "perbo/409-webhook-retry in git and its pull request on GitHub, the stored objects under that " +
+        "evidence, which another ticket's evidence can name, and any worktree a run left, which is reclaimed later.",
     );
     // Keep it first, and the delete, which is never the primary, beside it.
     const actions = within(dialog).getAllByRole("button").map((button) => button.textContent);

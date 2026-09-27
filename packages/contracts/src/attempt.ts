@@ -343,7 +343,8 @@ export const ResumedFromSchema = z.strictObject({
 export type ResumedFrom = z.infer<typeof ResumedFromSchema>;
 
 /**
- * A wait the loop sat out inside an attempt (SCP-193).
+ * A wait the loop sat out after an attempt (SCP-193): before the attempt that
+ * followed it, or before the review of its change set was taken once more.
  *
  * A provider that answers `429 … You've hit your session limit · resets 4:30am
  * (Europe/London)` has told the run when it can work again. Recording the wait
@@ -611,8 +612,9 @@ export const ExecutionAttemptSchema = z.strictObject({
    */
   provisioning_verify: VerifiedCommitSchema.nullable().default(null),
   /**
-   * SCP-193: the wait the loop sat out before the attempt that followed this
-   * one, or null where nothing parked the run. Written when the wait starts
+   * SCP-193: the wait the loop sat out after this attempt — before the attempt
+   * that followed it, or before its review was taken once more — or null where
+   * nothing parked the run. Written when the wait starts
    * rather than when it ends, so a process killed mid-wait leaves the record
    * that lets the next `perbo run` honour the remainder. Defaulted, so a
    * record written before parking existed parses.

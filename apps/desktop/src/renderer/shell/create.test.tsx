@@ -181,14 +181,15 @@ describe("what the Archive's Delete asks (D-129)", () => {
 
   it("names the branch its delivery records, and the pull request it has", () => {
     expect(confirmDeleteFiled("Retry", ticket({ branch: "prb/409/retry", pullRequest: "https://github.com/o/r/pull/9" }))).toBe(
-      `${GOES} all go, and nothing of this is kept. This leaves the branch prb/409/retry in git and its pull ` +
-        "request on GitHub, and any worktree a run left, which is reclaimed later.",
+      `${GOES} all go. This leaves the branch prb/409/retry in git and its pull request on GitHub, the stored ` +
+        "objects under that evidence, which another ticket's evidence can name, and any worktree a run left, " +
+        "which is reclaimed later.",
     );
   });
 
   it("names the branch its attempts record where its delivery records none, and prefers the delivery's", () => {
     expect(confirmDeleteFiled("Retry", ticket(), "prb/409/from-the-attempts")).toContain(
-      "This leaves the branch prb/409/from-the-attempts in git, and any worktree",
+      "This leaves the branch prb/409/from-the-attempts in git, the stored objects",
     );
     expect(confirmDeleteFiled("Retry", ticket({ branch: "prb/409/delivered" }), "prb/409/from-the-attempts")).toContain(
       "the branch prb/409/delivered in git",
@@ -198,8 +199,8 @@ describe("what the Archive's Delete asks (D-129)", () => {
   it("says any branch it left where nothing records one, or the attempts are not read yet", () => {
     for (const recorded of [null, undefined])
       expect(confirmDeleteFiled("Retry", ticket(), recorded)).toBe(
-        `${GOES} all go, and nothing of this is kept. This leaves any branch it left in git, and any worktree a ` +
-          "run left, which is reclaimed later.",
+        `${GOES} all go. This leaves any branch it left in git, the stored objects under that evidence, which ` +
+          "another ticket's evidence can name, and any worktree a run left, which is reclaimed later.",
       );
   });
 

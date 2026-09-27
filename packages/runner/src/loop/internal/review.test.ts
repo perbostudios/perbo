@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SecretIndex, readSpoken, type ReviewArtifact } from "@perbo/contracts";
-import { flakyCheckFindings, incompleteReviewCauses, openFindingLines, routeReview } from "./review.js";
+import { flakyCheckFindings, incompleteReviewCauses, openFindingLines, reviewRetry, routeReview } from "./review.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "../../transport.js";
 import { finding, makeReview } from "../../test-support/records.js";
 
 describe("what made an incomplete review incomplete", () => {
@@ -76,6 +77,7 @@ const route = (
     remediationRound: 0,
     maxRounds: 2,
     configPath: "/repo/.perbo/config.json",
+    unwaited: null,
     ...overrides,
   });
 
@@ -312,5 +314,48 @@ describe("what a round prints of the findings its review left open", () => {
     expect(lines).toHaveLength(1);
     expect(readSpoken(lines[0]!)).toBeNull();
     expect(lines[0]).toMatch(/^finding: The unit check failed and then passed when it was run again on its own: mailer retries review round 2; SESSION \[redacted: materialized local secret\]\. /);
+  });
+});
+
+describe("the wait a review its provider refused sits out", () => {
+  const LIMITED = "429 rate limited · resets 4:30am (Europe/London)";
+  const NOW = new Date("2026-09-04T00:15:00.000Z");
+  const RESETS_AT = "2026-09-04T03:30:00.000Z";
+  const SIX_HOURS = 6 * 3_600_000;
+
+  it("waits until a stated reset within the bound, as a park", () => {
+    const retry = reviewRetry({ message: LIMITED, waitBoundMs: SIX_HOURS, clock: () => NOW });
+    expect(retry.retry).toBe(true);
+    if (!retry.retry) return;
+    expect(retry.waitMs).toBe(Date.parse(RESETS_AT) - NOW.getTime());
+    expect(retry.park?.until).toBe(RESETS_AT);
+  });
+
+  it("waits the fixed transport delay where no reset is stated", () => {
+    const retry = reviewRetry({ message: "HTTP 529 after 3 attempts", waitBoundMs: SIX_HOURS, clock: () => NOW });
+    expect(retry).toMatchObject({ retry: true, waitMs: TRANSPORT_RETRY_DELAY_MS, park: null });
+  });
+
+  it("reviews again at once where the stated reset has already passed", () => {
+    // The reset is read at NOW and measured against a clock that has since
+    // moved past it, which is what a reset already past is.
+    const readings = [NOW, new Date("2026-09-04T03:45:00.000Z")];
+    const clock = () => readings.shift() ?? new Date("2026-09-04T03:45:00.000Z");
+    const retry = reviewRetry({ message: LIMITED, waitBoundMs: SIX_HOURS, clock });
+    expect(retry).toMatchObject({ retry: true, waitMs: 0, park: null });
+    if (retry.retry) expect(retry.say).toContain("already passed");
+  });
+
+  it("does not review again before a reset past the bound, and names it", () => {
+    const retry = reviewRetry({ message: LIMITED, waitBoundMs: 3_600_000, clock: () => NOW });
+    expect(retry).toEqual({
+      retry: false,
+      unwaited: {
+        until: RESETS_AT,
+        zone: "Europe/London",
+        parkMs: Date.parse(RESETS_AT) - NOW.getTime(),
+        waitBoundMs: 3_600_000,
+      },
+    });
   });
 });

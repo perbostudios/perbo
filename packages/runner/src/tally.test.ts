@@ -148,6 +148,20 @@ describe("RunTally", () => {
     expect(readTally(lines.at(-1)!)).toMatchObject({ input_tokens: 30, output_tokens: 3, micros: 3000 });
   });
 
+  it("joins no review to an attempt whose only review bundle records no attempt, whatever change set it names", () => {
+    const store = new BundleStore({ root: join(scratch("perbo-tally-"), "bundles"), retainContext: true });
+    const lines: string[] = [];
+    const tally = new RunTally({ bundles: store, ticketId: TICKET, before: [], progress: (line) => lines.push(line) });
+    const only = attempt("att_0000000000000021", 1);
+    write(store, "execution", only.attempt_id, { input_tokens: 10, output_tokens: 1, cost_micros: 100, cost_basis: "transport_reported" });
+    // A bundle written before reviews recorded the attempt they judged: its
+    // change set is this attempt's, and nothing else is there to prefer.
+    write(store, "review", "rev_0000000000000021", { input_tokens: 700, output_tokens: 100, cost_micros: 100_000, cost_basis: "transport_reported" }, { changeset_id: only.changeset_id! });
+
+    tally.recount([only]);
+    expect(readTally(lines.at(-1)!)).toMatchObject({ input_tokens: 10, output_tokens: 1, micros: 100 });
+  });
+
   it("starts a ticket with nothing on record at zero", () => {
     const store = new BundleStore({ root: join(scratch("perbo-tally-"), "bundles"), retainContext: true });
     const lines: string[] = [];

@@ -409,7 +409,8 @@ export function confirmDelete(stage: "name" | "spec" | "plan", title: string): s
  * evidence they sealed, and the spec folder it was drafted from only where no
  * other ticket or open planning names it (`removeSpecFolder`). It leaves the
  * branch the ticket ran on and its pull request, which are git's and
- * GitHub's, and any worktree a run left, which the next provisioning
+ * GitHub's, the stored objects under that evidence, which another ticket's
+ * evidence can name, and any worktree a run left, which the next provisioning
  * reclaims. The branch is named where the ticket's delivery or its attempts
  * record one (`recordedBranch`, the summary's); where neither does, or the
  * summary is not read yet, it is "any branch it left".
@@ -428,8 +429,9 @@ export function confirmDeleteFiled(
   ];
   return (
     `Delete ${named}? It is archived: its ticket, contract and plan, every attempt it recorded and ` +
-    `the evidence those attempts sealed${spec} all go, and nothing of this is kept. ` +
-    `This leaves ${left.join(" and ")}, and any worktree a run left, which is reclaimed later.`
+    `the evidence those attempts sealed${spec} all go. ` +
+    `This leaves ${left.join(" and ")}, the stored objects under that evidence, which another ticket's ` +
+    "evidence can name, and any worktree a run left, which is reclaimed later."
   );
 }
 

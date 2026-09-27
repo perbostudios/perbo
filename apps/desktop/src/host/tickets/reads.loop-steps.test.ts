@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { loopSteps, loopTally, StageLog } from "../../renderer/tasks/task-context.js";
+import { costLabel, loopSteps, loopTally, StageLog } from "../../renderer/tasks/task-context.js";
 import type { Job } from "../../shared/protocol.js";
 import { attemptViews, ReportSchema } from "./reads.js";
 
@@ -11,6 +11,10 @@ import { attemptViews, ReportSchema } from "./reads.js";
  * contract over the runner's loop with a scripted executor, reviewer and
  * closure verifier: round 0 executed, sealed, checked and reviewed, and one
  * remediation round sealed, checked and verified closed.
+ *
+ * `scripts/capture-recorded-run.mjs` makes it from the built CLI: run it after
+ * `pnpm -r build` to write the fixture, and with `--check` to fail where the
+ * fixture is not what the CLI now produces. The fixture is never edited by hand.
  */
 const captured = JSON.parse(
   readFileSync(new URL("../../renderer/tasks/fixtures/recorded-run.json", import.meta.url), "utf8"),
@@ -62,6 +66,17 @@ describe("the loop page, live from the run's log and rebuilt from its records", 
     expect(shown(during).find(({ text }) => text === "Review round 1")?.reason).toBe("The review left one finding open.");
     for (const { text, reason } of shown(after).filter(({ text }) => text.startsWith("Running check")))
       expect(reason, text).toMatch(/^Result: passed\./);
+  });
+
+  it("shows the dollars `perbo inspect` totals over the same records, every call priced", () => {
+    const total = ReportSchema.parse(captured.report).total_cost;
+    expect(total.unavailable).toBe(0);
+    expect(loopTally({ jobs: [ended], active: undefined, attempts }).dollars).toBe(
+      costLabel({ cost: { micros: total.micros, partial: total.partial > 0, unavailable: total.unavailable } }),
+    );
+    expect(loopTally({ jobs: [live], active: live, attempts: [] }).dollars).toBe(
+      loopTally({ jobs: [ended], active: undefined, attempts }).dollars,
+    );
   });
 
   it("counts the same commands, files and spend once the run has ended as its last tally did", () => {

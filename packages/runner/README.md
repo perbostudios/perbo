@@ -14,7 +14,8 @@ The half of execution that is not the agent.
   says when it starts. On Codex a subagent's items reach the attempt's transcript marked
   `subagent`, so nothing reads them back as the executor's. Each adapter also hands the loop what the attempt has
   done so far whenever any of it moves (`onTally`): the commands admitted once each is settled — the
-  hook's answer or the call's result in — the usage the provider reported, and the paths a file tool
+  hook's answer or the call's result in, and on Codex a command it ran without asking the runner only
+  at the attempt's end — the usage the provider reported, and the paths a file tool
   was let write once its call is settled.
 - `tally.ts` — the run's `tally:` progress line (`tallyLine` in `@perbo/contracts`, D-104), printed
   whenever a figure moves: the running attempt's figures from its adapter, added to what the run's
@@ -95,7 +96,9 @@ The half of execution that is not the agent.
   - `internal/attempt.ts` — what the attempt ended as, and the record and bundle it leaves.
   - `internal/route.ts` — what an attempt that stopped, or a base conflict, comes to.
   - `internal/verify.ts` — D-061's closure verification and the routing that reads it.
-  - `internal/review.ts` — the independent review, its bundle, and the routing that reads its verdict.
+  - `internal/review.ts` — the independent review, its bundle, and the routing that reads its verdict;
+    a review its provider refused is taken once more after `reviewRetry`'s wait, a park put on the
+    attempt it judged (`Ledger.parkAfter`) and flushed to the ticket's record before the sleep.
   - `internal/deliver.ts` — the push, the pull request and SCP-202's merge step.
   - `internal/retained.ts` — `publishRetained`: a branch a run retained without publishing, pushed
     and its pull request opened later through that same delivery, without executing or reviewing
