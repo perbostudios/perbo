@@ -284,14 +284,14 @@ describe("the questions a stalled refinement leaves, beside a declined finding",
     ],
   };
   const stalled = { at: "2026-09-24T09:20:00.000Z", note: gateClosedNote("remediation_stalled") };
-  const detail = (verdicts: unknown[], history: unknown[] = [stalled], rounds: unknown[] = []) =>
-    ({ ticket: { ticket_id: "ticket_1", history }, attempts: [reviewAttempt, declinedRound, ...rounds], verdicts }) as never;
-  const answer = (finding_key: string, choice: string, decided_at = "2026-09-24T09:30:00.000Z") => ({
+  const detail = (verdicts: unknown[], history: unknown[] = [stalled]) =>
+    ({ ticket: { ticket_id: "ticket_1", history }, attempts: [reviewAttempt, declinedRound], verdicts }) as never;
+  const answer = (finding_key: string, choice: string) => ({
     review: { ticket_id: "ticket_1", reference: "PRB-1" },
     finding_key,
     decision: "decide",
     choice,
-    decided_at,
+    decided_at: "2026-09-24T09:30:00.000Z",
     superseded_at: null,
   });
 
@@ -313,27 +313,5 @@ describe("the questions a stalled refinement leaves, beside a declined finding",
     const humanClosed = { ...reviewAttempt, review: { ...reviewAttempt.review, findings: [finding({ key: "x", routing: "remediable", closure: "human" }), remediable("y")] } };
     const asked = questionsOnRecord({ ticket: { ticket_id: "ticket_1", history: [stalled] }, attempts: [humanClosed, declinedRound], verdicts: [] } as never);
     expect(asked.map((question) => question.id)).toEqual(["y"]);
-  });
-
-  it("asks again, and owes, a finding handed to a round that left it open, on the answer that round tried", () => {
-    // The person handed y on at 09:30, and the round given it at 09:40 left it open.
-    const leftOpen = {
-      review: null,
-      verification: { open_keys: ["y"], per_finding: [{ finding_key: "y" }], deterministic_failure: null },
-      bundles: [
-        {
-          kind: "review",
-          subject_id: "cv_att_3",
-          created_at: "2026-09-24T09:40:00.000Z",
-          inputs: { findings_given: "y", findings_open: "y" },
-        },
-      ],
-    };
-    const escalated = { at: "2026-09-24T09:45:00.000Z", note: gateClosedNote("escalated") };
-    const tried = detail([answer("y", "approach")], [stalled, escalated], [leftOpen]);
-    expect(questionsOnRecord(tried).map((question) => [question.id, question.choices.length])).toEqual([["y", 3]]);
-    expect(owedOnRecord(tried).map((question) => question.id)).toEqual(["y"]);
-    // Answered again after that round, it is handed on again.
-    expect(owedOnRecord(detail([answer("y", "approach", "2026-09-24T09:50:00.000Z")], [stalled, escalated], [leftOpen]))).toEqual([]);
   });
 });

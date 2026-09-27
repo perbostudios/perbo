@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  answersFinding,
+  answersReview,
   decidable,
   decisionChoicesFor,
   leftToPrinciple,
@@ -144,7 +144,7 @@ export interface SettledFindings {
   refusal: { sentence: string; open: ReadonlySet<string> } | null;
   /** What the loop has done on the review (`loopOnRecord`), which says who each finding is asked of. */
   loop: LoopOnReview;
-  /** Each standing answer that answers its finding (`answersFinding`), by finding. */
+  /** Each standing answer that answers the review (`answersReview`), by finding. */
   answers: ReadonlyMap<string, DecisionChoice>;
 }
 
@@ -156,12 +156,12 @@ const NOTHING_SETTLED: SettledFindings = { keys: new Set(), refusal: null, loop:
  * answer (D-132): shipped as it is by
  * a standing answer that answers that review, or closed by a round after it,
  * as the loop reads the record (`loopOnRecord`) — which also says whether the
- * loop has finished trying it. Which answers answer their finding is
- * `answersFinding`, the loop's rule, against the review's own bundle — the one
- * whose subject is its id — the time it was recorded, and the last round
- * handed the finding, as the loop reads them; only the ticket's own answers
- * are read, as `perbo run` reads them. The review is immutable, so this is read beside it, and so is the
- * deterministic failure the last round since it was refused on.
+ * loop has finished trying it. Which answers answer the review is
+ * `answersReview`, the loop's rule, against the review's own bundle — the one
+ * whose subject is its id — and the time it was recorded, as the loop reads
+ * it; only the ticket's own answers are read, as `perbo run` reads them. The
+ * review is immutable, so this is read beside it, and so is the deterministic
+ * failure the last round since it was refused on.
  */
 export function settledFindings(detail: {
   ticket: Pick<Ticket, "ticket_id" | "history">;
@@ -205,15 +205,11 @@ export function settledOnRecord(input: {
   const answered = input.verdicts.flatMap((row) => {
     const parsed = AnsweredSchema.safeParse(row);
     if (!parsed.success) return [];
-    const { review: named, decided_at, finding_key } = parsed.data;
+    const { review: named, decided_at } = parsed.data;
     if (named.ticket_id !== input.ticket_id) return [];
     // A decision names a review by its id, or the ticket or its pull request.
     const review_id = named.reference.startsWith("rev_") ? named.reference : null;
-    return answersFinding(
-      { finding_key, decided_at, review_id },
-      { review_id: input.review_id, recorded_at: onRecord.reviewed_at },
-      onRecord.loop,
-    )
+    return answersReview({ decided_at, review_id }, { review_id: input.review_id, recorded_at: onRecord.reviewed_at })
       ? [parsed.data]
       : [];
   });

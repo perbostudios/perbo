@@ -7173,14 +7173,47 @@ describe("a stopped run's ticket", () => {
       );
       seen.length = 0;
       const refusal =
-        "PRB-1's pull request #15 is open, and that is a record this machine does not own. Close or merge it on GitHub " +
-        "first; the work can be deleted or planned again after that.";
+        "PRB-1's pull request #15 is open, and that is a record this machine does not own. Close or merge it on GitHub, " +
+        "then Refresh from GitHub; the work can be deleted or planned again after that.";
       await expect(made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(refusal);
       await expect(made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(refusal);
       expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
       expect(existsSync(made.at), "the ticket").toBe(true);
       expect(existsSync(made.attempts), "the attempts record").toBe(true);
       expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(true);
+    });
+
+    it("reads the pull request again on Refresh from GitHub, and deletes the work once it reads closed", async () => {
+      const synced: string[][] = [];
+      let at = "";
+      const made = await stopped(async (binary, args, options) => {
+        const command = args.slice(1, args.indexOf("--repo"));
+        if (command[0] !== "sync") return runProcess(binary, args, options);
+        synced.push(command);
+        // What `perbo sync` records where `gh` reports the pull request closed:
+        // the delivery record, and the ticket where it waits.
+        const read = JSON.parse(readFileSync(at, "utf8")) as { delivery: Record<string, unknown> };
+        writeFileSync(at, JSON.stringify({ ...read, delivery: { ...read.delivery, state: "closed" } }));
+        return { code: 0, stdout: "", stderr: "", cancelled: false };
+      });
+      at = made.at;
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; delivery: Record<string, unknown> };
+      writeFileSync(
+        made.at,
+        JSON.stringify({
+          ...held,
+          state: "changes_requested",
+          delivery: { ...held.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+        }),
+      );
+      await expect(made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(
+        /PRB-1's pull request #15 is open/,
+      );
+      const sync = await made.service.request({ kind: "sync", repoId: made.repoId, key: "PRB-1" });
+      expect((await finished(made.service, sync.id)).state).toBe("completed");
+      expect(synced).toEqual([["sync", "PRB-1"]]);
+      await made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" });
+      expect(existsSync(made.at), "the ticket").toBe(false);
     });
   });
 

@@ -14,6 +14,28 @@ export const APPROVED_NOTE = "approved; a human merges it";
 export const incompleteNote = (outcome: string): string => `the attempt did not complete: ${outcome}`;
 
 /**
+ * The row a run the loop refused under its run lock writes, owed a person's
+ * answers after the command had moved the ticket (D-132): the ticket goes back
+ * to the state the command found it in — `changes_requested`, or `failed` —
+ * on a row of its own. Not a run's end: {@link runEndedOn} reads it as none,
+ * and {@link settledRow} passes over it.
+ */
+export const ANSWERS_OWED_NOTE =
+  "the loop refused this run: a person owes answers to findings its last review put to them, and none is handed to the executor";
+
+/**
+ * The row that left the ticket in the state its last row did, passing over
+ * every row that returned it there from a run refused for owed answers
+ * ({@link ANSWERS_OWED_NOTE}): how the run that put it there ended, which a
+ * refused run, which started nothing, does not change. Undefined for an empty
+ * history.
+ */
+export function settledRow<Row extends { to: string; note: string }>(history: readonly Row[]): Row | undefined {
+  const state = history.at(-1)?.to;
+  return history.findLast((row) => row.to === state && row.note !== ANSWERS_OWED_NOTE);
+}
+
+/**
  * The outcome a ticket's row records its run ending on — `APPROVED_NOTE`, a
  * `gateClosedNote` or an `incompleteNote` — or null where the row is not a
  * run's end. The desktop says each in its own words from this.
@@ -37,7 +59,8 @@ export type RetainedBranch =
  * `refusal`, and the desktop's merge screen says it.
  *
  * An approved run moves the ticket to `pr_open`; an escalated one to
- * `changes_requested` on the row that names it. Either one's branch is
+ * `changes_requested` on the row that names it, which a run refused for owed
+ * answers since does not change (`settledRow`). Either one's branch is
  * published later only where the ticket records no pull request, and only the
  * loop's own: a direct arm's delivery or a person's hand-off is not the loop's
  * to publish. What the branch itself has to be — the commit the review judged,
@@ -47,7 +70,7 @@ export type RetainedBranch =
 export function retainedBranch(ticket: Pick<Ticket, "key" | "state" | "history" | "delivery">): RetainedBranch {
   const { key, delivery } = ticket;
   const refused = (refusal: string): RetainedBranch => ({ branch: null, outcome: null, refusal });
-  const last = ticket.history[ticket.history.length - 1];
+  const last = settledRow(ticket.history);
   const outcome =
     ticket.state === "pr_open"
       ? "approved"

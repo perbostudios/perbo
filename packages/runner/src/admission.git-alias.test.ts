@@ -49,6 +49,10 @@ const DEFINITIONS = [
   "git -C . -c alias.x='branch -D' x main",
   "git --weird -c alias.x='branch -D' x main",
   "git -c $KEY='branch -D' x main",
+  // A `--config-env` is split at its last `=`, so a variable name the line
+  // builds can end the key anywhere, past an option the walk does not know too.
+  "git --config-env url.https://e/=$V fetch",
+  "git --weird --config-env url.https://e/=$V fetch",
   // The environment git reads its config from.
   "GIT_CONFIG_PARAMETERS=\"'alias.x=branch -D'\" git x main",
   "GIT_CONFIG_PARAMETERS=\"'color.ui=always' 'alias.x=branch -D'\" git x main",
@@ -84,6 +88,21 @@ const DEFINITIONS = [
   "local -x GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
   "export -- GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
   "export PAGER GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
+  // Handed to `env` and the assigning builtins as the shell hands them their
+  // words, quotes and backslashes removed, and to `env` whatever the name
+  // before an operand's `=`.
+  "env -i 'GIT_CONFIG_GLOBAL=/tmp/c' git status",
+  'env "GIT_CONFIG_SYSTEM=/tmp/c" git status',
+  "env GIT_CONFIG_\\GLOBAL=/tmp/c git status",
+  "export 'GIT_CONFIG_GLOBAL=/tmp/c'; git status",
+  'declare -x "GIT_CONFIG_COUNT=1"; git x main',
+  "env 1=2 GIT_CONFIG_GLOBAL=/tmp/c git status",
+  "env 'A B=1' GIT_CONFIG_GLOBAL=/tmp/c git status",
+  // `NAME+=value` appends to what NAME already holds, so what it sets is built when the line runs.
+  "GIT_CONFIG_COUNT+=1 git x main",
+  "GIT_CONFIG_PARAMETERS+=\" 'color.ui=always'\" git x main",
+  "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0+=.x GIT_CONFIG_VALUE_0='branch -D' git x main",
+  "export GIT_CONFIG_GLOBAL+=.cfg; git status",
   // GIT_CONFIG_PARAMETERS in both of git's forms: `'key=value'` and `'key'='value'`.
   "GIT_CONFIG_PARAMETERS=\"'alias.x'='branch -D'\" git x main",
   "GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'alias.x'='branch -D'\" git x main",
@@ -142,6 +161,8 @@ describe("a git line that sets config and defines no alias", () => {
     "git config get alias.x",
     "git config --get-regexp '^alias\\.'",
     "git config --list",
+    "git -c 'color.ui=always' status",
+    "git --config-env=color.ui=COLOR status",
   ]) {
     it(`admits ${JSON.stringify(line)}`, () => {
       expect(claude(line), line).toMatchObject({ decision: "allowed" });

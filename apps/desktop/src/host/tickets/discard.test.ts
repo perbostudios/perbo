@@ -165,7 +165,7 @@ describe("discardTicket", () => {
       discardTicket(deps({ ticket: ticket({ state: "pr_open" }) }), repo, "PRB-1"),
     ).resolves.toBe(
       "PRB-1's pull request is open, and that is a record this machine does not own. Close or merge it " +
-        "on GitHub first; the work can be deleted or planned again after that.",
+        "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
     );
     expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
   });
@@ -179,7 +179,7 @@ describe("discardTicket", () => {
     };
     await expect(discardTicket(deps({ ticket: published }), repo, "PRB-1")).resolves.toBe(
       "PRB-1's pull request #15 is open, and that is a record this machine does not own. Close or merge it " +
-        "on GitHub first; the work can be deleted or planned again after that.",
+        "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
     );
     expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
     // Closed on GitHub, as `perbo sync` records it, and the work is the person's to delete.

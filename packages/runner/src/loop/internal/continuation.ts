@@ -3,7 +3,7 @@ import {
   ExecutionAttemptSchema,
   NodeReviewsSchema,
   ReviewArtifactSchema,
-  answersFinding,
+  answersReview,
   attemptsFileName,
   decidable,
   decisionChoicesFor,
@@ -200,8 +200,7 @@ export function judgedOnRecord(input: {
 }
 
 /**
- * The decisions that answer their findings on a review (`answersFinding`): one
- * per finding key.
+ * The decisions that answer a review (`answersReview`): one per finding key.
  * None answer a review that is not `decidable`: one that did not judge the
  * whole change, or that routed its findings to the executor while the loop is
  * still trying, so the run goes on as though nothing were answered.
@@ -219,7 +218,7 @@ export function decisionsOn(
       .filter(
         (row) =>
           keys.has(row.finding_key) &&
-          answersFinding(row, { review_id: review.review_id, recorded_at: reviewed_at }, loop),
+          answersReview(row, { review_id: review.review_id, recorded_at: reviewed_at }),
       )
       .map((row) => [row.finding_key, row]),
   );
@@ -359,9 +358,10 @@ export class AnswersOwedError extends Error {
  * The branch the ticket's records name is read in the checkout itself
  * (`ticketBranchStillAt`, which the desktop's host reads too): one whose tip
  * is no longer the commit the review, or the last verification after it,
- * judged carries work nobody judged, and that run reviews it afresh. An explicit `--resume-from` names the attempt whose work the run
- * carries on, which a fresh review then judges, and a re-level merges the
- * base into an open pull request's branch: neither is refused here.
+ * judged carries work nobody judged, and that run reviews it afresh. An
+ * explicit `--resume-from` names the attempt whose work the run carries on,
+ * which a fresh review then judges, and a re-level merges the base into an
+ * open pull request's branch: neither is refused here.
  */
 export async function refuseOwedAnswers(input: {
   config: Pick<

@@ -890,6 +890,26 @@ describe("the files the loop commits with the spec", () => {
     expect(files.map((file) => file.path)).toContain("specs/activation-email/spec.md");
   });
 
+  it("leaves out the interview's session record, and the copy of it a killed interview left before renaming it", () => {
+    const { repo } = repository();
+    const folder = join(repo, "specs", "activation-email");
+    writeFileSync(join(folder, INTERVIEW_SESSION_FILE), JSON.stringify({ session_id: "sess-1" }));
+    writeFileSync(
+      join(folder, `${INTERVIEW_SESSION_FILE}.4242.0f8e2a4c-3b1d-4c5e-9a7f-1d2e3f4a5b6c`),
+      JSON.stringify({ session_id: "sess-2" }),
+    );
+    writeFileSync(join(folder, "notes.md"), "# Notes\n");
+    const files = specCommitFiles({
+      repositoryRoot: repo,
+      store: storeDir(repo, null),
+      specPath: "specs/activation-email/spec.md",
+    });
+    expect(files.map((file) => file.path).filter((path) => path.startsWith("specs/"))).toEqual([
+      "specs/activation-email/spec.md",
+      "specs/activation-email/notes.md",
+    ]);
+  });
+
   it("refuses a recorded spec path with no folder of its own, rather than walking the repository", () => {
     const root = mkdtempSync(join(scratch, "root-spec-"));
     writeFileSync(join(root, "spec.md"), SPEC);

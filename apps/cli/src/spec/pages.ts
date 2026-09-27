@@ -103,10 +103,13 @@ export function readNodePageInputs(args: {
  * that record is bookkeeping: it names the session writing the folder and is
  * rewritten by the next one, so committing it would put a hash on the record
  * that the following interview moves, and every later run would stop over a
- * spec nobody had edited. The other two are taken only where the checkout has
- * changed them, from `git status`: `CONTEXT.md` and the ADR folder belong to
- * the repository rather than to this ticket, and committing the ones nobody
- * touched would put every ADR on every branch.
+ * spec nobody had edited. The copy an interview writes beside the record and
+ * renames over it (`.interview.json.<pid>.<uuid>`) is the same bookkeeping,
+ * and one a killed interview left before the rename is left out with it. The
+ * other two are taken only where the checkout has changed them, from `git
+ * status`: `CONTEXT.md` and the ADR folder belong to the repository rather
+ * than to this ticket, and committing the ones nobody touched would put every
+ * ADR on every branch.
  *
  * `spec.md` is first and the rest are sorted, so two admissions of the same
  * checkout record the same list in the same order.
@@ -130,9 +133,12 @@ export function specCommitFiles(args: {
     );
   }
   const folder = args.specPath.split("/").slice(0, -1).join("/");
-  const inFolder = filesUnder(args.repositoryRoot, folder).filter(
-    (path) => path !== args.specPath && !path.endsWith(`/${INTERVIEW_SESSION_FILE}`),
-  );
+  const inFolder = filesUnder(args.repositoryRoot, folder).filter((path) => {
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    return (
+      path !== args.specPath && name !== INTERVIEW_SESSION_FILE && !name.startsWith(`${INTERVIEW_SESSION_FILE}.`)
+    );
+  });
   const changed = changedSince(args.repositoryRoot, ["CONTEXT.md", adrFolder(args.store)]);
   const paths = [args.specPath, ...inFolder.sort(), ...changed.sort()];
   return [...new Set(paths)].map((path) => ({

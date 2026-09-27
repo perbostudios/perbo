@@ -3,13 +3,24 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DECISION_WORDS, EXIT_CODES, findingKey, gateClosedNote, type Finding } from "@perbo/contracts";
+import {
+  ANSWERS_OWED_NOTE,
+  DECISION_WORDS,
+  EXIT_CODES,
+  TicketSchema,
+  findingKey,
+  gateClosedNote,
+  incompleteNote,
+  transition,
+  type Finding,
+  type Ticket,
+} from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { initRepository } from "@perbo/test-support";
 import { admitCommandLine } from "../admit.js";
 import { verdictCommandLine } from "../verdict/index.js";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
-import { readTicket, storeDir } from "../../store/tickets.js";
+import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { makeReview } from "../../test-support/records.js";
 import { recordStreams } from "../../test-support/streams.js";
@@ -231,14 +242,9 @@ async function run(
   }
 }
 
-async function decide(
-  at: ReturnType<typeof fixture>,
-  key: string,
-  choice: string,
-  argv: readonly string[] = [],
-): Promise<number> {
+async function decide(at: ReturnType<typeof fixture>, key: string, choice: string): Promise<number> {
   return runCommandLine(verdictCommandLine, {
-    argv: [at.key, "--decide", key, "--choice", choice, "--author", "Owen <owen@example.com>", "--repo", at.repo, ...argv],
+    argv: [at.key, "--decide", key, "--choice", choice, "--author", "Owen <owen@example.com>", "--repo", at.repo],
     streams: recordStreams(),
     cwd: at.repo,
     now: new Date(),
@@ -370,60 +376,72 @@ const git = (repo: string, ...args: string[]): string =>
     },
   }).trim();
 
-describe("perbo run after a round left open a finding the person handed on", () => {
-  it("does not hand it again on the answer that round tried, and is refused until it is answered again", async () => {
-    const at = await stalledTicket();
-    const store = storeDir(at.repo, null);
-    expect(await decide(at, SHIPPED, "ship-as-is")).toBe(0);
-    expect(await decide(at, HANDED, "let-it-decide")).toBe(0);
-    const tried: string[][] = [];
-    const second = await run(at, { hooks: { review: noReview, verify: verifier(tried, () => []) } });
-    expect(tried).toEqual([[HANDED]]);
-    expect(second.code, second.err).toBe(2);
-    expect((JSON.parse(second.out) as { outcome: string }).outcome).toBe("escalated");
-    const before = readTicket(store, at.key);
-
-    // The answer that round tried answers the finding no more: nothing is
-    // handed on, so the same brief is not bought again.
-    const refused = await run(at, { hooks: nothingRuns });
-    expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
-    expect(refused.err).toContain(`left 1 finding(s) for you to answer (${HANDED.slice(0, 12)})`);
-    expect(readTicket(store, at.key)).toEqual(before);
-
-    // Answered again, it is handed on again, and delivered once a round closes it.
-    expect(await decide(at, HANDED, "approach", ["--replace", "--note", "Compute the total from its inputs."])).toBe(0);
-    const again: string[][] = [];
-    const third = await run(at, { hooks: { review: noReview, verify: verifier(again, () => [HANDED]) } });
-    expect(again).toEqual([[HANDED]]);
-    expect(third.code, third.err).toBe(0);
-    expect(readTicket(store, at.key).state).toBe("pr_open");
-  }, 300_000);
-});
-
 describe("perbo run where the loop refuses what the command let through", () => {
-  it("puts the ticket back where it was before the command moved it", async () => {
-    const at = await stalledTicket();
-    const store = storeDir(at.repo, null);
-    const before = readTicket(store, at.key);
-    const branch = before.delivery.branch!;
-    const judged = git(at.repo, "rev-parse", `refs/heads/${branch}`);
-    // A commit a person made on the branch by hand: the command reviews that
-    // afresh, so it lets the run through and moves the ticket...
-    const byHand = git(at.repo, "commit-tree", `${judged}^{tree}`, "-p", judged, "-m", "a fix by hand");
-    git(at.repo, "update-ref", `refs/heads/${branch}`, byHand);
-    // ...and by the time the loop holds its lock the branch is back at the
-    // commit judged, which the loop refuses.
-    const refused = await run(at, {
-      hooks: nothingRuns,
-      preflight: (request) => {
-        git(at.repo, "update-ref", `refs/heads/${branch}`, judged);
-        return okPreflight(request);
-      },
-    });
-    expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
-    expect(refused.err).toContain(`error: ${at.key}'s last run finished trying and left 2 finding(s) for you to answer`);
-    expect(readTicket(store, at.key)).toEqual(before);
-  }, 300_000);
+  // Another run of the ticket ends between the command's reading of it and
+  // the loop's: its rows, and the pull request it published, are on the
+  // ticket by the time the loop refuses.
+  it.each([
+    ["changes_requested", gateClosedNote("remediation_stalled")],
+    ["failed", incompleteNote("terminated")],
+  ] as const)(
+    "appends the row that returns it to %s, and every row the other run wrote stands",
+    async (left, ending) => {
+      const at = await stalledTicket();
+      const store = storeDir(at.repo, null);
+      const branch = readTicket(store, at.key).delivery.branch!;
+      const judged = git(at.repo, "rev-parse", `refs/heads/${branch}`);
+      // A commit a person made on the branch by hand: the command reviews that
+      // afresh, so it lets the run through...
+      const byHand = git(at.repo, "commit-tree", `${judged}^{tree}`, "-p", judged, "-m", "a fix by hand");
+      git(at.repo, "update-ref", `refs/heads/${branch}`, byHand);
+      let meanwhile: Ticket | null = null;
+      const refused = await run(at, {
+        hooks: nothingRuns,
+        preflight: (request) => {
+          // ...the other run ends, publishing its pull request...
+          let other = transition(readTicket(store, at.key), "ready", "new attempt after changes_requested");
+          other = transition(other, "provisioning", "run started against plan_other");
+          for (const to of ["executing", "verifying", "independent_review"] as const) other = transition(other, to, to);
+          other = transition(other, left, ending);
+          meanwhile = TicketSchema.parse({
+            ...other,
+            delivery: {
+              ...other.delivery,
+              pull_request_url: "https://github.com/o/r/pull/16",
+              pull_request_number: 16,
+              state: "open",
+              opened_by: "loop",
+              observed_at: new Date().toISOString(),
+            },
+          });
+          writeTicket(store, meanwhile);
+          // ...and by the time the loop holds its lock the branch is back at
+          // the commit judged, which the loop refuses.
+          git(at.repo, "update-ref", `refs/heads/${branch}`, judged);
+          return okPreflight(request);
+        },
+      });
+      expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
+      expect(refused.err).toContain(`error: ${at.key}'s last run finished trying and left 2 finding(s) for you to answer`);
+      const ticket = readTicket(store, at.key);
+      const other = meanwhile!;
+      // Appended to, never rewritten: the other run's rows and its pull request stand.
+      expect(ticket.history.slice(0, other.history.length)).toEqual(other.history);
+      expect(ticket.delivery).toEqual(other.delivery);
+      expect(ticket.history.slice(other.history.length)).toMatchObject([
+        { from: left, to: "ready", note: `new attempt after ${left}` },
+        { from: "ready", to: "provisioning" },
+        { from: "provisioning", to: left, note: ANSWERS_OWED_NOTE },
+      ]);
+      expect(ticket.state).toBe(left);
+
+      // The next run is refused before it moves the ticket, as any run owed answers is.
+      const again = await run(at, { hooks: nothingRuns });
+      expect(again.code, again.err).toBe(EXIT_CODES.did_not_complete);
+      expect(readTicket(store, at.key)).toEqual(ticket);
+    },
+    300_000,
+  );
 });
 
 /**

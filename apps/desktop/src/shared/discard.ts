@@ -29,7 +29,9 @@ export const ANOTHER_PLANNING_HOLDS = "Another planning holds this plan.";
  * or its delivery record says `gh` last saw its pull request open — an
  * escalated run publishes (D-065) and leaves the ticket at `changes_requested`
  * with one, and a re-run that failed keeps the one an earlier round opened.
- * Neither delete nor Plan it again reaches such a ticket.
+ * Neither delete nor Plan it again reaches such a ticket. Only a sync reads
+ * that record again, so the stopped page offers one while it reads open
+ * (`deletePullRequestOpen` names it).
  */
 export const pullRequestOpen = (ticket: Pick<Ticket, "state" | "delivery">): boolean =>
   ticket.state === "pr_open" || ticket.delivery.state === "open";
@@ -37,9 +39,10 @@ export const pullRequestOpen = (ticket: Pick<Ticket, "state" | "delivery">): boo
 /**
  * The one stage a delete, and Plan it again, does not reach: the pull request
  * is on GitHub, a record this machine does not own. Named by its number where
- * the record holds one.
+ * the record holds one, with the way to read it again once it is closed or
+ * merged: Refresh from GitHub, on the stopped page and the review page.
  */
 export const deletePullRequestOpen = (ticket: Pick<Ticket, "key" | "delivery">): string =>
   `${ticket.key}'s pull request${ticket.delivery.pull_request_number === null ? "" : ` #${ticket.delivery.pull_request_number}`} ` +
-  "is open, and that is a record this machine does not own. Close or merge it on GitHub first; the work " +
-  "can be deleted or planned again after that.";
+  "is open, and that is a record this machine does not own. Close or merge it on GitHub, then Refresh from " +
+  "GitHub; the work can be deleted or planned again after that.";

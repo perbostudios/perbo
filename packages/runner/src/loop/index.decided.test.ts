@@ -482,38 +482,6 @@ describe("a person's answer that hands the finding to the executor", () => {
     expect(second.decided.map((row) => row.finding_key)).not.toContain(forPerson[0]!.key);
   }, 90_000);
 
-  it("does not hand it again on the answer a round left it open on, and refuses the next run until it is answered again", async () => {
-    const { contract, config } = await stoppedForPerson();
-    const answers = [
-      decision(forPerson[0]!.key, "Keep package-lock.json.", new Date(), "approach"),
-      decision(forPerson[1]!.key, DECISION_WORDS.ship_as_is),
-    ];
-    const second = await runTicket({
-      config: { ...config, max_remediation_rounds: 1 },
-      contract,
-      decided: answers,
-      hooks: { agent: fixing().run as never, review: noModel.review, verify: leavesOpen([]) },
-    });
-    expect(second.outcome).toBe("escalated");
-    const history = [{ at: new Date().toISOString(), note: gateClosedNote(second.outcome) }];
-    await expect(runTicket({ config, contract, history, decided: answers, hooks: noModel })).rejects.toThrow(
-      `left 1 finding(s) for you to answer (${forPerson[0]!.key.slice(0, 12)})`,
-    );
-
-    // Answered again after that round, it is handed on again.
-    const agent = fixing();
-    const again = await runTicket({
-      config,
-      contract,
-      history,
-      decided: [decision(forPerson[0]!.key, "Delete pnpm-lock.yaml.", new Date(Date.now() + 1000), "approach"), answers[1]!],
-      hooks: { agent: agent.run as never, review: noModel.review, verify: closesEverything([]) },
-    });
-    expect(agent.calls).toHaveLength(1);
-    expect(agent.calls[0]).toContain("Delete pnpm-lock.yaml.");
-    expect(again.outcome).toBe("approved");
-  }, 120_000);
-
   it("delivers again on the same answers after a verified round, executing and reviewing nothing", async () => {
     const { contract, config } = await stoppedForPerson();
     const answers = [

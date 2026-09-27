@@ -1033,11 +1033,16 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   sync: (request) =>
     job("sync", request.repoId, request.key, () => {
       const { ticket } = ticketRow(request.key);
-      if (ticket.delivery.state === "open") {
+      if (ticket.delivery.state !== "open") return;
+      // The sample's pull request is merged where the ticket waits at
+      // `pr_open`, and was closed on GitHub where an escalated run published
+      // it and the ticket waits elsewhere (D-129): the record says so, and the
+      // ticket stays where it is.
+      if (ticket.state === "pr_open") {
         moveTicket(ticket, [{ to: "merged", note: "The pull request was merged." }]);
         ticket.delivery.state = "merged";
-        ticket.delivery.observed_at = new Date().toISOString();
-      }
+      } else ticket.delivery.state = "closed";
+      ticket.delivery.observed_at = new Date().toISOString();
     }),
   // The merge press on a retained branch: pushed and its pull request opened
   // as the host does it, refused as the CLI refuses it

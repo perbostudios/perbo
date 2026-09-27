@@ -1004,6 +1004,17 @@ function readWords(words: Word[], context: Context, expand: number[]): Analysis 
         };
       }
       i += wrapper.operands ?? 0;
+      // `env` reads every operand that holds an `=` as an assignment, whatever
+      // stands before it — `env 'A B=1' x`, `env 1=2 x` — where the shell
+      // reads only a name there, so its program is the first word that holds
+      // none.
+      if (program === "env") {
+        while (i < words.length && literal(words[i]!) && words[i]!.value.indexOf("=") > 0) {
+          const stands = placeholderStands(words[i]!, `a word of ${program}, which runs the command`);
+          if (stands !== null) return stands;
+          i += 1;
+        }
+      }
       continue;
     }
     if (SHELLS.has(basename(value))) {

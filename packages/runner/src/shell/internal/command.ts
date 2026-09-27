@@ -364,7 +364,8 @@ export function builtOptionFinding(verb: string, word: Word, keep: string, conte
 }
 
 export const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
-export const isAssignment = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
+/** A word that assigns a variable in front of a command, `NAME=…` or `NAME+=…`, which appends to it. */
+export const isAssignment = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(value);
 
 export const optionSet = (values: readonly string[] | undefined) => new Set(values ?? []);
 

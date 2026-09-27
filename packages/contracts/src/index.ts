@@ -312,7 +312,7 @@ export type {
   Waiver,
 } from "./review.js";
 export {
-  answersFinding,
+  answersReview,
   DECISION_CHOICES,
   DECISION_WORDS,
   decidable,
@@ -475,7 +475,15 @@ export type {
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
 export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
 export type { TicketTransition } from "./ticket-transitions.js";
-export { APPROVED_NOTE, gateClosedNote, incompleteNote, retainedBranch, runEndedOn } from "./retained.js";
+export {
+  ANSWERS_OWED_NOTE,
+  APPROVED_NOTE,
+  gateClosedNote,
+  incompleteNote,
+  retainedBranch,
+  runEndedOn,
+  settledRow,
+} from "./retained.js";
 export type { RetainedBranch } from "./retained.js";
 export {
   commitCarriesArm,

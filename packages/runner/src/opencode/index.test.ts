@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { LimitsTableSchema, OPENCODE_SESSION_ATTEMPTS, OPENCODE_SESSION_RETRY_MS } from "@perbo/contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LimitsTableSchema, OPENCODE_SESSION_RETRY_MS } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import type { AgentRequest } from "../adapter.js";
 import { AttemptCeilings } from "../ceilings.js";
@@ -302,15 +302,20 @@ describe("the OpenCode executor", () => {
   it(
     "ends an OpenCode that stopped while its catalogue was waited for as the agent's error, saying why it stopped",
     async () => {
-      const started = Date.now();
-      const { fake, run } = attempt({ exitAtSession: 1, turns: [{ steps: [] }] });
-      const result = await run;
-      expect(result.termination.reason).toBe("agent_error");
-      expect(result.termination.detail).toContain("OpenCode stopped before completing (3): opencode crashed");
-      // No session was asked for after the process was gone, and none was
-      // waited for: a snapshot asked again waits OPENCODE_SESSION_RETRY_MS first.
-      expect(fake.received().filter((line) => line["method"] === "session/new")).toHaveLength(1);
-      expect(Date.now() - started).toBeLessThan((OPENCODE_SESSION_ATTEMPTS - 1) * OPENCODE_SESSION_RETRY_MS);
+      // Counted rather than timed, so the fake's own start, however slow, is no part of it.
+      const timers = vi.spyOn(globalThis, "setTimeout");
+      try {
+        const { fake, run } = attempt({ exitAtSession: 1, turns: [{ steps: [] }] });
+        const result = await run;
+        expect(result.termination.reason).toBe("agent_error");
+        expect(result.termination.detail).toContain("OpenCode stopped before completing (3): opencode crashed");
+        // No session was asked for after the process was gone, and none was
+        // waited for: a snapshot asked again waits OPENCODE_SESSION_RETRY_MS first.
+        expect(fake.received().filter((line) => line["method"] === "session/new")).toHaveLength(1);
+        expect(timers.mock.calls.filter(([, ms]) => ms === OPENCODE_SESSION_RETRY_MS)).toEqual([]);
+      } finally {
+        timers.mockRestore();
+      }
     },
     SPAWN_TEST_TIMEOUT_MS,
   );

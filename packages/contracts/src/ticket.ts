@@ -694,7 +694,13 @@ export const TicketSchema = z.strictObject({
       checks: [],
       checks_state: null,
     }),
-  /** Appended to, never rewritten. A run not recorded is lost permanently. */
+  /**
+   * Appended to, never rewritten. A run not recorded is lost permanently, and
+   * a run that started nothing still leaves its rows: one the loop refused for
+   * owed answers after the command moved the ticket appends the row that
+   * returns it (`ANSWERS_OWED_NOTE`, D-132), and every row another command
+   * wrote meanwhile stands.
+   */
   history: z
     .array(
       z.strictObject({

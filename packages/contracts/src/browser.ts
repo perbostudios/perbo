@@ -11,7 +11,7 @@ export type { ApproachRecord, GraphEdge } from "./approach.js";
 export { costOf, formatUsd, rollCosts } from "./cost.js";
 export type { Cost, CostRoll } from "./cost.js";
 export {
-  answersFinding,
+  answersReview,
   DECISION_CHOICES,
   DECISION_WORDS,
   decidable,
@@ -69,7 +69,15 @@ export {
   VERIFICATION_KINDS,
 } from "./plan.js";
 export type { AcceptanceCriterion, PlanContract, PlanNode, VerificationKind } from "./plan.js";
-export { APPROVED_NOTE, gateClosedNote, incompleteNote, retainedBranch, runEndedOn } from "./retained.js";
+export {
+  ANSWERS_OWED_NOTE,
+  APPROVED_NOTE,
+  gateClosedNote,
+  incompleteNote,
+  retainedBranch,
+  runEndedOn,
+  settledRow,
+} from "./retained.js";
 export type { RetainedBranch } from "./retained.js";
 export { isPlannedP3Path } from "./risk.js";
 export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";

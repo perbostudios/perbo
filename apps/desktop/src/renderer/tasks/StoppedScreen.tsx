@@ -33,7 +33,8 @@ import { deletePullRequestOpen, pullRequestOpen } from "../../shared/discard.js"
  * and what stays ({@link confirmPlanAgain}), and once confirmed opens the
  * planning over the plan it drafts by itself. Nothing here changes the
  * lifecycle — the ticket stays where the stop left it until one of the three
- * is taken. At the other end of the same row is the way to the paused loop,
+ * is taken. Where its pull request reads open, Refresh from GitHub stands in
+ * for Delete and Plan it again, and reads it again (D-129). At the other end of the same row is the way to the paused loop,
  * where the agents' recorded output is and the way back here, and the
  * highlighted Continue the task at the far right.
  */
@@ -88,10 +89,13 @@ export function StoppedScreen(context: TaskContext) {
   // (D-132). A ticket whose pull request is open — at `pr_open`, or an
   // escalated run's that published (D-065) — is offered neither this nor
   // Delete, because a ticket with one is not deleted, and the page says so in
-  // one sentence naming it (D-129).
+  // one sentence naming it (D-129). Nothing else reads the delivery record of
+  // a ticket past `pr_open` again, so the page offers the sync that does:
+  // once it reads the pull request closed or merged, both return.
   const spent =
     ticket.state === "failed" || ticket.state === "cancelled" || (ticket.state === "changes_requested" && projection.recoverable);
   const prOpen = pullRequestOpen(ticket);
+  const refreshable = prOpen && ticket.state !== "pr_open";
   const replannable = spec !== null && !prOpen;
   // Whether Plan it again can be pressed now, which is what a hover may point to.
   const planAgainLive = replannable && spent;
@@ -201,6 +205,17 @@ export function StoppedScreen(context: TaskContext) {
         {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
       </div>
       <div className="approve-actions pane-confirm stopped-actions">
+        {refreshable && (
+          <Button
+            disabled={busy || action.isPending}
+            onClick={() => {
+              setError(null);
+              action.mutate({ kind: "sync", repoId, key: ticket.key });
+            }}
+          >
+            Refresh from GitHub
+          </Button>
+        )}
         {!prOpen && (
           <Button disabled={held} onClick={() => setDeleting(true)}>
             Delete this work

@@ -82,6 +82,7 @@ import {
   type MergedTicketContext,
 } from "@perbo/runner";
 import {
+  ANSWERS_OWED_NOTE,
   DECIDED_DELIVERY_NOTE,
   TICKET_TRANSITIONS,
   retainedBranch,
@@ -236,13 +237,17 @@ export interface TicketRuns {
    */
   starting(work: AdmittedWork, relevel: boolean): number | null;
   /**
-   * D-132: a run the loop refused under its run lock, owed a person's answers,
-   * started nothing, so the ticket goes back to `before`, the record it had
-   * before `starting` moved it, where the rows since are the ones `starting`
-   * wrote; a row anything else wrote since stands, and so does the ticket.
+   * D-132: a run the loop refused under its run lock, owed a person's answers
+   * after `starting` moved the ticket, started nothing. History is never
+   * rewritten: where the ticket is still at `provisioning` on this run's own
+   * row, reopened in one step from the state `starting` found it in, a row is
+   * appended that returns it there (`ANSWERS_OWED_NOTE`) — `changes_requested`,
+   * where a run that finished trying left it, or `failed`, where a later run
+   * that did not complete left it. Every row written since stands, and a
+   * ticket another command moved meanwhile stands as that command left it.
    * Answers the state it is left in.
    */
-  unstarted(work: AdmittedWork, before: Ticket): string;
+  refused(work: AdmittedWork): string;
   /** Record what the run did to the ticket, and answer the state it left it in. */
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean): string;
   /**
@@ -788,7 +793,7 @@ export const TICKET_RUNS: TicketRuns = {
       // Through `ready` where the ticket is somewhere else, because that is the
       // one state the row out of leads here, and a ticket reopened for an
       // attempt it never got is what happened.
-      const reopened = ticket.state === "ready" ? ticket : reopen(ticket, `new attempt after ${ticket.state}`);
+      const reopened = ticket.state === "ready" ? ticket : reopen(ticket, newAttemptNote(ticket.state));
       writeTicket(work.dir, transition(reopened, "plan_invalid", staleness.stale.join("; ")));
       throw new UsageError(
         `${work.key} was drafted from ${staleness.path}, which is no longer that spec, so the run ` +
@@ -809,15 +814,11 @@ export const TICKET_RUNS: TicketRuns = {
     // command able to recover it. A ticket is re-runnable or it is a dead
     // record; there is no third thing.
     if (ticket.state !== "ready") {
-      ticket = reopen(ticket, `new attempt after ${ticket.state}`);
+      ticket = reopen(ticket, newAttemptNote(ticket.state));
     }
     // Recorded before the attempt, not after: a run that never returns has to
     // leave the ticket saying so rather than saying `ready`.
-    const started = transition(
-      ticket,
-      "provisioning",
-      `run started against ${work.contract.plan_id}`,
-    );
+    const started = transition(ticket, "provisioning", runStartedNote(work.contract.plan_id));
     writeTicket(work.dir, started);
     // The ticket own count of the runs it has begun, this one included. The
     // runner mints the root attempt id from it, so a re-run of the same
@@ -826,16 +827,18 @@ export const TICKET_RUNS: TicketRuns = {
     return runsStartedBy(started);
   },
 
-  unstarted(work: AdmittedWork, before: Ticket) {
+  refused(work: AdmittedWork) {
     const now = readTicket(work.dir, work.key);
-    const last = now.history[now.history.length - 1];
-    const ours =
-      now.state === "provisioning" &&
-      last?.note === `run started against ${work.contract.plan_id}` &&
-      JSON.stringify(now.history.slice(0, before.history.length)) === JSON.stringify(before.history);
-    if (!ours) return now.state;
-    writeTicket(work.dir, before);
-    return before.state;
+    const [reopened, started] = now.history.slice(-2);
+    const left =
+      reopened?.to === "ready" && reopened.from !== null && reopened.note === newAttemptNote(reopened.from)
+        ? reopened.from
+        : null;
+    const ours = now.state === "provisioning" && started?.note === runStartedNote(work.contract.plan_id);
+    if (!ours || (left !== "changes_requested" && left !== "failed")) return now.state;
+    const back = transition(now, left, ANSWERS_OWED_NOTE);
+    writeTicket(work.dir, back);
+    return back.state;
   },
 
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean) {
@@ -892,15 +895,20 @@ export const TICKET_RUNS: TicketRuns = {
   },
 };
 
+/** The row a run of the ticket starts on, moving it to `provisioning`. */
+const runStartedNote = (plan_id: string): string => `run started against ${plan_id}`;
+
+/** The row that reopens a ticket to `ready` for a new attempt, naming the state it was in. */
+const newAttemptNote = (state: string): string => `new attempt after ${state}`;
+
 /**
  * The states a run's result proves. A delivery a person's decisions took
  * without a round proves only that the run provisioned and then went where its
- * outcome goes (D-132): an approval to
- * `pr_open`, on a row that says why in the words the lifecycle's guard reads;
- * one that ends `escalated` over a finding the executor declined (D-065) is
- * walked as every run is, and goes from `provisioning` to `changes_requested`
- * on the row every escalated run writes. Every other run is walked through
- * what its rounds prove.
+ * outcome goes (D-132): an approval to `pr_open`, on a row that says why in the
+ * words the lifecycle's guard reads; one that ends `escalated` over a finding
+ * the executor declined (D-065) is walked as every run is, and goes from
+ * `provisioning` to `changes_requested` on the row every escalated run writes.
+ * Every other run is walked through what its rounds prove.
  */
 export function observedPath(result: TicketRunResult): ReturnType<typeof statesObserved> {
   if (result.outcome === "approved" && result.rounds.length === 0 && result.decided.length > 0) {
@@ -1103,8 +1111,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     decisionsStore === null
       ? null
       : decidedFindings(readLocalVerdictsOrWarn(decisionsStore, streams).verdicts, contract.ticket_id);
-  const standing = admitted === null ? null : readTicket(admitted.dir, admitted.key);
-  const history = standing?.history ?? null;
+  const history = admitted === null ? null : readTicket(admitted.dir, admitted.key).history;
   if (retained === null && history !== null) {
     try {
       await refuseOwedAnswers({ config: { ...config, relevel: args.relevel }, contract, decided: decided ?? [], history });
@@ -1347,12 +1354,12 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
         : {}),
     });
   } catch (error) {
-    // D-132: the loop asks again under its
-    // run lock whether the person owes answers, and a refusal there started
-    // nothing, so the ticket goes back where it was before this command moved
-    // it, as the refusal above leaves it.
-    if (error instanceof AnswersOwedError && admitted !== null && standing !== null) {
-      TICKET_RUNS.unstarted(admitted, standing);
+    // D-132: the loop asks again under its run lock whether the person owes
+    // answers, and a refusal there started nothing: the ticket goes back to
+    // the state this command found it in, on a row of its own, and every row
+    // written since stands.
+    if (error instanceof AnswersOwedError && admitted !== null) {
+      TICKET_RUNS.refused(admitted);
       streams.stderr(`error: ${physicalLine(error.message)}\n`);
       return EXIT_CODES.did_not_complete;
     }

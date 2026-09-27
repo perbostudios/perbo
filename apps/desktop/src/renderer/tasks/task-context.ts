@@ -1,4 +1,4 @@
-import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, type Cost } from "@perbo/contracts/browser";
+import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, settledRow, type Cost } from "@perbo/contracts/browser";
 import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
 import { ATTEMPT_STARTS, runnerStages, runnerTally, spokenByAttempt, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
@@ -433,7 +433,9 @@ const rowWords = (entry: Pick<Detail["ticket"]["history"][number], "note" | "to"
  * escalation, that the executor declined what was left where an attempt since
  * the review records declines, and otherwise that the review put nothing to
  * them; for any other outcome, its row's outcome in Perbo's words and that
- * nothing is left to answer. Null where its last row is not such a run's end.
+ * nothing is left to answer. Null where the row that left the ticket where it
+ * is, a run refused for owed answers passed over (`settledRow`), is not such a
+ * run's end.
  * `planAgain` says whether the page offers Plan it again, which a reason
  * names only where it does.
  */
@@ -442,7 +444,7 @@ export function gateClosedReasons(
   attempts: readonly Pick<AttemptView, "review" | "declines">[],
   planAgain: boolean,
 ): StopReason[] | null {
-  const last = history.at(-1);
+  const last = settledRow(history);
   if (last === undefined || !last.note.startsWith(gateClosedNote(""))) return null;
   const outcome = runEndedOn(last.note);
   if (outcome === null) return null;

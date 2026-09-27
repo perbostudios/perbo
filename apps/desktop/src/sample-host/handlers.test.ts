@@ -1,7 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
-import { editing, job, sampleInterviews, sampleReadings, saveSpec, snapshot, specFiles, writeGraphEdit } from "./records.js";
+import {
+  editing,
+  job,
+  moveTicket,
+  sampleInterviews,
+  sampleReadings,
+  saveSpec,
+  snapshot,
+  specFiles,
+  writeGraphEdit,
+} from "./records.js";
 import { applyGraphEdit } from "@perbo/planning/browser";
 import type { EditingSession, Job } from "../shared/protocol.js";
 import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
@@ -56,7 +66,7 @@ it("keeps work whose pull request is open, in the host's words", async () => {
   expect(snapshot.tasks.find((row) => row.ticket.key === "PRB-377")?.ticket.state).toBe("pr_open");
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-377" })).rejects.toThrow(
     "PRB-377's pull request #418 is open, and that is a record this machine does not own. Close or merge it " +
-      "on GitHub first; the work can be deleted or planned again after that.",
+      "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
   );
   expect(onBoard("PRB-377")).toBe(true);
 });
@@ -67,7 +77,7 @@ it("keeps the ticket a discarded planning drafted once its pull request is open,
   // is said in the host's words rather than swallowed.
   await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
     "PRB-421's pull request is open, and that is a record this machine does not own. Close or merge it " +
-      "on GitHub first; the work can be deleted or planned again after that.",
+      "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
   );
   expect(stored().find((each) => each.id === planning.id)?.phase).toBe("discarded");
   expect(onBoard("PRB-421")).toBe(true);
@@ -359,18 +369,35 @@ it("refuses a run on a ticket the lifecycle gives no route back to ready, before
   await refused("pr_open", "open");
 });
 
-it("refuses a move the lifecycle has no row for, and leaves the ticket where it was", async () => {
-  const key = "PRB-412";
-  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
-  // An open pull request on a ticket still waiting on the person: no row takes it to merged.
-  row.ticket = { ...row.ticket, delivery: { ...row.ticket.delivery, state: "open" } };
+it("refuses a move the lifecycle has no row for, and leaves the ticket where it was", () => {
+  const row = snapshot.tasks.find((each) => each.ticket.key === "PRB-412")!;
+  row.ticket = structuredClone(row.ticket);
   const before = structuredClone(row.ticket);
-  const sync = await sampleBridge.request({ kind: "sync", repoId, key });
-  await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === sync.id)!.state).toBe("failed"), { timeout: 5000 });
-  expect(snapshot.jobs.find((each) => each.id === sync.id)!.error).toBe(
+  // A ticket still waiting on the person: no row takes it to merged.
+  expect(() => moveTicket(row.ticket, [{ to: "merged", note: "The pull request was merged." }])).toThrow(
     "PRB-412 cannot move from changes_requested to merged: the lifecycle has no row for it.",
   );
   expect(row.ticket).toEqual(before);
+});
+
+it("reads the pull request an escalated run published closed on Refresh from GitHub, and then deletes the work (D-129)", async () => {
+  const key = "PRB-412";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  // An escalated run that published: the ticket waits at changes_requested, its pull request open.
+  row.ticket = {
+    ...row.ticket,
+    delivery: { ...row.ticket.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+  };
+  await expect(sampleBridge.request({ kind: "discard", repoId, key })).rejects.toThrow(
+    "PRB-412's pull request #15 is open, and that is a record this machine does not own.",
+  );
+  const history = structuredClone(row.ticket.history);
+  const sync = await sampleBridge.request({ kind: "sync", repoId, key });
+  await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === sync.id)!.state).toBe("completed"), { timeout: 5000 });
+  expect([row.ticket.state, row.ticket.delivery.state]).toEqual(["changes_requested", "closed"]);
+  expect(row.ticket.history).toEqual(history);
+  await sampleBridge.request({ kind: "discard", repoId, key });
+  expect(onBoard(key)).toBe(false);
 });
 
 /**
@@ -702,7 +729,7 @@ it("keeps an escalated ticket whose pull request is open from Plan it again and 
   };
   const refusal =
     "PRB-415's pull request #15 is open, and that is a record this machine does not own. Close or merge it " +
-    "on GitHub first; the work can be deleted or planned again after that.";
+    "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.";
   await expect(sampleBridge.request({ kind: "replan", repoId, key: "PRB-415" })).rejects.toThrow(refusal);
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-415" })).rejects.toThrow(refusal);
   expect(onBoard("PRB-415")).toBe(true);
