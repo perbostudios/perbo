@@ -8,6 +8,7 @@ import {
   ReviewArtifactSchema,
   RunBundleSchema,
   TicketSchema,
+  UsageLimitSchema,
   hasAcceptanceCriteria,
 } from "@perbo/contracts";
 import type { Ticket } from "@perbo/contracts";
@@ -90,6 +91,7 @@ export const ReportSchema = z
             .object({ declines: z.array(z.object({ finding_key: z.string(), reason: z.string() })).optional() })
             .passthrough()
             .optional(),
+          usage_limit: UsageLimitSchema.extend({ waited: z.boolean() }).nullable(),
           bundles: z.array(RunBundleSchema),
         })
         .passthrough(),
@@ -142,6 +144,7 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
     // The attempt's own record of what it declined, as the loop reads it;
     // the words `perbo inspect` read from its transcript where the record does not say.
     declines: (attempt.record?.declines ?? attempt.declines).map(({ finding_key, reason }) => ({ finding_key, reason })),
+    usageLimit: attempt.usage_limit,
     bundles: attempt.bundles,
   }));
 }

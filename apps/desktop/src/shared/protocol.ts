@@ -19,6 +19,7 @@ import {
   type RunVerdict,
   type SizeEstimate,
   type StandingProhibitedEntry,
+  type UsageLimitStop,
   type VerificationKind,
 } from "@perbo/contracts/browser";
 import type {
@@ -1396,6 +1397,13 @@ export const RequestSchema = z.discriminatedUnion("kind", [
       .string()
       .regex(/^bundle_[0-9a-f]{16}$/)
       .nullable(),
+    /**
+     * The models the person carries a ticket stopped on a provider's usage
+     * limit on with (D-NEW-pass-a-limited-loop-on): written to the ticket's
+     * models and run from the stopped attempt's work. Absent on every other
+     * run, which runs on the models the ticket holds.
+     */
+    models: TaskModelsSchema.optional(),
   }),
   z.strictObject({ kind: z.literal("sync"), ...reference }),
   /**
@@ -1693,6 +1701,12 @@ export interface AttemptView {
    * holds them. Absent where the records it was read from do not say.
    */
   declines?: readonly { finding_key: string; reason: string }[];
+  /**
+   * The provider usage limit the run ended on after this attempt, and whose
+   * connection it was, as `perbo inspect` reads it with `usageLimitStop`
+   * (D-NEW-pass-a-limited-loop-on); null where none did.
+   */
+  usageLimit: UsageLimitStop | null;
   bundles: RunBundle[];
 }
 export interface Detail {

@@ -28,7 +28,14 @@ export type FakeAgentBehaviour =
    * synthetic assistant message, a non-zero exit — and the difference the loop
    * acts on is only in what the provider wrote.
    */
-  | { kind: "session_limit"; message: string; retries?: number }
+  | {
+      kind: "session_limit";
+      message: string;
+      retries?: number;
+      /** Work the attempt wrote before its provider refused it, left in the worktree. */
+      file?: string;
+      contents?: string;
+    }
   | { kind: "agent_error" }
   | { kind: "recovered_blip" }
   | { kind: "shell"; commands: readonly string[]; reported_denials?: readonly string[] }
@@ -146,7 +153,8 @@ export function fakeAgent(
   } = {},
 ): {
   binary: string;
-  invocations: () => Array<{ cwd: string }>;
+  /** Every invocation, with its working directory and the arguments it was started with. */
+  invocations: () => Array<{ cwd: string; argv: string[] }>;
 } {
   const dir = scratch("perbo-fake-agent-");
   const binary = join(dir, "agent.cjs");
@@ -181,7 +189,7 @@ const CALLS = ${JSON.stringify(calls)};
 
 const seen = existsSync(CALLS) ? JSON.parse(readFileSync(CALLS, "utf8")) : [];
 const behaviour = BEHAVIOURS[Math.min(seen.length, BEHAVIOURS.length - 1)];
-seen.push({ cwd: process.cwd() });
+seen.push({ cwd: process.cwd(), argv: process.argv.slice(2) });
 writeFileSync(CALLS, JSON.stringify(seen));
 
 const emit = (event) => writeAll(1, JSON.stringify(event) + "\\n");
@@ -224,6 +232,11 @@ if (behaviour.kind === "overloaded") {
 }
 
 if (behaviour.kind === "session_limit") {
+  if (behaviour.file) {
+    const written = join(process.cwd(), behaviour.file);
+    mkdirSync(dirname(written), { recursive: true });
+    writeFileSync(written, behaviour.contents || "");
+  }
   const retries = behaviour.retries || 10;
   const payload = JSON.stringify({
     type: "error",
@@ -544,6 +557,6 @@ process.exit(0);
   return {
     binary,
     invocations: () =>
-      existsSync(calls) ? (JSON.parse(readFileSync(calls, "utf8")) as Array<{ cwd: string }>) : [],
+      existsSync(calls) ? (JSON.parse(readFileSync(calls, "utf8")) as Array<{ cwd: string; argv: string[] }>) : [],
   };
 }

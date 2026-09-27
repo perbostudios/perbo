@@ -5,6 +5,7 @@ import { furthestAt, overTheTicket, runnerStages, WHEEL_STEPS, wheelAt, wheelSte
 import { heldTicket, inTheWay, isRun, ticketRun } from "../../shared/jobs.js";
 import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isMergeDecided, isPreLoop } from "../../shared/archive.js";
 import { questionsOnRecord } from "../../shared/decisions.js";
+import type { UsageLimitStop } from "@perbo/contracts/browser";
 
 export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
 /** The wheel's last stage: the journey's end, waiting on the person to check it and decide the merge. */
@@ -282,14 +283,30 @@ export const stoppedByPerson = (jobs: readonly Job[]): boolean => {
 };
 
 /**
- * Whether Continue the task carries on from the ticket's last run: the person
- * stopped it, or Perbo closed while it was going, quit or crashed alike
- * (`interrupted`). Nothing about the plan or an error stood in the way of
- * either; every other stop is a limit, a refusal or an error that another
- * attempt at the same plan meets again.
+ * The provider usage limit the ticket's last run ended on, and whose
+ * connection it was (D-NEW-pass-a-limited-loop-on), or null: the limit the
+ * attempts record says ended the run (`AttemptView.usageLimit`, read with
+ * `usageLimitStop`), where that run failed and the attempt is its own — one
+ * that started after the run did.
  */
-export const carriesOn = (jobs: readonly Job[]): boolean =>
-  stoppedByPerson(jobs) || jobs.filter(isRun).at(-1)?.state === "interrupted";
+export function limitStop(jobs: readonly Job[], latest: AttemptView | undefined): UsageLimitStop | null {
+  const run = jobs.filter(isRun).at(-1);
+  if (run === undefined || run.state !== "failed" || latest?.usageLimit == null) return null;
+  return Date.parse(latest.startedAt) >= Date.parse(run.startedAt) ? latest.usageLimit : null;
+}
+
+/**
+ * Whether Continue the task carries on from the ticket's last run: the person
+ * stopped it, Perbo closed while it was going, quit or crashed alike
+ * (`interrupted`), or a provider's usage limit ended it (`limitStop`). Nothing
+ * about the plan, the work or an error stood in the way of any of them; every
+ * other stop is a limit, a refusal or an error that another attempt at the
+ * same plan meets again. After a usage limit the same connection carries on
+ * only once the provider's stated reset has passed, and another connection at
+ * once.
+ */
+export const carriesOn = (jobs: readonly Job[], latest: AttemptView | undefined): boolean =>
+  stoppedByPerson(jobs) || jobs.filter(isRun).at(-1)?.state === "interrupted" || limitStop(jobs, latest) !== null;
 
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
 export function projectTicket(
@@ -353,8 +370,9 @@ export function projectTicket(
   // The loop waits on the person at that stage.
   const deciding = paused || asking;
   // Continue the task is offered only after the person's own stop, taken or
-  // still settling, or Perbo closing mid-run.
-  const continuable = carriesOn(jobs);
+  // still settling, Perbo closing mid-run, or a provider's usage limit.
+  const limited = limitStop(jobs, latest);
+  const continuable = carriesOn(jobs, latest);
   const attention = !active && !refreshing && (recoverable || paused || ["changes_requested", "pr_open", "failed", "blocked", "plan_invalid"].includes(ticket.state));
   // While a run of the ticket is live its page is the loop, whatever was
   // asked for: the results are that run's, offered once it has ended with its
@@ -412,5 +430,5 @@ export function projectTicket(
   const description = stopped ? `The run stopped. Its work and evidence have been retained — ${continuable ? "carry on with the task, plan it again," : "plan it again"} or delete it.` :
     refreshing ? "Reading the task's recorded outcome…" :
     descriptions[paused ? "changes_requested" : (observed?.state ?? ticket.state)] ?? "Open the ticket to see its contract, latest state and retained evidence.";
-  return { jobs, active, busy, held, recoverable, continuable, paused, asking, deciding, resultReady, refreshing, attention, tone, primary, screen, stage, description, observed, latest, review, evidence };
+  return { jobs, active, busy, held, recoverable, continuable, limited, paused, asking, deciding, resultReady, refreshing, attention, tone, primary, screen, stage, description, observed, latest, review, evidence };
 }

@@ -7,6 +7,7 @@ import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
 import { projectTicket, recordedRunnerStages, stoppedByPerson } from "./ticket-workspace.js";
+import { limitEnding } from "./usage-limit.js";
 export interface TaskContext extends PageProps {
   detail: Detail;
   repoId: string;
@@ -864,7 +865,7 @@ export interface RunEnding {
   reason: string;
   /** The command's own output, where there is no verdict of the loop's to say instead. */
   log: string | null;
-  /** Whether the person stopped the run themselves (`stoppedByPerson`): the one stop Continue the task carries on from. */
+  /** Whether the person stopped the run themselves (`stoppedByPerson`): one of the stops Continue the task carries on from. */
   byPerson: boolean;
   /**
    * Each reason the command ended, one line each: the sentence alone for most
@@ -970,6 +971,12 @@ export function runEnding(jobs: readonly Job[], latest: AttemptView | undefined)
     byPerson: false,
     reasons,
   });
+  // D-NEW-pass-a-limited-loop-on: a provider's usage limit ended the run, the
+  // executor's or its review's, as the attempts record says.
+  if (latest.usageLimit !== null && job.state === "failed") {
+    const said = limitEnding(latest.usageLimit);
+    return ended(said.sentence, said.detail);
+  }
   if (reason === "no_changes")
     return ended(
       "The agent made no change to the branch.",

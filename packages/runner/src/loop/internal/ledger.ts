@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Decline } from "../../declines.js";
 import { CostBasisSchema, costOf, rollCosts } from "@perbo/contracts";
-import type { AttemptWait, Cost, ExecutionAttempt } from "@perbo/contracts";
+import type { AttemptWait, Cost, ExecutionAttempt, UsageLimit } from "@perbo/contracts";
 import { appendAttempts, sealedByAttempt, type AttemptsRecord } from "../../attempts.js";
 import type { VerificationCost } from "./deliver.js";
 import type { RoundRecord } from "./state.js";
@@ -155,6 +155,22 @@ export class Ledger {
     const parked = { ...this.mine[index]!, wait };
     this.mine[index] = parked;
     return parked;
+  }
+
+  /**
+   * Put on this run's attempt the usage limit its review was refused on and
+   * the run ends on (D-NEW-pass-a-limited-loop-on). As with a park, an attempt
+   * already on disk is never rewritten, so one that is refuses: a review that
+   * parked first flushed its attempt, and its wait is what says it.
+   */
+  limitAfter(attemptId: string, limit: UsageLimit): ExecutionAttempt {
+    const index = this.mine.findIndex((attempt) => attempt.attempt_id === attemptId);
+    if (index < this.recordedThrough) {
+      throw new Error(`${attemptId} is not an attempt of this run still to be written, so no usage limit can be put on it`);
+    }
+    const limited = { ...this.mine[index]!, usage_limit: limit };
+    this.mine[index] = limited;
+    return limited;
   }
 
   addRound(record: RoundRecord): void {

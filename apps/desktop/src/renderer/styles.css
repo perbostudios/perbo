@@ -6033,9 +6033,17 @@ select.add-chip {
   flex: none;
   align-self: center;
 }
+/* Where a usage limit ended the run and no other connection runs its role:
+   the one sentence that says so, read beside the reasons. */
+.stopped-limit {
+  margin: 0;
+  font-size: calc(13.5px * var(--text-scale));
+  color: var(--muted);
+}
 /* The footer every pane has, with the ways to delete or plan the work again
-   at the start of the row, and the way to the paused loop, then the
-   highlighted Continue the task, at its end. */
+   at the start of the row, and the way to the paused loop, then Continue the
+   task, and after a usage limit Continue on another model, the highlighted
+   one at its end. */
 .stopped-actions {
   justify-content: flex-start;
 }
