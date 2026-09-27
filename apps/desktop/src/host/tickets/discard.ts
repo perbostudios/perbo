@@ -1,9 +1,9 @@
 import { existsSync, lstatSync, rmSync } from "node:fs";
 import type { Ticket } from "@perbo/contracts";
-import { heldRepository } from "../../shared/jobs.js";
+import { heldTicket } from "../../shared/jobs.js";
 import {
   DELETE_TICKET_GONE,
-  DELETE_WAITS_FOR_COMMANDS,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
   deletePullRequestOpen,
 } from "../../shared/discard.js";
 import { listBundles } from "../records.js";
@@ -35,7 +35,10 @@ export interface DiscardDeps {
  * person has already said is over. A path that is a link is left alone rather
  * than followed.
  *
- * One stage holds: a ticket at `pr_open` has a pull request on GitHub, which
+ * A command running for this ticket holds it, because that command writes
+ * what the delete removes; a command running for another ticket in the same
+ * repository does not, since it writes none of this one's records. One stage
+ * holds: a ticket at `pr_open` has a pull request on GitHub, which
  * is a record this machine does not own. Deleting the ticket would leave it
  * standing with nothing here to read it against, so the pull request is closed
  * or merged first and the delete is offered again after that.
@@ -50,7 +53,7 @@ export async function discardTicket(
   repo: RegisteredRepository,
   key: string,
 ): Promise<string | null> {
-  if (heldRepository(deps.liveJobs(), repo.id)) return DELETE_WAITS_FOR_COMMANDS;
+  if (heldTicket(deps.liveJobs(), repo.id, key)) return DELETE_WAITS_FOR_TICKET_COMMAND;
   const ticket = (await deps.tickets.list(repo)).tickets.find((entry) => entry.key === key);
   if (!ticket) return DELETE_TICKET_GONE;
   // The one stage a delete does not reach: the pull request is on GitHub and

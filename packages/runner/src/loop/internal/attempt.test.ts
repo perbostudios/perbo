@@ -96,6 +96,7 @@ describe("what an attempt that finished is recorded as", () => {
     changeset: null,
     head_commit: null,
     diff: "",
+    retained_diff: "",
     changed_paths: [],
     excluded_paths: [],
     excluded_check_artifacts: [],
@@ -168,6 +169,42 @@ describe("what an attempt that finished is recorded as", () => {
         carriedForward: false,
       }),
     ).toEqual({ reason: "no_changes", detail: "the branch adds no change to its base" });
+  });
+
+  it("names each refused command whole, and how many more past five (D-NEW-nothing-shown-is-cut)", () => {
+    const long =
+      "node -e \"require('fs').writeFileSync('/etc/hosts', 'a line the guard read in full before refusing it')\"";
+    const commands = [0, 1, 2, 3, 4, 5, 6].map((n) => ({
+      decision: "denied",
+      denial_rule: "command_allow_list",
+      denial_target: null,
+      detail: `${long} # ${n}`,
+    }));
+    const termination = classifyTermination({
+      config: config({}),
+      agentResult: { termination: { reason: "completed", detail: "" }, commands } as unknown as AgentResult,
+      sealed: seal(),
+      pathsAllowed: ["src/**"],
+      inherited: [],
+      carriedForward: false,
+    });
+    expect(long.length).toBeGreaterThan(80);
+    expect(termination.detail).toContain(`command_allow_list on ${long} # 4`);
+    expect(termination.detail).not.toContain(`${long} # 5`);
+    expect(termination.detail.endsWith("; and 2 more")).toBe(true);
+  });
+
+  it("names the first five paths outside the contract whole, then how many more", () => {
+    const paths = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `docs/${n}.md`);
+    const termination = classifyTermination({
+      config: config({}),
+      agentResult: agent(),
+      sealed: seal({ outside_allowed_paths: paths, changeset: null }),
+      pathsAllowed: ["src/**"],
+      inherited: [],
+      carriedForward: false,
+    });
+    expect(termination.detail).toContain("docs/1.md, docs/2.md, docs/3.md, docs/4.md, docs/5.md and 3 more — ");
   });
 
   it("says a change set the executor added nothing to is what was checked and reviewed", () => {
@@ -279,6 +316,7 @@ describe("the record one finished attempt leaves", () => {
         prior_commits: [],
         toClose,
         resumedHere: null,
+        resumeOutcome: null,
         pathsAllowed: ["src/**"],
         pathsProhibited: [],
         prompt: "close the findings",
@@ -318,6 +356,7 @@ describe("the record one finished attempt leaves", () => {
         changeset: { changeset_id: "cs_0000000000000001" } as never,
         head_commit: input.headCommit,
         diff: "",
+        retained_diff: "",
         changed_paths: ["src/feature.ts"],
         excluded_paths: [],
         excluded_check_artifacts: [],

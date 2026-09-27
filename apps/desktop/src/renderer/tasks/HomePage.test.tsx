@@ -1,13 +1,24 @@
 // @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { TicketState } from "@perbo/contracts";
 import { HomePage } from "./HomePage.js";
+import { CreateProvider } from "../shell/create.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Route } from "../shell/route.js";
-import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
+import {
+  ARCHIVE_SEARCH_MAX_CHARS,
+  RequestSchema,
+  type Request,
+  type Snapshot,
+  type TaskRow,
+  type TaskSummary,
+} from "../../shared/protocol.js";
+import { calledOffEntry } from "../../shared/archive.js";
+import { typeInto } from "../../test-support/typing.js";
+import { bridge } from "../workspace/index.js";
 
 let client: QueryClient;
 let sample: Snapshot;
@@ -21,6 +32,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   client.clear();
+  vi.restoreAllMocks();
 });
 
 /** One filed ticket, with the summary its row reads already answered. */
@@ -77,6 +89,39 @@ describe("the archive's cost column", () => {
   });
 });
 
+describe("the search a person types (D-NEW-nothing-shown-is-cut)", () => {
+  it("is held to what an archive search holds where it is typed, on Home and in the archive, and exports without a refusal", async () => {
+    const { workspace } = archived(null);
+    const sent: Request[] = [];
+    vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {
+      sent.push(request);
+      return null;
+    }) as typeof bridge.request);
+    render(
+      <QueryClientProvider client={client}>
+        <HomePage workspace={workspace} navigate={() => undefined} archive={false} />
+      </QueryClientProvider>,
+    );
+    const running = screen.getByRole("textbox", { name: "Search running tickets" }) as HTMLInputElement;
+    typeInto(running, "s".repeat(ARCHIVE_SEARCH_MAX_CHARS + 20));
+    expect(running.value).toHaveLength(ARCHIVE_SEARCH_MAX_CHARS);
+    cleanup();
+    render(
+      <QueryClientProvider client={client}>
+        <HomePage workspace={workspace} navigate={() => undefined} archive />
+      </QueryClientProvider>,
+    );
+    const search = screen.getByRole("textbox", { name: "Search archived tasks" }) as HTMLInputElement;
+    typeInto(search, "s".repeat(ARCHIVE_SEARCH_MAX_CHARS + 20));
+    expect(search.value).toHaveLength(ARCHIVE_SEARCH_MAX_CHARS);
+    fireEvent.click(screen.getByRole("button", { name: "export CSV" }));
+    await waitFor(() => expect(sent.some((request) => request.kind === "exportArchive")).toBe(true));
+    const exported = sent.find((request) => request.kind === "exportArchive")!;
+    expect(RequestSchema.safeParse(exported).success).toBe(true);
+    expect((exported as { search: string }).search).toBe("s".repeat(ARCHIVE_SEARCH_MAX_CHARS));
+  });
+});
+
 describe("a Home card", () => {
   const pr = "https://github.com/example/webstore/pull/9";
   /** A board of these tickets, nothing filed and nothing running, each with its contract's outcome read. */
@@ -96,7 +141,7 @@ describe("a Home card", () => {
         costBasis: "none",
         diff: null,
         note: null,
-        outcome: `The outcome of ticket ${index}, long enough that a narrow card has to cut it short at its edge`,
+        outcome: `The outcome of ticket ${index}, long enough that a narrow card has to wrap it at its edge`,
       });
       return row;
     });
@@ -140,18 +185,19 @@ describe("a Home card", () => {
     expect(opened).toMatchObject([{ page: "task", key: "PRB-904" }]);
   });
 
-  it("says the contract's outcome on one line where the loop did not stop, and why it stopped where it did", () => {
+  it("says the contract's outcome whole where the loop did not stop, and why it stopped where it did", () => {
     home(board([["pr_open", pr], ["merged", pr], ["changes_requested", null], ["failed", null]]));
     for (const [index, name] of ["Ticket 0 pr_open", "Ticket 1 merged", "Ticket 2 changes_requested"].entries()) {
       const line = card(name).querySelector(".task-card-description > span")!;
       expect(line.className).toBe("task-card-outcome");
       expect(line.textContent).toBe(
-        `The outcome of ticket ${index}, long enough that a narrow card has to cut it short at its edge`,
+        `The outcome of ticket ${index}, long enough that a narrow card has to wrap it at its edge`,
       );
     }
     const stopped = card("Ticket 3 failed").querySelector(".task-card-description > span")!;
     expect(stopped.className).toBe("");
-    expect(stopped.textContent).toBe("The loop stopped. Its work and evidence have been retained. Open the task to inspect the cause.");
+    // A failed ticket with nothing running for it is a stopped run, whatever the journal still holds.
+    expect(stopped.textContent).toBe("The run stopped. Its work and evidence have been retained — carry on with the task, plan it again, or delete it.");
     // No outcome to say, or none read yet: the line keeps its height with a space, so the card does not move.
     cleanup();
     const workspace = board([["merged", pr], ["executing", null]]);
@@ -164,13 +210,165 @@ describe("a Home card", () => {
     home(workspace);
     for (const name of ["Ticket 0 merged", "Ticket 1 executing"])
       expect(card(name).querySelector(".task-card-outcome")!.textContent).toBe("\u00a0");
-    // One line, cut short with an ellipsis at the card's other end.
+    // Whole, wrapping onto more lines at the card's other end rather than cut
+    // short there (D-NEW-nothing-shown-is-cut).
     const rule = /\.task-card-description > \.task-card-outcome \{([^}]*)\}/.exec(
       readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"),
     )?.[1];
-    expect(rule).toMatch(/white-space: nowrap;/);
-    expect(rule).toMatch(/overflow: hidden;/);
-    expect(rule).toMatch(/text-overflow: ellipsis;/);
+    expect(rule).toMatch(/overflow-wrap: anywhere;/);
+    for (const cut of ["nowrap", "overflow: hidden", "ellipsis"]) expect(rule).not.toContain(cut);
+  });
+
+  /** The bridge, answering every request with nothing and keeping each one it was asked. */
+  function asked(): Request[] {
+    const requests: Request[] = [];
+    vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {
+      requests.push(request);
+      return null;
+    }) as typeof bridge.request);
+    return requests;
+  }
+  /** A run under way for this board's ticket at `index`. */
+  const running = (workspace: Snapshot, index: number): Snapshot["jobs"][number] => ({
+    id: crypto.randomUUID(), repoId: workspace.tasks[index]!.repoId, key: workspace.tasks[index]!.ticket.key, resultKey: null,
+    kind: "run", label: "Run", state: "running", startedAt: "2026-09-09T09:00:00.000Z", endedAt: null, log: "", error: null, result: null,
+  });
+  const cards = (): string[] =>
+    [...document.querySelectorAll(".task-list .task-card")].map((entry) => entry.getAttribute("aria-label") ?? "");
+
+  it("keeps a merged or closed ticket on Home, under every colour, with a check in its wheel and Archive to press", async () => {
+    const requests = asked();
+    const workspace = board([
+      ["merged", pr], ["executing", null], ["closed", pr], ["changes_requested", null], ["failed", null], ["pr_open", pr],
+    ]);
+    workspace.jobs = [running(workspace, 1)];
+    // Opened after every other ticket: still under them all.
+    workspace.lastOpened = {
+      [workspace.tasks[0]!.repoId + ":PRB-900"]: "2026-09-20T09:00:00.000Z",
+      [workspace.tasks[2]!.repoId + ":PRB-902"]: "2026-09-21T09:00:00.000Z",
+    };
+    home(workspace);
+    expect(cards()).toEqual([
+      "Ticket 5 pr_open", "Ticket 3 changes_requested", "Ticket 4 failed", "Ticket 1 executing",
+      "Ticket 2 closed", "Ticket 0 merged",
+    ]);
+    // Every other sort keeps the decided merges below the rest.
+    const sorted = (option: string): string[] => {
+      fireEvent.click(screen.getByLabelText("Sort tickets"));
+      fireEvent.click(screen.getByRole("option", { name: option }));
+      return cards();
+    };
+    for (const option of ["Newest first", "Oldest first"])
+      expect(sorted(option).slice(4).sort()).toEqual(["Ticket 0 merged", "Ticket 2 closed"]);
+    // By title, the merged ticket's comes first of all and still sits below.
+    expect(sorted("Task title")).toEqual([
+      "Ticket 1 executing", "Ticket 3 changes_requested", "Ticket 4 failed", "Ticket 5 pr_open",
+      "Ticket 0 merged", "Ticket 2 closed",
+    ]);
+    // Furthest along, the merged ticket is at no further a stage than the stopped one above it.
+    expect(sorted("Furthest along")).toEqual([
+      "Ticket 5 pr_open", "Ticket 3 changes_requested", "Ticket 1 executing", "Ticket 4 failed",
+      "Ticket 0 merged", "Ticket 2 closed",
+    ]);
+    // The wheel holds the check mark where its progress was; a card still in the loop holds its progress.
+    for (const name of ["Ticket 0 merged", "Ticket 2 closed"]) {
+      const ring = card(name).querySelector<HTMLElement>(".stage-ring")!;
+      expect(ring.getAttribute("aria-label")).toBe("Completed");
+      expect(ring.classList).toContain("stage-ring--decided");
+      expect(ring.querySelector("img")!.getAttribute("src")).toBe("./brand/approve.png");
+      expect(ring.style.background).toBe("");
+    }
+    for (const name of ["Ticket 5 pr_open", "Ticket 3 changes_requested", "Ticket 4 failed", "Ticket 1 executing"]) {
+      const ring = card(name).querySelector<HTMLElement>(".stage-ring")!;
+      expect(ring.querySelector("img")).toBeNull();
+      expect(ring.style.background).toContain("conic-gradient");
+    }
+    // Rendered and left alone, nothing is filed.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requests.filter((request) => request.kind === "archive")).toEqual([]);
+    // Archive on a decided card, and on a stopped one, is the same request.
+    for (const name of ["Ticket 0 merged", "Ticket 2 closed", "Ticket 4 failed"])
+      fireEvent.click(within(card(name)).getByRole("button", { name: "Archive" }));
+    const repoId = workspace.tasks[0]!.repoId;
+    await waitFor(() =>
+      expect(requests.filter((request) => request.kind === "archive")).toEqual([
+        { kind: "archive", repoId, keys: ["PRB-900"], archived: true },
+        { kind: "archive", repoId, keys: ["PRB-902"], archived: true },
+        { kind: "archive", repoId, keys: ["PRB-904"], archived: true },
+      ]),
+    );
+  });
+
+  it("counts a merge called off as completed: below every colour, a check in its wheel and Archive to press", async () => {
+    const requests = asked();
+    const workspace = board([["pr_open", pr], ["executing", null], ["pr_open", pr]]);
+    workspace.jobs = [running(workspace, 1)];
+    // Don't merge on PRB-900, recorded; PRB-902 still waits on its merge decision.
+    workspace.calledOff = [calledOffEntry(workspace.tasks[0]!.repoId, "PRB-900", pr)];
+    home(workspace);
+    expect(cards()).toEqual(["Ticket 2 pr_open", "Ticket 1 executing", "Ticket 0 pr_open"]);
+    const ring = card("Ticket 0 pr_open").querySelector<HTMLElement>(".stage-ring")!;
+    expect(ring.getAttribute("aria-label")).toBe("Completed");
+    expect(card("Ticket 2 pr_open").querySelector(".stage-ring img")).toBeNull();
+    expect(within(card("Ticket 2 pr_open")).queryByRole("button", { name: "Archive" })).toBeNull();
+    fireEvent.click(within(card("Ticket 0 pr_open")).getByRole("button", { name: "Archive" }));
+    await waitFor(() =>
+      expect(requests.filter((request) => request.kind === "archive")).toEqual([
+        { kind: "archive", repoId: workspace.tasks[0]!.repoId, keys: ["PRB-900"], archived: true },
+      ]),
+    );
+  });
+
+  it("waits on the merge decision again for a pull request opened after the one its merge was called off on", () => {
+    const workspace = board([["pr_open", "https://github.com/example/webstore/pull/10"]]);
+    // Don't merge on #9; a run since opened #10, which nobody has decided.
+    workspace.calledOff = [calledOffEntry(workspace.tasks[0]!.repoId, "PRB-900", pr)];
+    home(workspace);
+    expect(screen.getByText(/one waiting on your merge decision/)).toBeTruthy();
+    expect(screen.queryByText(/completed/)).toBeNull();
+    const ring = card("Ticket 0 pr_open").querySelector<HTMLElement>(".stage-ring")!;
+    expect(ring.getAttribute("aria-label")).not.toBe("Completed");
+    expect(within(card("Ticket 0 pr_open")).queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
+  it("marks a ticket that needs you with a blue circle until it is opened, and never a decided merge", () => {
+    const workspace = board([
+      ["changes_requested", null], ["failed", null], ["pr_open", pr], ["merged", pr], ["closed", pr], ["executing", null],
+    ]);
+    workspace.jobs = [running(workspace, 5)];
+    const moved = "2026-09-10T09:00:00.000Z";
+    for (const row of workspace.tasks) {
+      row.ticket.history = [{ at: moved, from: "ready", to: row.ticket.state, note: "moved" }];
+      row.ticket.updated_at = moved;
+    }
+    const circled = (): string[] =>
+      cards().filter((name) => card(name).querySelector(".task-card-unseen") !== null);
+    const { rerender } = home(workspace);
+    expect(circled()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested", "Ticket 1 failed"]);
+    const circle = card("Ticket 1 failed").querySelector(".task-card-unseen")!;
+    expect(circle.getAttribute("role")).toBe("img");
+    expect(circle.getAttribute("aria-label")).toBe("Not opened since it needed you");
+    // A button's children are presentational, so the card itself carries the circle's words.
+    const described = (): string[] =>
+      screen.queryAllByRole("button", { description: "Not opened since it needed you" }).map((each) => each.getAttribute("aria-label") ?? "");
+    expect(described()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested", "Ticket 1 failed"]);
+    const blue = /\.task-card-unseen \{([^}]*)\}/.exec(readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"))?.[1];
+    expect(blue).toMatch(/background: var\(--blue\);/);
+    expect(blue).toMatch(/position: absolute;/);
+    // Opened after it came to stand there: the circle goes. Opened before: it stays.
+    const opened = (index: number, at: string) => ({ [workspace.tasks[index]!.repoId + ":" + workspace.tasks[index]!.ticket.key]: at });
+    const later = {
+      ...workspace,
+      lastOpened: { ...opened(1, "2026-09-10T09:05:00.000Z"), ...opened(0, "2026-09-09T09:00:00.000Z"), ...opened(3, "2026-09-09T09:00:00.000Z") },
+    };
+    rerender(
+      <QueryClientProvider client={client}>
+        <HomePage workspace={later} navigate={() => undefined} archive={false} />
+      </QueryClientProvider>,
+    );
+    expect(circled()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested"]);
+    expect(described()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested"]);
+    expect(screen.getByRole("button", { name: "Ticket 1 failed", description: "" })).toBeTruthy();
   });
 
   it("names a stopped loop's stage 'loop stopped', and every other card by its stage", () => {
@@ -184,6 +382,22 @@ describe("a Home card", () => {
     expect(pill("Ticket 3 executing")).toBe("loop stopped");
     expect(pill("Ticket 4 merged")).toBe("completed");
     expect(pill("Ticket 5 changes_requested")).toBe("decisions required");
+  });
+
+  it("calls only a decided merge completed: a cancelled or rolled-back ticket a run carries keeps its stage and its ring", () => {
+    const workspace = board([["cancelled", null], ["rolled_back", null], ["merged", pr]]);
+    workspace.jobs = [running(workspace, 0), running(workspace, 1)];
+    home(workspace);
+    const pill = (name: string): string => card(name).querySelector(".stage-pill")!.textContent ?? "";
+    const ring = (name: string): string => card(name).querySelector(".stage-ring")!.getAttribute("aria-label") ?? "";
+    for (const name of ["Ticket 0 cancelled", "Ticket 1 rolled_back"]) {
+      expect(card(name).className).not.toMatch(/task-card--red/);
+      expect(pill(name)).not.toMatch(/completed|loop stopped/);
+      expect(ring(name)).toMatch(/^Stage \d of 6$/);
+      expect(card(name).className).not.toMatch(/task-card--complete/);
+    }
+    expect(pill("Ticket 2 merged")).toBe("completed");
+    expect(ring("Ticket 2 merged")).toBe("Completed");
   });
 });
 
@@ -218,4 +432,139 @@ describe("a diff whose summary could not be read", () => {
       expect(screen.queryByText("no diff yet")).toBeNull();
     });
   }
+});
+
+describe("deleting from the Archive", () => {
+  beforeAll(() => {
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      };
+      HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      };
+    }
+  });
+  /**
+   * One filed ticket that ran on a branch and merged a pull request, beside a
+   * ticket on Home whose run is under way — or, with `own`, that run is the
+   * filed ticket's own command.
+   */
+  function besideARun(own = false): { filed: TaskRow; workspace: Snapshot } {
+    const { row: filed, workspace } = archived(null);
+    filed.ticket.title = "Retry the invoice webhook";
+    filed.ticket.delivery.branch = "perbo/409-webhook-retry";
+    filed.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/9";
+    const running = structuredClone(filed);
+    running.ticket.key = "PRB-950";
+    running.ticket.state = "executing";
+    const job = {
+      ...structuredClone(sample.jobs[0]!),
+      repoId: filed.repoId,
+      key: own ? filed.ticket.key : running.ticket.key,
+      kind: own ? "sync" : "run",
+      state: "running" as const,
+      endedAt: null,
+    };
+    return { filed, workspace: { ...workspace, tasks: [filed, running], jobs: [job], titles: {} } };
+  }
+  const archiveOf = (workspace: Snapshot) =>
+    render(
+      <QueryClientProvider client={client}>
+        <CreateProvider workspace={workspace} navigate={() => undefined} route={{ page: "archive" }}>
+          <HomePage workspace={workspace} navigate={() => undefined} archive />
+        </CreateProvider>
+      </QueryClientProvider>,
+    );
+  const listed = (): boolean =>
+    within(screen.getByRole("table", { name: "Archived tickets" })).queryByText("Retry the invoice webhook") !== null;
+
+  it("asks first in the picker's confirmation, saying what goes and what stays, and Keep it sends nothing", () => {
+    const { workspace } = besideARun();
+    const sent = vi.spyOn(bridge, "request");
+    archiveOf(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete ticket" });
+    expect(dialog.querySelector("p")?.textContent).toBe(
+      "Delete “Retry the invoice webhook”? It is archived: its ticket, contract and plan, every attempt it " +
+        "recorded and the evidence those attempts sealed all go. This leaves the branch " +
+        "perbo/409-webhook-retry in git and its pull request on GitHub, the stored objects under that " +
+        "evidence, which another ticket's evidence can name, and any worktree a run left, which is reclaimed later.",
+    );
+    // Keep it first, and the delete, which is never the primary, beside it.
+    const actions = within(dialog).getAllByRole("button").map((button) => button.textContent);
+    expect(actions.slice(-2)).toEqual(["Keep it", "Delete ticket"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByRole("dialog", { name: "Delete ticket" })).toBeNull();
+    expect(sent.mock.calls.filter(([request]) => request.kind === "discard")).toEqual([]);
+    expect(listed()).toBe(true);
+  });
+
+  it("names the branch the ticket's attempts ran on where its delivery records none", () => {
+    const { filed, workspace } = besideARun();
+    filed.ticket.delivery.branch = null;
+    client.setQueryData<TaskSummary>(["summary", filed.repoId, filed.ticket.key], {
+      ...client.getQueryData<TaskSummary>(["summary", filed.repoId, filed.ticket.key])!,
+      branch: "prb/409/the-attempts-branch",
+    });
+    archiveOf(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }));
+    expect(screen.getByRole("dialog", { name: "Delete ticket" }).querySelector("p")?.textContent).toContain(
+      "This leaves the branch prb/409/the-attempts-branch in git and its pull request on GitHub",
+    );
+  });
+
+  it("deletes while another ticket's run is under way, off the Archive at the click", async () => {
+    const { filed, workspace } = besideARun();
+    const sent: Request[] = [];
+    // The host has not answered yet: the row is gone all the same.
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) => {
+      sent.push(request);
+      return new Promise(() => undefined);
+    }) as typeof bridge.request);
+    archiveOf(workspace);
+    const remove = screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }) as HTMLButtonElement;
+    expect(remove.disabled, "another ticket's run holds nothing of this one").toBe(false);
+    fireEvent.click(remove);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Delete ticket" })).getByRole("button", { name: "Delete ticket" }));
+    expect(listed(), "off the Archive at the click").toBe(false);
+    await waitFor(() =>
+      expect(sent.filter((request) => request.kind === "discard")).toEqual([
+        { kind: "discard", repoId: filed.repoId, key: filed.ticket.key },
+      ]),
+    );
+  });
+
+  it("puts the row back and says why where the host refuses", async () => {
+    const { workspace } = besideARun();
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) =>
+      request.kind === "discard"
+        ? Promise.reject(new Error("PRB-409 has a pull request open"))
+        : Promise.resolve(null)) as typeof bridge.request);
+    archiveOf(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Delete ticket" })).getByRole("button", { name: "Delete ticket" }));
+    await screen.findByText("PRB-409 has a pull request open");
+    expect(listed()).toBe(true);
+  });
+
+  it("offers no Delete on a filed ticket whose pull request is still open, and offers it again once merged or closed", () => {
+    for (const [state, offered] of [["pr_open", false], ["merged", true], ["closed", true]] as const) {
+      const { filed, workspace } = besideARun();
+      filed.ticket.state = state;
+      // Filed at `pr_open` only with its merge called off, its pull request left open.
+      workspace.calledOff = [calledOffEntry(filed.repoId, filed.ticket.key, filed.ticket.delivery.pull_request_url!)];
+      const view = archiveOf(workspace);
+      expect(listed(), state).toBe(true);
+      expect(screen.queryByRole("button", { name: "Delete ticket: Retry the invoice webhook" }) !== null, state).toBe(offered);
+      view.unmount();
+    }
+  });
+
+  it("holds the delete while a command runs for this ticket itself", () => {
+    const { workspace } = besideARun(true);
+    archiveOf(workspace);
+    const remove = screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }) as HTMLButtonElement;
+    expect(remove.disabled).toBe(true);
+  });
 });

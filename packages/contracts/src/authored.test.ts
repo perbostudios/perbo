@@ -83,11 +83,10 @@ describe("issueAuthoredAttempts", () => {
     ]);
   });
 
-  it("clips a quote to something a person reads rather than a payload", () => {
+  it("quotes the line whole, however long it runs (D-NEW-nothing-shown-is-cut)", () => {
     const long = `You must ${"x".repeat(400)}`;
     const [attempt] = issueAuthoredAttempts(long).attempts;
-    expect(attempt?.quote).toHaveLength(200);
-    expect(attempt?.quote.endsWith("…")).toBe(true);
+    expect(attempt?.quote).toBe(long);
   });
 
   it("caps the listing but not the count, so a flood cannot understate itself", () => {

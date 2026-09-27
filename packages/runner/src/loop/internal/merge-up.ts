@@ -152,7 +152,7 @@ export async function mergeUp(request: MergeUpRequest): Promise<MergeUpResult> {
     base_commit: request.base_commit,
     tip,
     paths,
-    detail: (merged.stderr || merged.stdout).trim().split("\n").slice(0, 4).join("; ").slice(0, 400),
+    detail: (merged.stderr || merged.stdout).trim().split("\n").join("; "),
   };
 }
 

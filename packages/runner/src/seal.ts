@@ -106,6 +106,8 @@ export interface SealResult {
   head_commit: string | null;
   /** Empty when the change set is `truncated`: the body was withheld, not cut. */
   diff: string;
+  /** The range with `--binary`, as the execution bundle retains it; see `RangeDescription`. */
+  retained_diff: string;
   /** Paths kept out of the commit because their bytes matched a materialized secret. */
   excluded_paths: string[];
   /** Paths kept out because a previous round's checks produced them. */
@@ -213,6 +215,18 @@ export interface RangeDescription {
   head_commit: string;
   /** Empty when the change set is `truncated`: the body was withheld, not cut. */
   diff: string;
+  /**
+   * The same range taken with `--binary`: what the execution bundle retains as
+   * `change.diff` and what a resume applies with `git apply` (SCP-154).
+   *
+   * Separate from `diff` because the two have different readers. The reviewer
+   * reads a binary file as git's `Binary files … differ`, which is what its
+   * legibility rule looks for; `git apply` cannot apply that line, so a retained
+   * diff without the file's bytes resumes every text file and fails on the
+   * first binary one. Empty where the range is empty or the body is past
+   * `max_diff_bytes`: withheld whole, never cut.
+   */
+  retained_diff: string;
   prohibited: ProhibitedHit[];
   changed_paths: string[];
   /**
@@ -296,6 +310,7 @@ export async function describeRange(args: {
       changeset: null,
       head_commit,
       diff: "",
+      retained_diff: "",
       prohibited,
       changed_paths: [],
       outside_allowed_paths,
@@ -308,8 +323,10 @@ export async function describeRange(args: {
   const cap = args.max_diff_bytes ?? MAX_REVIEWABLE_DIFF_BYTES;
   const scratch = mkdtempSync(join(tmpdir(), "perbo-seal-"));
   const diffPath = join(scratch, "change.diff");
+  const retainedPath = join(scratch, "retained.diff");
   let diff: string | null;
   let diff_bytes: number;
+  let retained_diff: string;
   try {
     await git.runOrThrow(
       cwd,
@@ -318,6 +335,12 @@ export async function describeRange(args: {
     );
     diff_bytes = statSync(diffPath).size;
     diff = diff_bytes <= cap ? readFileSync(diffPath, "utf8") : null;
+    await git.runOrThrow(
+      cwd,
+      ["diff", "--no-color", "--binary", `--output=${retainedPath}`, range, "--", ...pathspec],
+      { timeoutMs },
+    );
+    retained_diff = statSync(retainedPath).size <= cap ? readFileSync(retainedPath, "utf8") : "";
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -332,6 +355,7 @@ export async function describeRange(args: {
     }),
     head_commit,
     diff: diff ?? "",
+    retained_diff,
     prohibited,
     changed_paths: files.map((file) => file.path),
     outside_allowed_paths,

@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { hostname } from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +9,7 @@ import {
   SecretIndex,
   type MaterializationManifest,
   type PlanContract,
+  type ReviewArtifact,
 } from "@perbo/contracts";
 import type { Model } from "@perbo/model";
 import { runReview } from "@perbo/review";
@@ -16,7 +17,8 @@ import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../adapter.js";
 import { EgressLog } from "../egress.js";
 import { BundleStore } from "../bundle.js";
-import { RunLockedError, acquireRunLock } from "../lock.js";
+import { parkedWait } from "../attempts.js";
+import { RunLockedError, acquireRunLock, readRunLock, runLockPath } from "../lock.js";
 import { TicketRunConfigSchema, runTicket } from "./index.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../transport.js";
 import { fakeAgent } from "../test-support/fake-agent.js";
@@ -577,26 +579,16 @@ describe("the record", () => {
   }, 60_000);
 
   /**
-   * The join key a review bundle records is the reviewer's own target, and the
-   * loop copies it rather than restating it.
+   * A review bundle records the reviewer's own target as its change set, and
+   * the attempt it judged as its join key.
    *
-   * A regression pin, not a test of new behaviour: this is what the loop did
-   * before SCP-180 and what it must go on doing after it. `inputs.changeset_id`
-   * is what every reader joins a review to its attempt by — `perbo inspect`
-   * among them — and a run reached this file having changed it to the change
-   * set the runner sealed, which is the same value in every run a real reviewer
-   * makes and a different one only where the reviewer states a target of its
-   * own. Nothing in SCP-180 asked for that, so it is pinned here instead.
-   *
-   * The double states a target no seal produced, which is the only condition
-   * that tells the two rules apart: the assertion below is the reviewer's
-   * string, and the attempt's own change set is asserted to differ from it so
-   * that a loop reaching for the seal fails rather than coincidentally passing.
-   *
-   * What this pins is where the value comes from, not that the value is right.
-   * A reviewer that mis-states its target orphans its review from the attempt
-   * in `inspect`, which joins on this key — a question about the reviewer's
-   * contract, and not one an unrequested change here was the place to answer.
+   * The change set is copied from the verdict rather than restated from the
+   * seal, so the double states a target no seal produced: the assertion below
+   * is the reviewer's string, and the attempt's own change set is asserted to
+   * differ from it so that a loop reaching for the seal fails rather than
+   * coincidentally passing. What joins the review to its attempt — for `perbo
+   * inspect` and the run's tally (`attemptBundles`) — is the attempt id, so a
+   * reviewer that mis-states its target still leaves its review joined.
    */
   it("records the reviewer's own target as the review bundle's change set", async () => {
     const repo = runnerRepository(scratch);
@@ -636,6 +628,7 @@ describe("the record", () => {
       .find((bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"));
     expect(review).toBeDefined();
     expect(review!.inputs["changeset_id"]).toBe(stated);
+    expect(review!.inputs["attempt_id"]).toBe(result.rounds[0]!.attempt.attempt_id);
   }, 60_000);
 
   it("degrades the replay claim honestly when the bytes were not kept", () => {
@@ -970,6 +963,7 @@ describe("a review that did not complete", () => {
     const result = await runTicket({
       config,
       contract,
+      sleep: async () => {},
       hooks: {
         agent: agent.run as never,
         review: (async () => ({
@@ -1010,6 +1004,7 @@ describe("a review that did not complete", () => {
     return runTicket({
       config,
       contract,
+      sleep: async () => {},
       hooks: {
         agent: agent.run as never,
         review: (async () => ({
@@ -1030,6 +1025,227 @@ describe("a review that did not complete", () => {
       },
     });
   };
+
+  const outage = (message: string) => ({
+    artifact: makeReview({
+      review_id: "rev_0000000000000001",
+      decision: "error",
+      coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
+      error: { kind: "provider_unavailable", message, attempts: 1, unresolved_criteria: ["ac_1"], reading: [] },
+    }),
+    bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+  });
+  const approval = () => ({
+    artifact: makeReview({ review_id: "rev_0000000000000002", decision: "approve" }),
+    bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+  });
+  /** A review double answering from a script, recording the commit each call judged. */
+  const scripted = (answers: Array<() => unknown>) => {
+    const judged: Array<string | undefined> = [];
+    const review = (async (input: { head_commit?: string }) => {
+      judged.push(input.head_commit);
+      const next = answers[judged.length - 1];
+      if (next === undefined) throw new Error(`review called ${judged.length} times`);
+      return next();
+    }) as never;
+    return { review, judged };
+  };
+
+  it("waits and reviews the same sealed commit once more when the provider was unavailable, then routes that verdict", async () => {
+    const { contract, config, agent } = setUp();
+    const double = scripted([() => outage("HTTP 529 after 3 attempts"), approval]);
+    const waited: number[] = [];
+    const result = await runTicket({
+      config,
+      contract,
+      sleep: async (ms) => {
+        waited.push(ms);
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("approved");
+    expect(waited).toEqual([TRANSPORT_RETRY_DELAY_MS]);
+    expect(double.judged).toHaveLength(2);
+    expect(double.judged[1]).toBe(double.judged[0]);
+    expect(double.judged[0]).toBe(result.rounds[0]?.attempt.head_commit);
+    expect(result.rounds[0]?.review?.decision).toBe("approve");
+  }, 60_000);
+
+  it("tries only once more: a second outage ends review_failed", async () => {
+    const { contract, config, agent } = setUp();
+    const double = scripted([() => outage("HTTP 529 after 3 attempts"), () => outage("HTTP 529 again")]);
+    const waited: number[] = [];
+    const result = await runTicket({
+      config,
+      contract,
+      sleep: async (ms) => {
+        waited.push(ms);
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("review_failed");
+    expect(result.detail).toContain("HTTP 529 again");
+    expect(waited).toEqual([TRANSPORT_RETRY_DELAY_MS]);
+    expect(double.judged).toHaveLength(2);
+  }, 60_000);
+
+  it("waits for the reset a rate limit states, recorded on the run lock while it waits", async () => {
+    const { contract, config, agent } = setUp();
+    const NOW = new Date("2026-09-04T00:15:00.000Z");
+    const RESETS_AT = "2026-09-04T03:30:00.000Z";
+    const double = scripted([
+      () => outage("429 rate limited · resets 4:30am (Europe/London)"),
+      approval,
+    ]);
+    const waited: number[] = [];
+    let lockWhileWaiting: ReturnType<typeof readRunLock> = null;
+    const result = await runTicket({
+      config,
+      contract,
+      now: () => NOW,
+      sleep: async (ms) => {
+        waited.push(ms);
+        lockWhileWaiting = readRunLock(runLockPath(config.state_root, contract.ticket_id));
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("approved");
+    expect(waited).toEqual([Date.parse(RESETS_AT) - NOW.getTime()]);
+    const held = lockWhileWaiting as ReturnType<typeof readRunLock>;
+    expect(held?.wait?.reason).toBe("provider_reset");
+    expect(held?.wait?.until).toBe(RESETS_AT);
+    expect(held?.wait?.quoted).toContain("resets 4:30am");
+    expect(double.judged).toHaveLength(2);
+  }, 60_000);
+
+  it("does not wait for a reset past wait_for_provider_ms, nor review again before it", async () => {
+    const { contract, config, agent } = setUp();
+    config.limits = LimitsTableSchema.parse({
+      organisation: "test",
+      limits: { concurrent_local_attempts: 4, wait_for_provider_ms: 3_600_000 },
+    });
+    const double = scripted([() => outage("429 rate limited · resets 4:30am (Europe/London)")]);
+    const waited: number[] = [];
+    const result = await runTicket({
+      config,
+      contract,
+      now: () => new Date("2026-09-04T00:15:00.000Z"),
+      sleep: async (ms) => {
+        waited.push(ms);
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("review_failed");
+    expect(result.detail).toContain("The provider resets at 2026-09-04T03:30:00.000Z (Europe/London)");
+    expect(result.detail).toContain("limits.limits.wait_for_provider_ms");
+    expect(result.detail).toContain("(currently 3600000 ms)");
+    expect(waited).toEqual([]);
+    expect(double.judged).toHaveLength(1);
+  }, 60_000);
+
+  /**
+   * The park is on the ticket's record before the sleep, as an attempt's own
+   * park is: the attempt the review judged is written carrying the wait, so a
+   * run restarted mid-wait reads the instant (`parkedWait`) rather than
+   * spending a review against a limit still in force.
+   */
+  it("writes the attempt it judged, carrying the wait, to the ticket's record before it sleeps", async () => {
+    const { contract, config, agent } = setUp();
+    const RESETS_AT = "2026-09-04T03:30:00.000Z";
+    const double = scripted([() => outage("429 rate limited · resets 4:30am (Europe/London)"), approval]);
+    const attemptsFile = join(config.state_root, `${contract.ticket_id}.attempts.json`);
+    let onDiskWhileWaiting: { attempts: Array<{ attempt_id: string; wait: { until: string } | null }> } | null = null;
+    const result = await runTicket({
+      config,
+      contract,
+      now: () => new Date("2026-09-04T00:15:00.000Z"),
+      sleep: async () => {
+        onDiskWhileWaiting = existsSync(attemptsFile) ? JSON.parse(readFileSync(attemptsFile, "utf8")) : null;
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("approved");
+    const judged = result.rounds[0]!.attempt;
+    const held = onDiskWhileWaiting as { attempts: Array<{ attempt_id: string; wait: { until: string } | null }> } | null;
+    expect(held?.attempts.map((attempt) => attempt.attempt_id)).toEqual([judged.attempt_id]);
+    expect(parkedWait(held as never)?.until).toBe(RESETS_AT);
+    // Written once: the run's own write at the end appends nothing twice.
+    const after = JSON.parse(readFileSync(attemptsFile, "utf8")) as { attempts: Array<{ attempt_id: string }> };
+    expect(after.attempts.map((attempt) => attempt.attempt_id)).toEqual([judged.attempt_id]);
+    expect(judged.wait?.until).toBe(RESETS_AT);
+  }, 60_000);
+
+  it("adds the refused review's usage to the bundle of the review taken once more", async () => {
+    const { contract, config, agent } = setUp();
+    const withUsage = <T extends { artifact: ReviewArtifact }>(
+      answer: T,
+      usage: { input: number; output: number; micros: number; ms: number },
+    ): T => ({
+      ...answer,
+      artifact: {
+        ...answer.artifact,
+        cost_micros: usage.micros,
+        latency_ms: usage.ms,
+        model: { ...answer.artifact.model, input_tokens: usage.input, output_tokens: usage.output, cost_basis: "transport_reported" },
+      },
+    });
+    const double = scripted([
+      () => withUsage(outage("HTTP 529 after 3 attempts"), { input: 1_000, output: 20, micros: 3_000, ms: 400 }),
+      () => withUsage(approval(), { input: 5_000, output: 700, micros: 90_000, ms: 9_000 }),
+    ]);
+    const result = await runTicket({
+      config,
+      contract,
+      sleep: async () => {},
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("approved");
+    const reviews = new BundleStore({ root: config.bundle_root, retainContext: true })
+      .forTicket(contract.ticket_id)
+      .filter((bundle) => bundle.kind === "review");
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]!.usage).toMatchObject({
+      input_tokens: 6_000,
+      output_tokens: 720,
+      cost_micros: 93_000,
+      cost_basis: "transport_reported",
+      wall_clock_ms: 9_400,
+    });
+  }, 60_000);
+
+  it("reviews once only where the review failed for anything but its provider", async () => {
+    const { contract, config, agent } = setUp();
+    const double = scripted([
+      () => ({
+        ...outage("x"),
+        artifact: makeReview({
+          review_id: "rev_0000000000000001",
+          decision: "error",
+          coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
+          error: { kind: "verdict_rejected", message: "no verdict could be used", attempts: 2, unresolved_criteria: ["ac_1"], reading: [] },
+        }),
+      }),
+    ]);
+    const waited: number[] = [];
+    const result = await runTicket({
+      config,
+      contract,
+      sleep: async (ms) => {
+        waited.push(ms);
+      },
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("review_failed");
+    expect(waited).toEqual([]);
+    expect(double.judged).toHaveLength(1);
+  }, 60_000);
 
   it("names the file the review was reading when the transport failed", async () => {
     const result = await reviewFailedOn(["packages/contracts/src/verdicts.ts"]);
@@ -2726,6 +2942,116 @@ describe("a second run of a ticket that is already running", () => {
     // A run that ended leaves no lock behind.
     expect(existsSync(held.path)).toBe(false);
   }, 60_000);
+});
+
+/**
+ * D-049: runs of different tickets go on at the same time. One ticket's run
+ * holds that ticket's lock and its worktree's lease while it works, and a run
+ * of another ticket in the same repository starts beside it, with no ceiling
+ * on how many unless the limits name one.
+ */
+describe("a run of another ticket while one is running", () => {
+  const approving = (review_id: string) =>
+    (async () => ({
+      artifact: makeReview({ review_id, decision: "approve" }),
+      bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+    })) as never;
+  const writing = (file: string) =>
+    agentDouble((worktree) => {
+      mkdirSync(join(worktree, "src"), { recursive: true });
+      writeFileSync(join(worktree, "src", file), "export const total = (n) => n.length;\n");
+    });
+  /** The second ticket, in the first one's repository and under its roots. */
+  const other = (config: ReturnType<typeof makeConfig>, contract: PlanContract) => ({
+    config: TicketRunConfigSchema.parse({ ...config, ticket_key: "SCP095" }),
+    contract: PlanContractSchema.parse({
+      ...contract,
+      ticket_id: "ticket_SCP095",
+      plan_id: "plan_other",
+      outcome: "The other module exports a computed total",
+    }),
+  });
+
+  it("starts and finishes beside it, with nothing set", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = TicketRunConfigSchema.parse({
+      ...makeConfig(repo.dir),
+      limits: LimitsTableSchema.parse({ organisation: "test" }),
+    });
+    const second = other(config, contract);
+
+    // The first run's executor waits, holding its ticket's lock and lease,
+    // until the second run has finished.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const working = new Promise<void>((resolve) => (entered = resolve));
+    const held = writing("feature.ts");
+    const first = runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: (async (request: Parameters<typeof held.run>[0]) => {
+          entered();
+          await released;
+          return held.run(request);
+        }) as never,
+        review: approving("rev_0000000000000049"),
+      },
+    });
+    await working;
+    const locks = readdirSync(config.state_root).filter((name) => name.endsWith(".lock.json"));
+    expect(locks).toEqual([`${contract.ticket_id}.lock.json`]);
+
+    const beside = await runTicket({
+      config: second.config,
+      contract: second.contract,
+      hooks: { agent: writing("other.ts").run as never, review: approving("rev_0000000000000050") },
+    });
+    release();
+    expect(beside.outcome).toBe("approved");
+    expect((await first).outcome).toBe("approved");
+  }, 120_000);
+
+  it("waits for none, but a number the limits set holds the machine to it", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = TicketRunConfigSchema.parse({
+      ...makeConfig(repo.dir),
+      limits: LimitsTableSchema.parse({ organisation: "test", limits: { concurrent_local_attempts: 1 } }),
+    });
+    const second = other(config, contract);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const working = new Promise<void>((resolve) => (entered = resolve));
+    const held = writing("feature.ts");
+    const first = runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: (async (request: Parameters<typeof held.run>[0]) => {
+          entered();
+          await released;
+          return held.run(request);
+        }) as never,
+        review: approving("rev_0000000000000051"),
+      },
+    });
+    await working;
+    await expect(
+      runTicket({
+        config: second.config,
+        contract: second.contract,
+        hooks: { agent: writing("other.ts").run as never, review: approving("rev_0000000000000052") },
+      }),
+    ).rejects.toThrow(/concurrent_local_attempts would reach 2, above the limit of 1/);
+    release();
+    expect((await first).outcome).toBe("approved");
+  }, 120_000);
 });
 
 /**

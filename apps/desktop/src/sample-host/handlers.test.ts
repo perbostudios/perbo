@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
-import { editing, job, sampleInterviews, saveSpec, snapshot, specFiles } from "./records.js";
+import { editing, job, sampleInterviews, sampleReadings, saveSpec, snapshot, specFiles, writeGraphEdit } from "./records.js";
+import { applyGraphEdit } from "@perbo/planning/browser";
 import type { EditingSession, Job } from "../shared/protocol.js";
+import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
+import { unseenAttention } from "../renderer/tasks/ticket-workspace.js";
+import { calledOffEntry } from "../shared/archive.js";
 
 /**
  * Deleting a piece of work from the sample host refuses where the host's
@@ -68,19 +72,19 @@ it("keeps the ticket a discarded planning drafted once its pull request is open,
   expect(onBoard("PRB-421")).toBe(true);
 });
 
-it("waits for a command running in the repository, in the host's words", async () => {
-  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+it("waits for a command running for the ticket itself, in the host's words", async () => {
+  held.push(job("run", repoId, "PRB-412", () => undefined, 60_000));
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-412" })).rejects.toThrow(
-    "Wait for the commands running in this repository to finish before deleting a contract.",
+    "Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.",
   );
   expect(onBoard("PRB-412")).toBe(true);
 });
 
-it("refuses to discard the planning that drafted its ticket while a command runs, before anything goes", async () => {
+it("refuses to discard the planning that drafted its ticket while that ticket's command runs, before anything goes", async () => {
   const planning = await drafted("executing");
-  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+  held.push(job("run", repoId, "PRB-421", () => undefined, 60_000));
   await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
-    "Wait for the commands running in this repository to finish before deleting a contract.",
+    "Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.",
   );
   // Refused before the planning went, as the host refuses it: the person
   // finds the work as it was, planning and ticket both.
@@ -116,18 +120,21 @@ it("refuses to read the plan of a planning thrown away against its spec, in the 
     "PRB-421 has a pull request open",
   );
   expect(onBoard("PRB-421")).toBe(true);
-  await expect(sampleBridge.request({ kind: "driftCheck", id: planning.id })).rejects.toThrow(
+  await expect(sampleBridge.request({ kind: "driftCheck", id: planning.id, state: null })).rejects.toThrow(
     "This planning has been thrown away, and its plan with it.",
   );
 });
 
-it("deletes the ticket once nothing holds it, and every planning over it with its chat", async () => {
+it("deletes the ticket at once while another ticket's run is under way, and every planning over it with its chat", async () => {
   const planning = await drafted("executing");
   expect(planning.phase).not.toBe("discarded");
+  // Another ticket's run holds nothing of this one, as on the host (D-129).
+  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
   await sampleBridge.request({ kind: "interviewTurn", id: planning.id, text: "Split the settings page" });
   expect(sampleInterviews.has(planning.id), "the planning's chat is running").toBe(true);
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-421" })).resolves.toBeNull();
   expect(onBoard("PRB-421")).toBe(false);
+  expect(onBoard("PRB-404"), "the ticket running beside it").toBe(true);
   expect(stored().find((each) => each.id === planning.id)?.phase).toBe("discarded");
   expect(sampleInterviews.has(planning.id), "the chat went with it").toBe(false);
 });
@@ -137,18 +144,13 @@ it("deletes the ticket once nothing holds it, and every planning over it with it
  * drafted from with Generate plan: the ticket it drafts, and the spec's title
  * after. `byPerson` is whether the person gave that title on the Spec pane.
  */
-async function draftedUnder(byPerson: boolean): Promise<{ ticket: string; spec: string }> {
-  const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
-  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
-  const slug = "confirmation-email";
-  editing.recordSpec(opened.id, slug);
-  saveSpec(
-    slug,
-    `# ${taken}\n\n## Outcome\n\nNew users receive a confirmation email.\n\n` +
-      "## Requirements\n\n- R1: A signup queues exactly one email.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
-  );
-  if (byPerson) editing.personTitled(opened.id, taken);
-  await sampleBridge.request({ kind: "generatePlan", repoId, id: opened.id });
+async function draftedUnder(
+  byPerson: boolean,
+  heading?: string | null,
+  outcome = "New users receive a confirmation email.",
+): Promise<{ ticket: string; spec: string; key: string }> {
+  const { job: drafting, slug } = await generating(byPerson, heading, outcome);
+  await settledJob(drafting.id);
   const row = await vi.waitFor(
     () => {
       const found = snapshot.tasks.find((each) => each.ticket.admission.spec?.path === `specs/${slug}/spec.md`);
@@ -157,18 +159,91 @@ async function draftedUnder(byPerson: boolean): Promise<{ ticket: string; spec: 
     },
     { timeout: 5000 },
   );
-  return { ticket: row.ticket.title, spec: specFiles()[slug]!.split("\n")[0]! };
+  return { ticket: row.ticket.title, spec: specFiles()[slug]!.split("\n")[0]!, key: row.ticket.key };
+}
+
+/** Generate plan pressed on that planning, and the drafting job it started. */
+async function generating(
+  byPerson: boolean,
+  heading: string | null | undefined,
+  outcome: string,
+): Promise<{ job: Job; slug: string }> {
+  const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+  const title = heading === undefined ? taken : heading;
+  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+  const slug = "confirmation-email";
+  editing.recordSpec(opened.id, slug);
+  saveSpec(
+    slug,
+    (title === null ? "" : `# ${title}\n\n`) +
+      `## Outcome\n\n${outcome}\n\n` +
+      "## Requirements\n\n- R1: A signup queues exactly one email.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  if (byPerson && title !== null) editing.personTitled(opened.id, title);
+  return { job: await sampleBridge.request({ kind: "generatePlan", repoId, id: opened.id }), slug };
 }
 
 it("drafts the plan under the name the person gave the spec, and the spec keeps it (D-127)", async () => {
   const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
-  expect(await draftedUnder(true)).toEqual({ ticket: taken, spec: `# ${taken}` });
+  expect(await draftedUnder(true)).toMatchObject({ ticket: taken, spec: `# ${taken}` });
 });
 
 it("names a plan whose spec nobody titled as admit does, and the spec takes that name (D-127)", async () => {
-  expect(await draftedUnder(false)).toEqual({
+  expect(await draftedUnder(false)).toMatchObject({
     ticket: "New users receive a confirmation email.",
     spec: "# New users receive a confirmation email.",
+  });
+});
+
+it("names a plan whose spec has no title line by its outcome, and the spec takes that name (D-118, D-127)", async () => {
+  expect(await draftedUnder(false, null)).toMatchObject({
+    ticket: "New users receive a confirmation email.",
+    spec: "# New users receive a confirmation email.",
+  });
+});
+
+it("names a plan whose spec is titled Untitled by that title, which is the app's display word and no mark in the file (D-118)", async () => {
+  expect(await draftedUnder(false, "Untitled")).toMatchObject({ ticket: "Untitled", spec: "# Untitled" });
+});
+
+describe("a sample ticket's name is never over 60 characters, and never cut, as admit names it (D-120, D-127)", () => {
+  const LONG_TITLE = "Confirmation email " + "and its retries ".repeat(36) + "x".repeat(5);
+  const LONG_SENTENCE = "New users receive a confirmation email " + "and a reminder ".repeat(37) + "anyway";
+
+  it("uses six-hundred-character stand-ins", () => {
+    expect(LONG_TITLE).toHaveLength(600);
+    expect(LONG_SENTENCE).toHaveLength(600);
+  });
+
+  it("passes over a spec title past the cap for the outcome's first sentence", async () => {
+    expect(await draftedUnder(false, LONG_TITLE, `Confirmation emails are sent. ${LONG_SENTENCE}`)).toMatchObject({
+      ticket: "Confirmation emails are sent.",
+      spec: "# Confirmation emails are sent.",
+    });
+  });
+
+  it("is the ticket's key where the title and the outcome's first sentence are both past the cap", async () => {
+    const { ticket, spec, key } = await draftedUnder(false, LONG_TITLE, LONG_SENTENCE);
+    expect(ticket).toBe(key);
+    expect(spec).toBe(`# ${key}`);
+  });
+
+  it("numbers the spec's title where another ticket carries it and the outcome's sentence too", async () => {
+    const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+    expect(await draftedUnder(false, taken, taken)).toMatchObject({ ticket: `${taken} 2`, spec: `# ${taken} 2` });
+  });
+
+  it("refuses a title the person gave past the cap, in admit's words, and puts nothing on the board", async () => {
+    const before = snapshot.tasks.length;
+    const { job: drafting } = await generating(true, LONG_TITLE, "New users receive a confirmation email.");
+    await vi.waitFor(
+      () => expect(snapshot.jobs.find((each) => each.id === drafting.id)!.state).toBe("failed"),
+      { timeout: 5000 },
+    );
+    expect(snapshot.jobs.find((each) => each.id === drafting.id)!.error).toBe(
+      "the spec's title is 600 characters, and a ticket's name is at most 60 (D-127): shorten the title, then draft the plan again",
+    );
+    expect(snapshot.tasks).toHaveLength(before);
   });
 });
 
@@ -178,7 +253,7 @@ it("moves a ticket on a principle with no finding answered, as the principle alo
   const digest = async () => (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
   // The run that stops for it was going to publish.
   await sampleBridge.request({ kind: "run", repoId, key, digest: await digest(), publish: true, approve: false, resumeFrom: null });
-  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  await vi.waitFor(() => expect(state()).not.toBe("provisioning"), { timeout: 5000 });
   const decided = await sampleBridge.request({
     kind: "decide",
     repoId,
@@ -188,6 +263,418 @@ it("moves a ticket on a principle with no finding answered, as the principle alo
     decisions: [],
   });
   expect(decided.publish).toBe(false);
-  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  await vi.waitFor(() => expect(state()).not.toBe("provisioning"), { timeout: 5000 });
   expect(state()).toBe("pr_open");
+});
+
+it("moves a ticket as the CLI does, along the lifecycle's own rows with a row of history each step, so one opened before it came to need the person owes it again", async () => {
+  const key = "PRB-412";
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const from = ticket().state;
+  const before = ticket().history.length;
+  await sampleBridge.request({ kind: "ticketOpened", repoId, key });
+  const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+  await sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: false, resumeFrom: null });
+  // Back through `ready`, then `provisioning` before the attempt.
+  expect(ticket().history.slice(before).map((row) => [row.from, row.to])).toEqual([[from, "ready"], ["ready", "provisioning"]]);
+  await vi.waitFor(() => expect(ticket().state).not.toBe("provisioning"), { timeout: 5000 });
+  const walked = ticket().history.slice(before);
+  expect(walked.map((row) => row.to)).toEqual(["ready", "provisioning", "executing", "verifying", "independent_review", ticket().state]);
+  for (const step of walked)
+    expect(TICKET_TRANSITIONS.some((row) => row.from === step.from && row.to === step.to), `${step.from} to ${step.to}`).toBe(true);
+  expect(walked.at(-1)).toMatchObject({ from: "independent_review", to: ticket().state, at: ticket().updated_at });
+  const board = await sampleBridge.request({ kind: "snapshot" });
+  expect(unseenAttention(board, board.tasks.find((row) => row.ticket.key === key)!)).toBe(true);
+  await sampleBridge.request({ kind: "ticketOpened", repoId, key });
+  const opened = await sampleBridge.request({ kind: "snapshot" });
+  expect(unseenAttention(opened, opened.tasks.find((row) => row.ticket.key === key)!)).toBe(false);
+});
+
+it("forgets a merge called off once a run of the ticket starts, as the host does", async () => {
+  const key = "PRB-377";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  const before = structuredClone(row.ticket);
+  try {
+    await sampleBridge.request({ kind: "callOff", repoId, key });
+    expect(snapshot.calledOff).toEqual([calledOffEntry(repoId, key, row.ticket.delivery.pull_request_url!)]);
+    // Its pull request closed on GitHub, and the work run again.
+    row.ticket.state = "closed";
+    row.ticket.delivery.state = "closed";
+    const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+    const run = await sampleBridge.request({ kind: "run", repoId, key, digest, publish: true, approve: false, resumeFrom: null });
+    expect(snapshot.calledOff).toEqual([]);
+    expect((await sampleBridge.request({ kind: "snapshot" })).calledOff).toEqual([]);
+    await sampleBridge.request({ kind: "cancel", jobId: run.id });
+    await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === run.id)!.state).toBe("cancelled"), { timeout: 5000 });
+  } finally {
+    snapshot.calledOff = [];
+    row.ticket = before;
+  }
+});
+
+it("forgets a merge called off with the ticket it was called off on, as the host does", async () => {
+  const key = "PRB-377";
+  try {
+    await sampleBridge.request({ kind: "callOff", repoId, key });
+    await sampleBridge.request({ kind: "callOff", repoId, key });
+    const url = snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.delivery.pull_request_url!;
+    expect(snapshot.calledOff).toEqual([calledOffEntry(repoId, key, url)]);
+    snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.state = "failed";
+    await sampleBridge.request({ kind: "discard", repoId, key });
+    expect(snapshot.calledOff).toEqual([]);
+  } finally {
+    snapshot.calledOff = [];
+  }
+});
+
+it("stops a run as the host does: the ticket stays where the run left it, with no row for the stop", async () => {
+  const key = "PRB-412";
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+  const run = await sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: false, resumeFrom: null });
+  const started = structuredClone(ticket());
+  expect(started.state).toBe("provisioning");
+  await sampleBridge.request({ kind: "cancel", jobId: run.id });
+  await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === run.id)!.state).toBe("cancelled"), { timeout: 5000 });
+  expect(ticket()).toEqual(started);
+});
+
+it("refuses a run on a ticket the lifecycle gives no route back to ready, before any job opens", async () => {
+  const key = "PRB-412";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  const refused = async (state: "cancelled" | "pr_open", delivery: "open" | "closed") => {
+    row.ticket = { ...row.ticket, state, delivery: { ...row.ticket.delivery, state: delivery } };
+    const before = structuredClone(row.ticket);
+    const jobs = snapshot.jobs.length;
+    const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+    await expect(
+      sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: false, resumeFrom: null }),
+    ).rejects.toThrow(`PRB-412 is ${state}, which the lifecycle has no route out of back to ready.`);
+    expect(snapshot.jobs).toHaveLength(jobs);
+    expect(row.ticket).toEqual(before);
+  };
+  await refused("cancelled", "open");
+  // The rows out of pr_open but the merge are for a pull request GitHub closed.
+  await refused("pr_open", "open");
+});
+
+it("refuses a move the lifecycle has no row for, and leaves the ticket where it was", async () => {
+  const key = "PRB-412";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  // An open pull request on a ticket still waiting on the person: no row takes it to merged.
+  row.ticket = { ...row.ticket, delivery: { ...row.ticket.delivery, state: "open" } };
+  const before = structuredClone(row.ticket);
+  const sync = await sampleBridge.request({ kind: "sync", repoId, key });
+  await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === sync.id)!.state).toBe("failed"), { timeout: 5000 });
+  expect(snapshot.jobs.find((each) => each.id === sync.id)!.error).toBe(
+    "PRB-412 cannot move from changes_requested to merged: the lifecycle has no row for it.",
+  );
+  expect(row.ticket).toEqual(before);
+});
+
+/**
+ * A fresh planning drafted from a spec with Generate plan, once it has landed:
+ * one requirement drafts a basic ticket, two an epic the drafter divides.
+ */
+async function draftedFromSpec(slug: string, requirements: string[]): Promise<{ id: string; key: string }> {
+  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+  editing.recordSpec(opened.id, slug);
+  saveSpec(
+    slug,
+    "# Confirmation email\n\n## Outcome\n\nNew users receive a confirmation email.\n\n## Requirements\n\n" +
+      requirements.map((each, index) => `- R${index + 1}: ${each}`).join("\n") +
+      "\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  const key = await submitted(opened.id, "generate");
+  return { id: opened.id, key };
+}
+
+/** Generate plan, or Start over, pressed as the Spec pane presses it, and its plan landed on the planning. */
+async function submitted(id: string, intent: "generate" | "startOver"): Promise<string> {
+  // Opened again, as the page does as it mounts: a landed plan is edited from there.
+  const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "session", id } });
+  const operationId = crypto.randomUUID();
+  await sampleBridge.request({ kind: "editingSubmit", id, revision: session.revision, operationId, intent });
+  return vi.waitFor(
+    () => {
+      const now = editing.read(id);
+      if (now.key === null || now.operation?.id !== operationId || !now.operation.reconciled)
+        throw new Error("not landed yet");
+      return now.key;
+    },
+    { timeout: 5000 },
+  );
+}
+
+const settledJob = (id: string) =>
+  vi.waitFor(
+    () => {
+      const found = snapshot.jobs.find((each) => each.id === id)!;
+      if (found.state === "running" || found.state === "stopping") throw new Error("still running");
+      expect(found.state).toBe("completed");
+    },
+    { timeout: 5000 },
+  );
+
+/** The sample's refusal of a dismissal after a person's edit of the plan, in the CLI's words. */
+const handEditedRefusal = (key: string) =>
+  `${key}'s plan has been edited by hand since it was drafted, so its problems cannot be ` +
+  "dismissed: answer them, or edit the plan until a reading finds none";
+
+it("dismisses the problems of a plan nobody has edited since it was drafted", async () => {
+  const { id } = await draftedFromSpec("dismiss-untouched", ["A signup queues exactly one email."]);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).resolves.toBeNull();
+});
+
+it("dismisses after edits the chat made alone, which move the spec with the plan", async () => {
+  const { id, key } = await draftedFromSpec("dismiss-after-chat", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  // The chat's edit, as the sample interview applies one: through the same
+  // edit path, recorded as the interview's.
+  writeGraphEdit(
+    key,
+    (state) =>
+      applyGraphEdit(
+        state,
+        {
+          op: "set_criterion",
+          id: "ac_1",
+          text: "A signup queues exactly two emails.",
+          expected_verification: { kind: "test", assertion: "two emails" },
+        },
+        [],
+      ),
+    null,
+    undefined,
+    "interview",
+  );
+  await settledJob((await sampleBridge.request({ kind: "driftCheck", id, state: null })).id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).resolves.toBeNull();
+  // The person taking the chat's edit back in the Graph pane is an edit by hand.
+  const undo = await sampleBridge.request({ kind: "graphUndo", repoId, key, edit: 1 });
+  await settledJob(undo.id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).rejects.toThrow(handEditedRefusal(key));
+});
+
+it("refuses the dismissal after a hand edit on a basic ticket's contract page, saying why", async () => {
+  const { id, key } = await draftedFromSpec("dismiss-after-contract", ["A signup queues exactly one email."]);
+  const session = editing.read(id);
+  expect(session.nodes).toBe(0);
+  const { digest } = await sampleBridge.request({ kind: "detail", repoId, key });
+  const draft = session.form.draft;
+  const edit = await sampleBridge.request({
+    kind: "edit",
+    repoId,
+    key,
+    digest,
+    draft: { ...draft, criteria: [{ ...draft.criteria[0]!, text: "A signup queues exactly two emails." }] },
+  });
+  await settledJob(edit.id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).rejects.toThrow(handEditedRefusal(key));
+});
+
+it("refuses the dismissal after a hand edit in an epic's Graph pane, until the plan is drafted again", async () => {
+  const { id, key } = await draftedFromSpec("dismiss-after-graph", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  expect(editing.read(id).nodes).toBeGreaterThan(0);
+  const edit = await sampleBridge.request({
+    kind: "graphEdit",
+    repoId,
+    key,
+    edit: {
+      op: "set_criterion",
+      id: "ac_1",
+      text: "A signup queues exactly two emails.",
+      expected_verification: { kind: "test", assertion: "two emails" },
+    },
+  });
+  await settledJob(edit.id);
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).rejects.toThrow(handEditedRefusal(key));
+  // Start over drafts the plan again, over the edit.
+  await submitted(id, "startOver");
+  await expect(sampleBridge.request({ kind: "driftDismiss", id })).resolves.toBeNull();
+});
+
+/** A reworded criterion the sample reading finds differs from its requirement. */
+function chatRewords(key: string): void {
+  writeGraphEdit(
+    key,
+    (state) =>
+      applyGraphEdit(
+        state,
+        {
+          op: "set_criterion",
+          id: "ac_1",
+          text: "A signup queues exactly two emails.",
+          expected_verification: { kind: "test", assertion: "two emails" },
+        },
+        [],
+      ),
+    null,
+    undefined,
+    "interview",
+  );
+}
+
+const readingsOf = (key: string) => snapshot.jobs.filter((each) => each.kind === "drift" && each.key === key);
+
+it("lands a plan Start over drafts with none of the problems of the plan it replaced, and reads nothing", async () => {
+  const { id, key } = await draftedFromSpec("start-over-over-problems", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  await settledJob((await sampleBridge.request({ kind: "driftCheck", id, state: null })).id);
+  expect(editing.read(id).drift?.open.length).toBeGreaterThan(0);
+  const before = readingsOf(key).length;
+  await submitted(id, "startOver");
+  const landed = editing.read(id);
+  expect(landed.drift).toBeNull();
+  expect(landed.read).not.toBeNull();
+  expect(readingsOf(key)).toHaveLength(before);
+});
+
+it("tries a reading again until it runs, and stops trying once it is cancelled, landing nothing (D-NEW-basic-and-epic-flows)", async () => {
+  const { id, key } = await draftedFromSpec("reading-cancelled-between-tries", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  let tries = 0;
+  let release = (): void => undefined;
+  const attempt = vi.spyOn(sampleReadings, "attempt").mockImplementation(() => {
+    tries += 1;
+    if (tries === 1) throw new Error("No credential for Claude.");
+  });
+  const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(
+    () => new Promise<void>((done) => (release = done)),
+  );
+  try {
+    const reading = await sampleBridge.request({ kind: "driftCheck", id, state: "0123456789abcdef" });
+    await vi.waitFor(() => expect(pause).toHaveBeenCalledWith(2_000), { timeout: 5000 });
+    await sampleBridge.request({ kind: "cancel", jobId: reading.id });
+    release();
+    await new Promise((done) => setTimeout(done, 50));
+    expect(tries).toBe(1);
+    expect(snapshot.jobs.find((each) => each.id === reading.id)!.state).toBe("cancelled");
+    expect(editing.read(id).drift).toBeNull();
+    expect(editing.read(id).read).not.toBe("0123456789abcdef");
+  } finally {
+    attempt.mockRestore();
+    pause.mockRestore();
+  }
+});
+
+it("records what the try that ran found, where the spec could not be read on the first (D-NEW-basic-and-epic-flows)", async () => {
+  const slug = "reading-readable-later";
+  const { id, key } = await draftedFromSpec(slug, [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  const spec = specFiles()[slug]!;
+  const others = specFiles();
+  delete others[slug];
+  localStorage.setItem("perbo:preview-specs", JSON.stringify(others));
+  const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(async () => saveSpec(slug, spec));
+  try {
+    const reading = await sampleBridge.request({ kind: "driftCheck", id, state: null });
+    await settledJob(reading.id);
+    expect(pause).toHaveBeenCalledTimes(1);
+    const verdict = snapshot.jobs.find((each) => each.id === reading.id)!.result as { findings: unknown[] };
+    expect(verdict.findings.length).toBeGreaterThan(0);
+    expect(editing.read(id).drift?.open.length).toBeGreaterThan(0);
+  } finally {
+    pause.mockRestore();
+  }
+});
+
+it("records nothing of a reading Start over overtook: the plan it read has gone", async () => {
+  const { id, key } = await draftedFromSpec("start-over-under-a-reading", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  const reading = await sampleBridge.request({ kind: "driftCheck", id, state: "0123456789abcdef" });
+  const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "session", id } });
+  await sampleBridge.request({ kind: "editingSubmit", id, revision: session.revision, operationId: crypto.randomUUID(), intent: "startOver" });
+  // The reading lands before the plan drafted again does, and finds the
+  // difference in the plan it read; none of it reaches the planning.
+  await settledJob(reading.id);
+  const now = editing.read(id);
+  expect(now.operation?.reconciled).toBe(false);
+  expect((snapshot.jobs.find((each) => each.id === reading.id)!.result as { findings: unknown[] }).findings.length).toBeGreaterThan(0);
+  expect(now.drift).toBeNull();
+  expect(now.read).not.toBe("0123456789abcdef");
+});
+
+it("refuses to approve a ticket while a planning over it records problems open, in one sentence, and approves it once none is", async () => {
+  const { id, key } = await draftedFromSpec("approve-over-problems", [
+    "A signup queues exactly one email.",
+    "A failed send is retried once.",
+  ]);
+  chatRewords(key);
+  await settledJob((await sampleBridge.request({ kind: "driftCheck", id, state: null })).id);
+  expect(editing.read(id).drift?.open.length).toBeGreaterThan(0);
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const runs = () => snapshot.jobs.filter((each) => each.kind === "run" && each.key === key);
+  const { digest } = await sampleBridge.request({ kind: "detail", repoId, key });
+  const approve = () =>
+    sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: true, resumeFrom: null });
+  await expect(approve()).rejects.toThrow(
+    `${key} is not approved while its plan and its spec no longer promise the same thing: resolve each ` +
+      "problem on the Problems tab, or change the plan, and confirm again.",
+  );
+  expect(runs()).toHaveLength(0);
+  expect(ticket().approved_at).toBeNull();
+  // Dismissed at the command line, which the chat's edits allow: none is open, and it approves.
+  await sampleBridge.request({ kind: "driftDismiss", id });
+  expect(editing.read(id).drift).toBeNull();
+  const run = await approve();
+  held.push(run);
+  expect(runs()).toHaveLength(1);
+  expect(ticket().approved_at).not.toBeNull();
+});
+
+it("throws away a planning and the ticket it drafted while another ticket's run is under way", async () => {
+  // Over a ticket nothing else here reads, since the delete takes it, put
+  // back in review as a plan a planning drafted is.
+  const row = snapshot.tasks.find((each) => each.ticket.key === "PRB-299")!;
+  row.ticket = { ...row.ticket, state: "plan_review" };
+  const opened = await sampleBridge.request({
+    kind: "editingOpen",
+    target: { kind: "planning", repoId, key: "PRB-299" },
+  });
+  localStorage.setItem(
+    "perbo:preview-editing",
+    JSON.stringify(stored().map((each) => (each.id === opened.id ? { ...each, admitted: true } : each))),
+  );
+  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+  await sampleBridge.request({ kind: "editingDiscard", id: opened.id });
+  expect(stored().find((each) => each.id === opened.id)?.phase).toBe("discarded");
+  expect(onBoard("PRB-299")).toBe(false);
+});
+
+/**
+ * Plan it again deletes the stopped ticket as a delete takes it, so it waits
+ * only on that ticket's own command: another ticket's run in the same
+ * repository holds nothing of it (D-129). Last in this file, because the plan
+ * it drafts stays in the sample's records.
+ */
+it("plans a stopped ticket again while another ticket's run is under way, as the host does", async () => {
+  saveSpec(
+    "retire-the-legacy-csv-importer",
+    "# Retire the legacy CSV importer\n\n## Outcome\n\nEvery import goes through the current parser.\n\n" +
+      "## Requirements\n\n- R1: The legacy importer and its routes are removed.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  held.push(job("run", repoId, "PRB-412", () => undefined, 60_000));
+  expect(onBoard("PRB-415")).toBe(true);
+  const opened = await sampleBridge.request({ kind: "replan", repoId, key: "PRB-415" });
+  expect(onBoard("PRB-415")).toBe(false);
+  expect(opened.key).not.toBe("PRB-415");
+  expect(onBoard(opened.key)).toBe(true);
 });

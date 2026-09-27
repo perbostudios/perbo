@@ -6,7 +6,7 @@ import type { EditingChange, PlanPromise } from "../../shared/protocol.js";
  * green, what it took away is shown red and struck through, where each stood.
  *
  * Pure functions over text, so the same diff serves a criterion on a node
- * card, a criterion in the inspector, a row on the Plan pane and a section of
+ * card, a criterion in the inspector and a section of
  * the spec as it reads. Nothing here reads a record or a file; the panes hand
  * these the before and the after the session holds.
  */
@@ -269,6 +269,25 @@ export function criteriaChange(
     ),
   );
   return { of, removed: unpaired.slice(pairs) };
+}
+
+/**
+ * The last change where the chat made it, which is the only change a pane
+ * marks (D-128): a change the person made by hand was made where they read
+ * it, and is marked nowhere, though it still replaces the chat's marks.
+ */
+export function chatChange(change: EditingChange | null | undefined): EditingChange | null {
+  return change?.by === "chat" ? change : null;
+}
+
+/**
+ * The marks a list of criteria shown by their words carries, by those words:
+ * for a list that holds no ids, as the criteria being edited on a basic
+ * ticket's contract do. Undefined for words the change did not leave.
+ */
+export function changeOfText(marks: CriteriaChange, after: PlanPromise["criteria"], text: string): CriterionChange | undefined {
+  const criterion = after.find((each) => each.text === text);
+  return criterion === undefined ? undefined : marks.of.get(criterion.id);
 }
 
 /**

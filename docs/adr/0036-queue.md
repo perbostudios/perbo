@@ -13,7 +13,7 @@ One deterministic process, `perbo serve`, runs over the ticket store. The loop's
 
 ## Consequences
 
-- Throughput comes from pipelining runs up to `concurrent_local_attempts`.
+- Throughput comes from running every ready ticket at once, up to `concurrent_local_attempts` where the limits set one ([D-049](../11-open-decisions.md)).
 - Which ticket waits is set arithmetic over approved records (`depends_on`, `paths_allowed`, a sealed branch's paths), so the same store always gives the same order.
 - Tracker drafting adds at most one draft per tick.
 

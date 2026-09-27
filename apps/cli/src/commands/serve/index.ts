@@ -68,18 +68,21 @@ import { describeWaits } from "./waits.js";
  *    by the paths it changed afterwards. A wait moves the ticket to `blocked`
  *    with the reason on its record; the end of one moves it back. Set
  *    arithmetic over approved records, no model anywhere (ADR-0011).
- * 4. **Starts runs**, as child `perbo run --ticket` processes, up to
- *    `concurrent_local_attempts` minus whatever is already running — including
- *    a run a person started by hand. The run is the unit every measurement is
- *    taken on and it stays that; this only decides when it starts.
+ * 4. **Starts runs**, as child `perbo run --ticket` processes: every ready
+ *    ticket not already running, in queue order, in the same tick. Where the
+ *    repository sets `concurrent_local_attempts`, only up to that number minus
+ *    whatever is already running — including a run a person started by hand.
+ *    The run is the unit every measurement is taken on and it stays that; this
+ *    only decides when it starts.
  * 5. **Drafts one labelled tracker issue** into `plan_review`, where the
  *    repository names a tracker: the one model call a tick makes, through the
  *    same `admit --from` a person types. The store says what was drafted;
  *    nothing is written to the issue, and nothing is approved.
  *
- * Pipelining is the throughput: the next ticket starts when the previous one's
- * process ends at `pr_open`, not when it merges. Nothing here merges under the
- * default `merge: "person"`, and nothing here approves anything.
+ * Runs of different tickets go side by side (D-049): a ticket starts the tick
+ * after it is confirmed and nothing it waits on holds it, whatever else is
+ * running. Nothing here merges under the default `merge: "person"`, and nothing
+ * here approves anything.
  */
 
 export interface ServeArgs {
@@ -224,7 +227,7 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
     });
     return result.code === 0
       ? { ok: true, detail: `fetched ${base_ref}` }
-      : { ok: false, detail: (result.stderr || result.stdout).trim().split("\n").slice(0, 2).join("; ").slice(0, 300) };
+      : { ok: false, detail: (result.stderr || result.stdout).trim().split("\n").join("; ") };
   },
 
   async sync({ key, merge, onLine }) {
@@ -289,7 +292,7 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
       { timeoutMs: GIT_TIMEOUT_MS },
     );
     if (result.code !== 0) {
-      return { ok: false, detail: (result.stderr || result.stdout).trim().split("\n")[0]?.slice(0, 300) || "gh failed" };
+      return { ok: false, detail: (result.stderr || result.stdout).trim().split("\n").join("; ") || "gh failed" };
     }
     // An answer larger than the read holds arrives as a list of issues shaped
     // exactly like the whole of one, short by the issues that were cut.
@@ -344,9 +347,6 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   };
 }
 
-/** As long as a reason on a ticket's record may be: the queue's own bound on what it keeps of a child's words. */
-const REASON_LIMIT = 300;
-
 /**
  * What a run that completed said, from the record it writes to stdout when
  * that is a pipe (`run --json`'s document): its outcome and detail as one
@@ -363,7 +363,7 @@ function runDocumentAnswer(stdout: string): string | null {
   return parsed.success ? `${parsed.data.outcome} — ${parsed.data.detail}` : null;
 }
 
-/** Tracker text on one line of this queue's stderr: line breaks and control characters become spaces, and it is cut short. */
+/** Tracker text on one line of this queue's stderr, whole: line breaks and control characters become spaces (D-NEW-nothing-shown-is-cut). */
 const oneLine = (text: string): string =>
   Array.from(text, (char) => {
     const code = char.charCodeAt(0);
@@ -371,8 +371,7 @@ const oneLine = (text: string): string =>
   })
     .join("")
     .replace(/ {2,}/g, " ")
-    .trim()
-    .slice(0, 120);
+    .trim();
 
 /**
  * `.perbo/config.json`'s `tracker`: the repository whose open issues carrying
@@ -432,9 +431,9 @@ export const ServeTickSchema = z.strictObject({
   relevelled: z.array(TicketKeySchema),
   /** The tracker issue drafted this tick, with the key admit wrote for it (null where it wrote none) and admit's exit code. At most one. */
   drafted: z.array(z.strictObject({ reference: z.string().min(1), key: TicketKeySchema.nullable(), code: z.number().int() })),
-  /** Runs alive after the starts, and the ceiling they are counted against. */
+  /** Runs alive after the starts, and the ceiling they are counted against: null where the repository sets none. */
   running: z.number().int().min(0),
-  capacity: z.number().int().min(0),
+  capacity: z.number().int().min(0).nullable(),
 });
 export type ServeTick = z.infer<typeof ServeTickSchema>;
 
@@ -447,7 +446,8 @@ interface Queue {
   base_ref: string;
   mode: MergeMode;
   limits: LimitsTable;
-  capacity: number;
+  /** How many runs may be alive at once, or null: as many as are ready. */
+  capacity: number | null;
   args: ServeArgs;
   deps: ServeDeps;
   streams: Streams;
@@ -711,7 +711,7 @@ async function runTick(queue: Queue): Promise<ServeTick> {
                 base_tip: tip,
                 exit_code: result.code ?? -1,
                 at: queue.clock().toISOString(),
-                reason: said === null ? null : said.slice(0, REASON_LIMIT),
+                reason: said,
               };
         try {
           const after = readTicket(dir, ticket.key);
@@ -736,7 +736,8 @@ async function runTick(queue: Queue): Promise<ServeTick> {
     say(`re-levelling ${ticket.key}: perbo ${argv.join(" ")}`);
   }
 
-  // 4. Starts, up to the ceiling, counting every run alive whoever started it.
+  // 4. Starts: every ready ticket not already running, up to a ceiling only
+  // where the repository sets one, counting every run alive whoever started it.
   const started: string[] = [];
   for (const ticket of ready) {
     if (queue.paused) break;
@@ -845,7 +846,7 @@ function summarise(tick: ServeTick): string {
     `tick ${tick.tick}: ${tick.fetch.ok ? `fetched ${tick.base_ref}` : `fetch failed`}; ` +
     `${tick.synced.length} synced${tick.synced.some((entry) => entry.merge) ? " (one asked to merge)" : ""}; ` +
     `${tick.relevelled.length} re-levelled; ${tick.started.length} started; ${tick.drafted.length} drafted; ` +
-    `${tick.running}/${tick.capacity} running; `+
+    `${tick.capacity === null ? tick.running : `${tick.running}/${tick.capacity}`} running; ` +
     `${readyCount} ready; ${waiting} blocked`
   );
 }
@@ -955,7 +956,9 @@ export async function serve(args: ServeArgs, context: ServeContext): Promise<num
 
   streams.stderr(
     `serving ${dir}: base ${base.base_ref} (${base.from}), merge ${mode}, ` +
-      `up to ${capacity} run${capacity === 1 ? "" : "s"} at once` +
+      (capacity === null
+        ? "every ready ticket at once"
+        : `up to ${capacity} run${capacity === 1 ? "" : "s"} at once`) +
       (args.once ? ", one tick" : `, every ${Math.round(args.intervalMs / 1000)}s`) +
       (args.publish ? ", publishing" : "") +
       (tracker === null ? "" : `, drafting '${tracker.draft_label}' issues from ${tracker.repository}`) +

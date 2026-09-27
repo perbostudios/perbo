@@ -154,3 +154,37 @@ describe("a failure that named no test file", () => {
   }, 15_000);
 });
 
+
+/**
+ * A check's summary is a line of the test run's own output, and it is recorded
+ * whole (D-NEW-nothing-shown-is-cut): a totals line longer than any width a
+ * screen would pick still arrives with its last word.
+ */
+describe("a check's summary line", () => {
+  it("is the run's own line, whole", async () => {
+    const worktree = scratch("perbo-checks-summary-");
+    const line =
+      "Tests  1 failed | 311 passed | 4 skipped | 2 todo across the auth, billing, " +
+      "notifications, search and onboarding packages (318 in all, 41.2s)";
+    const script = join(worktree, "check.mjs");
+    writeFileSync(script, `console.log(${JSON.stringify(line)});\nprocess.exit(1);\n`);
+    const [result] = await runPinnedChecks({
+      checks: [
+        {
+          check_id: "check_lint",
+          name: "lint",
+          kind: "lint",
+          command: ["node", script],
+          timeout_ms: 30_000,
+          definition_path: null,
+          origin: "configured",
+        },
+      ],
+      worktree,
+      env: process.env,
+      secrets: new SecretIndex(),
+    });
+    expect(line.length).toBeGreaterThan(120);
+    expect(result!.summary).toBe(line);
+  });
+});

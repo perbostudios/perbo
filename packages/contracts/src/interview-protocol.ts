@@ -38,6 +38,14 @@ export const InterviewStartedSchema = z.strictObject({
   tools: z.array(z.string().min(1)),
 });
 
+/**
+ * The most characters one message of the session's own words may run to, as
+ * the chat records it. The session is told the limit up front, and a message
+ * that still runs past it is asked for again, condensed, rather than cut
+ * (D-NEW-nothing-shown-is-cut).
+ */
+export const INTERVIEW_SAID_MAX_CHARS = 12_000;
+
 /** One message the session streamed, passed through. */
 export const InterviewMessageSchema = z.strictObject({
   type: z.literal("message"),

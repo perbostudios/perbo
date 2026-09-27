@@ -53,6 +53,8 @@ export const ProfileStateSchema = z.object({
   taskModels: z.record(z.string(), TaskModelsSchema).default({}),
   /** Completed tickets filed away from Home by hand (S4), as `repoId:key`. */
   archived: z.array(z.string()).default([]),
+  /** Tickets whose merge the person called off with Don't merge (D-097), as `repoId:key`. */
+  calledOff: z.array(z.string()),
   /**
    * Each repository's unsent answer to "What do you want to build?", by
    * repository id (D-131).
@@ -104,6 +106,7 @@ export class Profile {
           titles: {},
           taskModels: {},
           archived: [],
+          calledOff: [],
           asks: {},
           lastOpened: {},
           editingSessions: [],

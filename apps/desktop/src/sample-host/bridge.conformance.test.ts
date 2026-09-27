@@ -8,6 +8,8 @@ import type { HostModules } from "../host/routes.js";
 import { disposeFixtures, fixture } from "../host/test-support/host-fixture.js";
 import { handlers } from "./handlers.js";
 import { sampleBridge } from "./bridge.js";
+import { snapshot as sampleRecords } from "./records.js";
+import { calledOffEntry } from "../shared/archive.js";
 import { runProcess } from "../host/process.js";
 import type { Change, DesktopBridge, Draft, Job, ReplyMap, Request } from "../shared/protocol.js";
 import { describeBridgeContract } from "../test-support/bridge-contract.js";
@@ -35,7 +37,7 @@ it("answers every request kind from the host's routes, and nothing else", () => 
   expect(Object.keys(createRoutes({} as unknown as HostModules)).sort()).toEqual(requestKinds());
 });
 
-/** A run the executor never finishes, so the exclusive lane stays occupied. */
+/** A run the executor never finishes, so its ticket's turn stays taken. */
 function heldRunner() {
   let release!: () => void;
   const until = new Promise<void>((resolve) => {
@@ -44,6 +46,13 @@ function heldRunner() {
   const runner: typeof runProcess = async (binary, args, options) => {
     if (args[1] === "approve") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
     if (args[1] === "run") {
+      // What the CLI prints while the run works, each output the whole of it
+      // so far, as the process runner hands it on.
+      // The worktree line names the ticket, so two runs' progress can be told apart.
+      const printed = [`  worktree /w/${args[3]} on prb/held at abc1234`, "  executing", "  executor says: Holding, as asked."];
+      printed.forEach((_, at) =>
+        setTimeout(() => options.onOutput?.(printed.slice(0, at + 1).join("\n") + "\n"), 20 * (at + 1)),
+      );
       await Promise.race([
         until,
         new Promise<void>((resolve) =>
@@ -78,12 +87,21 @@ describeBridgeContract("the sample host", async () => {
   const changes: Change[] = [];
   const stop = sampleBridge.subscribe((change) => changes.push(change));
   const repoId = (await sampleBridge.request({ kind: "snapshot" })).repositories[0]!.id;
+  // A ticket of the suite's own to approve beside a run, so the sample's
+  // PRB-421 stays unapproved for the cases after it.
+  const approvable = await settled(
+    sampleBridge,
+    (await sampleBridge.request({ kind: "admit", repoId, draft: hostDraft })).id,
+  );
   let held: Job | null = null;
   return {
     bridge: sampleBridge,
     repoId,
     unapprovedKey: "PRB-421",
     runnableKey: "PRB-412",
+    approvableKey: approvable.resultKey!,
+    // Archived, and read by nothing else here.
+    deletableKey: "PRB-299",
     startHeldRun: async (key) => {
       const detail = await sampleBridge.request({ kind: "detail", repoId, key });
       held = await sampleBridge.request({
@@ -114,7 +132,7 @@ describeBridgeContract("the host", async () => {
     subscribe: () => () => undefined,
   };
   const repository = await made.service.registerRepository(made.repo);
-  for (const outcome of [hostDraft.outcome, "A second contract nobody approved"])
+  for (const outcome of [hostDraft.outcome, "A second contract nobody approved", "A third contract to delete"])
     await settled(
       bridge,
       (
@@ -125,12 +143,25 @@ describeBridgeContract("the host", async () => {
         })
       ).id,
     );
+  // A ticket of the suite's own to approve beside a run.
+  const approvable = await settled(
+    bridge,
+    (
+      await bridge.request({
+        kind: "admit",
+        repoId: repository.id,
+        draft: { ...hostDraft, outcome: "A contract approved beside a run" },
+      })
+    ).id,
+  );
   let held: Job | null = null;
   return {
     bridge,
     repoId: repository.id,
     unapprovedKey: "PRB-2",
     runnableKey: "PRB-1",
+    approvableKey: approvable.resultKey!,
+    deletableKey: "PRB-3",
     startHeldRun: async (key) => {
       const detail = await bridge.request({ kind: "detail", repoId: repository.id, key });
       held = await bridge.request({
@@ -315,6 +346,158 @@ it("takes a principle with no finding answered as the host takes it", async () =
     expect(onSample.job).toEqual(onHost.job);
     expect(onHost).toMatchObject({ job: { kind: "decide", state: "completed", publish: false }, principled: true });
     expect(onSample).toMatchObject({ principled: true, state: "pr_open" });
+  } finally {
+    await disposeFixtures();
+  }
+}, 60_000);
+
+/**
+ * D-NEW-publish-a-retained-branch-later: the merge press on a run that
+ * retained its branch is a job in the exclusive lane on both, which records
+ * the pull request it opened; and the sample refuses, as the CLI behind the
+ * host does, a ticket with no retained branch to publish, in the rule's own
+ * words.
+ */
+it("publishes a retained branch as the host does, and refuses one with none to publish", async () => {
+  const PULL_REQUEST = "https://github.com/example/webstore/pull/418";
+  let repoPath = "";
+  const made = fixture(async (binary, args, options) => {
+    if (args[1] !== "run") return runProcess(binary, args, options);
+    const path = join(repoPath, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(path, "utf8")) as { delivery: Record<string, unknown> };
+    ticket.delivery = { ...ticket.delivery, pull_request_url: PULL_REQUEST, pull_request_number: 418, state: "open", opened_by: "loop" };
+    writeFileSync(path, JSON.stringify(ticket, null, 2));
+    return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+  });
+  repoPath = made.repo;
+  try {
+    const host: DesktopBridge = { request: (request) => made.service.request(request), subscribe: () => () => undefined };
+    const hostRepo = (await made.service.registerRepository(made.repo)).id;
+    await settled(host, (await host.request({ kind: "admit", repoId: hostRepo, draft: hostDraft })).id);
+    const sampleRepo = (await sampleBridge.request({ kind: "snapshot" })).repositories[0]!.id;
+    const retained = (await sampleBridge.request({ kind: "snapshot" })).tasks.find(
+      (row) => row.ticket.state === "pr_open" && row.ticket.delivery.pull_request_url === null,
+    )!;
+    const press = async (bridge: DesktopBridge, repoId: string, key: string) => {
+      const job = await settled(bridge, (await bridge.request({ kind: "publish", repoId, key })).id);
+      const detail = await bridge.request({ kind: "detail", repoId, key });
+      return { job: { kind: job.kind, state: job.state, label: job.label }, url: detail.ticket.delivery.pull_request_url };
+    };
+    const onHost = await press(host, hostRepo, "PRB-1");
+    const onSample = await press(sampleBridge, sampleRepo, retained.ticket.key);
+    expect(onSample).toEqual(onHost);
+    expect(onHost).toEqual({ job: { kind: "publish", state: "completed", label: "Open the pull request" }, url: PULL_REQUEST });
+
+    const refused = await settled(sampleBridge, (await sampleBridge.request({ kind: "publish", repoId: sampleRepo, key: "PRB-421" })).id);
+    expect(refused.state).toBe("failed");
+    expect(refused.error).toBe("PRB-421 is plan_review: only a run that ended approved or escalated retains a branch to publish");
+  } finally {
+    await disposeFixtures();
+  }
+}, 60_000);
+
+/**
+ * D-097: a pull request waiting on the merge decision is filed only once the
+ * person's Don't merge is recorded as that decision; before it, both refuse
+ * the filing in the same words, and both refuse a call-off where there is no
+ * pull request to leave open.
+ */
+it("records Don't merge on a pull request left open and files it only then, as the host does", async () => {
+  const made = fixture(runProcess);
+  try {
+    const host: DesktopBridge = { request: (request) => made.service.request(request), subscribe: () => () => undefined };
+    const hostRepo = (await made.service.registerRepository(made.repo)).id;
+    await settled(host, (await host.request({ kind: "admit", repoId: hostRepo, draft: hostDraft })).id);
+    const path = join(made.repo, ".perbo", "tickets", "PRB-1.json");
+    const refusal = (reply: Promise<unknown>, key: string) =>
+      reply.then(() => null, (error: unknown) => (error as Error).message.replaceAll(key, "KEY"));
+    const plan = (await sampleBridge.request({ kind: "snapshot" })).tasks.find((row) => row.ticket.key === "PRB-421")!;
+    // Still a plan: there is no pull request to leave open.
+    const noPullRequest = {
+      onHost: await refusal(host.request({ kind: "callOff", repoId: hostRepo, key: "PRB-1" }), "PRB-1"),
+      onSample: await refusal(sampleBridge.request({ kind: "callOff", repoId: plan.repoId, key: "PRB-421" }), "PRB-421"),
+    };
+    expect(noPullRequest).toEqual({
+      onHost: "KEY has no open pull request, so there is no merge to call off.",
+      onSample: "KEY has no open pull request, so there is no merge to call off.",
+    });
+    const PULL_REQUEST = "https://github.com/example/repo/pull/1";
+    const planned = JSON.parse(readFileSync(path, "utf8")) as { state: string; delivery: Record<string, unknown> };
+    /** PRB-1 on the host at `state`, with a pull request on its record or none. */
+    const hostAt = (state: string, pullRequest: string | null) =>
+      writeFileSync(
+        path,
+        JSON.stringify(
+          {
+            ...planned,
+            state,
+            delivery: {
+              ...planned.delivery,
+              pull_request_url: pullRequest,
+              pull_request_number: pullRequest === null ? null : 1,
+              state: pullRequest === null ? planned.delivery["state"] : "open",
+            },
+          },
+          null,
+          2,
+        ),
+      );
+    const open = (await sampleBridge.request({ kind: "snapshot" })).tasks.find(
+      (row) => row.ticket.state === "pr_open" && row.ticket.delivery.pull_request_url !== null,
+    )!;
+    const sampleRow = sampleRecords.tasks.find((row) => row.ticket.key === open.ticket.key)!;
+    const sampleTicket = structuredClone(sampleRow.ticket);
+    /** The sample's open ticket at `state`, with a pull request on its record or none. */
+    const sampleAt = (state: string, pullRequest: string | null) => {
+      sampleRow.ticket = {
+        ...structuredClone(sampleTicket),
+        state: state as never,
+        delivery: { ...structuredClone(sampleTicket.delivery), pull_request_url: pullRequest },
+      };
+    };
+    // Each half of the refusal on its own: a pull request on the record of a
+    // ticket not at `pr_open`, and a ticket at `pr_open` with none on its record.
+    const halves: Record<string, unknown> = {};
+    for (const [state, pullRequest] of [["failed", PULL_REQUEST], ["pr_open", null]] as const) {
+      hostAt(state, pullRequest);
+      sampleAt(state, pullRequest);
+      halves[`${state} ${pullRequest === null ? "without" : "with"} a pull request`] = {
+        onHost: await refusal(host.request({ kind: "callOff", repoId: hostRepo, key: "PRB-1" }), "PRB-1"),
+        onSample: await refusal(sampleBridge.request({ kind: "callOff", repoId: open.repoId, key: open.ticket.key }), open.ticket.key),
+      };
+    }
+    sampleRow.ticket = sampleTicket;
+    const refused = {
+      onHost: "KEY has no open pull request, so there is no merge to call off.",
+      onSample: "KEY has no open pull request, so there is no merge to call off.",
+    };
+    expect(halves).toEqual({ "failed with a pull request": refused, "pr_open without a pull request": refused });
+    expect(sampleRecords.calledOff).toEqual([]);
+    hostAt("pr_open", PULL_REQUEST);
+    const file = async (bridge: DesktopBridge, repoId: string, key: string) => {
+      const refused = await refusal(bridge.request({ kind: "archive", repoId, keys: [key], archived: true }), key);
+      await bridge.request({ kind: "callOff", repoId, key });
+      const read = await bridge.request({ kind: "snapshot" });
+      const url = read.tasks.find((row) => row.repoId === repoId && row.ticket.key === key)!.ticket.delivery.pull_request_url!;
+      const recorded = read.calledOff?.includes(calledOffEntry(repoId, key, url)) ?? false;
+      await bridge.request({ kind: "archive", repoId, keys: [key], archived: true });
+      const filed = (await bridge.request({ kind: "snapshot" })).archived?.includes(repoId + ":" + key) ?? false;
+      await bridge.request({ kind: "archive", repoId, keys: [key], archived: false });
+      return { refused, recorded, filed };
+    };
+    try {
+      const onHost = await file(host, hostRepo, "PRB-1");
+      const onSample = await file(sampleBridge, open.repoId, open.ticket.key);
+      expect(onSample).toEqual(onHost);
+      expect(onHost).toEqual({
+        refused: "KEY waits on the merge decision. Archive it once its pull request is merged or closed, or its merge is called off.",
+        recorded: true,
+        filed: true,
+      });
+    } finally {
+      // The sample's records are shared with every later test in this file.
+      sampleRecords.calledOff = [];
+    }
   } finally {
     await disposeFixtures();
   }

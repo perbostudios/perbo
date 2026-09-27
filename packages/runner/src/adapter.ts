@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import {
+  admittedCommands,
   invocationShapeHash,
   type AgentInvocation,
   type CostBasis,
@@ -13,6 +14,7 @@ import {
   type NeutralisationRecord,
   type PermissionProfile,
   type TerminationReason,
+  spokenLine,
 } from "@perbo/contracts";
 import { PRICED_MODEL_ID, costMicros as providerListCostMicros } from "@perbo/model";
 import {
@@ -38,10 +40,11 @@ import {
   prepareUnguardedSettings,
   readPreToolDecisions,
 } from "./pretool.js";
-import { inspectToolWrite, type ProhibitedHit, type ShellCwd } from "./prohibited.js";
+import { inspectToolWrite, toolWritePaths, type ProhibitedHit, type ShellCwd } from "./prohibited.js";
 import { UNKNOWN_CWD } from "./shell/index.js";
 import { DEFAULT_AGENT_TOOLS } from "./profile.js";
 import { prepareScratchDirectory, scratchEnvironment } from "./scratch.js";
+import { worktreePath, type AttemptTally } from "./tally.js";
 import { describeTransportFailure, transportExhaustion } from "./transport.js";
 
 /**
@@ -165,6 +168,12 @@ export interface AgentRequest {
   spec_folder?: string | null;
   tools?: readonly string[];
   onProgress?: (message: string) => void;
+  /**
+   * What the attempt has done so far, handed over whenever any of it may have
+   * moved: the commands its record holds, the provider's usage, and the paths a
+   * file tool was let write (D-104). The loop prints the run's tally from it.
+   */
+  onTally?: (tally: AttemptTally) => void;
   /** Redacts a line against the attempt's materialized secrets before recording it. */
   redact?: (text: string) => string;
   /** Injected by the test that proves a suspend terminates an attempt. */
@@ -195,6 +204,22 @@ export interface AgentRequest {
    * judges the arm's work rather than its budget.
    */
   supervision?: "runner_guard" | "agent_permissions";
+}
+
+/**
+ * What a command's record keeps of the transcript reading where the hook's
+ * enforced decision differs from it (SCP-177): a sentence naming the rule and
+ * the whole target, or the whole call where the reading named no target. Null
+ * where the two agree.
+ */
+export function secondReading(
+  entry: Pick<CommandRecord, "decision" | "denial_rule" | "denial_target" | "detail">,
+  enforced: CommandRecord["decision"],
+): string | null {
+  if (entry.decision === enforced) return null;
+  return entry.decision === "denied"
+    ? `the transcript reading refused it: ${entry.denial_rule ?? "unknown"} on ${entry.denial_target ?? entry.detail}`
+    : "the transcript reading admitted it";
 }
 
 export interface AgentResult {
@@ -366,7 +391,7 @@ export function assertNeutralised(
   }
   const errors = init.mcp_server_errors;
   if (Array.isArray(errors) && errors.length > 0) {
-    violations.push(`tool servers were attempted and failed: ${JSON.stringify(errors).slice(0, 200)}`);
+    violations.push(`tool servers were attempted and failed: ${JSON.stringify(errors)}`);
   }
   for (const path of [...paths(init.plugins), ...memoryPaths]) {
     if (inside(path)) violations.push(`configuration loaded from inside the worktree: ${path}`);
@@ -475,7 +500,7 @@ function describeTool(name: string, input: unknown): string {
   const record = (input ?? {}) as Record<string, unknown>;
   if (name === "Bash" && typeof record.command === "string") return record.command;
   if (typeof record.file_path === "string") return `${name} ${record.file_path}`;
-  return `${name} ${JSON.stringify(record).slice(0, 300)}`;
+  return `${name} ${JSON.stringify(record)}`;
 }
 
 export async function runAgent(request: AgentRequest): Promise<AgentResult> {
@@ -646,6 +671,15 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
    * prevented and still ends the attempt.
    */
   const pendingHits: Array<{ hit: ProhibitedHit; at: string; toolUseId: string | undefined }> = [];
+  /**
+   * The worktree paths each file-tool call names, by the index of the command
+   * record it made. A path counts as written once the call is settled and for
+   * as long as the record says it was allowed; a tool result that is an error
+   * wrote nothing.
+   */
+  const writtenBy = new Map<number, string[]>();
+  /** Each call's `tool_use_id` whose result has arrived, and whether that result was an error. */
+  const resultOf = new Map<string, { is_error: boolean }>();
   const prohibited: Array<ProhibitedHit & { at: string }> = [];
   const transcript: string[] = [];
   /** D-096: filled from the hook's own file as the guard directory is retired. */
@@ -823,11 +857,11 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         commands.push({
           sequence: commands.length,
           tool: decision.tool,
-          detail: redact(decision.target ?? decision.tool).slice(0, 2_000),
+          detail: redact(decision.target ?? decision.tool),
           decision: decision.decision,
           denial_reason: decision.reason === null ? null : redact(decision.reason),
           denial_rule: decision.rule,
-          denial_target: decision.target === null ? null : redact(decision.target).slice(0, 200),
+          denial_target: decision.target === null ? null : redact(decision.target),
           cwd: decision.cwd,
           decided_by: "pre_execution_hook",
           second_reading: "the runner never read this call's tool_use block",
@@ -839,19 +873,13 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         continue;
       }
       const entry = commands[index]!;
-      const disagreed =
-        entry.decision !== decision.decision
-          ? entry.decision === "denied"
-            ? `the transcript reading refused it: ${entry.denial_rule ?? "unknown"} on ` +
-              `${entry.denial_target ?? entry.detail.slice(0, 80)}`
-            : "the transcript reading admitted it"
-          : null;
+      const disagreed = secondReading(entry, decision.decision);
       commands[index] = {
         ...entry,
         decision: decision.decision,
         denial_reason: decision.reason === null ? null : redact(decision.reason),
         denial_rule: decision.rule,
-        denial_target: decision.target === null ? null : redact(decision.target).slice(0, 200),
+        denial_target: decision.target === null ? null : redact(decision.target),
         // The directory the enforced judgement stood in, which after a refusal
         // is not where the transcript reading thinks the shell went: a refused
         // `cd` never happened.
@@ -916,6 +944,22 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
      * every `user` event on this stream is a tool answering.
      */
     if (type === "user") request.ceilings.noteToolActivity();
+    /**
+     * A tool's result: the hook answered before the tool ran, so its answer is
+     * in the decisions file now and is folded in before the tally reads
+     * whether the call was admitted and what it wrote.
+     */
+    if (type === "user") {
+      const content = ((event.message ?? {}) as { content?: unknown }).content;
+      let answered = false;
+      for (const block of Array.isArray(content) ? (content as Array<Record<string, unknown>>) : []) {
+        if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+        if (!recordOfToolUse.has(block.tool_use_id)) continue;
+        resultOf.set(block.tool_use_id, { is_error: block.is_error === true });
+        answered = true;
+      }
+      if (answered) reconcile();
+    }
     // A child can flush several stream lines in one stdout chunk before the
     // stop signal lands. Continue reading their audit evidence, as before, but
     // freeze accounting at the event that tripped the stop.
@@ -1018,7 +1062,13 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         .map((block) => block.text as string)
         .join("\n")
         .trim();
-      if (agent === null && spoken.length > 0) finalMessage = redact(spoken);
+      if (agent === null && spoken.length > 0) {
+        finalMessage = redact(spoken);
+        // The same words, as they are said, for whoever watches the run: a
+        // line of their own, marked as the executor's, and never read back.
+        const said = spokenLine("executor", finalMessage);
+        if (said !== null) progress(said);
+      }
 
       for (const block of message.content ?? []) {
         if (block.type !== "tool_use" || typeof block.name !== "string") continue;
@@ -1104,10 +1154,15 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
               ];
         decided(block.name, detail, commands.length);
         if (typeof block.id === "string") recordOfToolUse.set(block.id, commands.length);
+        const writes = toolWritePaths(block.name, block.input).flatMap((path) => {
+          const inside = worktreePath(request.worktree, scratch, path);
+          return inside === null ? [] : [inside];
+        });
+        if (writes.length > 0) writtenBy.set(commands.length, writes);
         commands.push({
           sequence: commands.length,
           tool: block.name,
-          detail: detail.slice(0, 2_000),
+          detail,
           decision: admission.decision,
           denial_reason: admission.reason,
           denial_rule: admission.rule,
@@ -1185,7 +1240,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
               decision: "denied",
               denial_reason: "the agent's permission layer refused it before it ran",
               denial_rule: ADMISSION_RULES.allow_list,
-              denial_target: entry.detail.slice(0, 200),
+              denial_target: entry.detail,
               decided_by: "agent_permission_layer",
             };
           }
@@ -1194,11 +1249,11 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         commands.push({
           sequence: commands.length,
           tool: name,
-          detail: detail.slice(0, 2_000),
+          detail,
           decision: "denied",
           denial_reason: "outside the runner's command allow-list",
           denial_rule: ADMISSION_RULES.allow_list,
-          denial_target: detail.slice(0, 200),
+          denial_target: detail,
           // Denied before it reached the shell or the guard: there is no
           // directory it was judged from.
           cwd: null,
@@ -1219,6 +1274,44 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     }
   };
 
+  /**
+   * The attempt's figures so far, to whoever tallies the run (D-104).
+   *
+   * While the stream goes, a call counts once it is settled: the hook's answer
+   * folded into its record, or its result read. Until then the record holds
+   * only the transcript's reading, which the hook may still refuse, and a tally
+   * that counted it would name a command that never ran or a path never
+   * written. Once the process has closed, every record is as final as the
+   * attempt keeps it, and the tally comes to what the record holds.
+   */
+  const tell = (over = false): void => {
+    if (request.onTally === undefined) return;
+    const toolUseOf = new Map([...recordOfToolUse].map(([id, index]) => [index, id]));
+    const settled = (index: number): boolean => {
+      const id = toolUseOf.get(index);
+      return (
+        over ||
+        commands[index]?.decided_by === "pre_execution_hook" ||
+        (id !== undefined && resultOf.has(id))
+      );
+    };
+    const written = new Set<string>();
+    for (const [index, paths] of writtenBy) {
+      const id = toolUseOf.get(index);
+      if (commands[index]?.decision !== "allowed" || !settled(index)) continue;
+      if (id !== undefined && resultOf.get(id)?.is_error === true) continue;
+      for (const path of paths) written.add(path);
+    }
+    request.onTally({
+      commands: admittedCommands(commands.filter((_, index) => settled(index))),
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cost_micros: costMicros,
+      cost_basis: costBasis,
+      written: [...written],
+    });
+  };
+
   try {
     await new Promise<void>((resolveDone, rejectDone) => {
     let partial = "";
@@ -1237,6 +1330,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           continue;
         }
         handleEvent(event, new Date());
+        tell();
       }
     });
     child.stderr.setEncoding("utf8");
@@ -1255,6 +1349,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
       // result envelope and its refusals are the ones a reader most needs.
       reconcile();
       settlePendingHits();
+      tell(true);
       /**
        * An exit the runner did not ask for. Two of them, and they mean
        * opposite things (SCP-172): an agent that ran and failed is evidence

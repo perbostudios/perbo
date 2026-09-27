@@ -4,10 +4,13 @@ import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
+  admittedCommands,
   invocationShapeHash,
   type BriefReinjection,
   type CommandRecord,
   type TerminationReason,
+  oneLine,
+  spokenLine,
 } from "@perbo/contracts";
 import {
   DEFAULT_SUSPEND_INTERVAL_MS,
@@ -16,6 +19,7 @@ import {
 } from "@perbo/workspace";
 import type { AgentRequest, AgentResult } from "../adapter.js";
 import type { AttemptCeilings } from "../ceilings.js";
+import { worktreePath } from "../tally.js";
 import { reinjectedBrief } from "../brief.js";
 import { CodexExecutorSession, CODEX_EXECUTOR_ARGV, type Usage } from "./internal/rpc.js";
 import { EgressLog } from "../egress.js";
@@ -200,8 +204,16 @@ export function codexNotificationHandler(attempt: {
    * else: `"interacted"` and `"interrupted"` name no new thread.
    */
   onSubagentStarted: (parentThreadId: string | null, childThreadId: string) => void;
+  /**
+   * The attempt's own thread finished saying something: an `agentMessage`
+   * item completed on it, with its words as Codex sent them. A subagent's
+   * words are its own, never the executor's (D-106), and are not passed.
+   */
+  spoke: (words: string) => void;
+  /** D-106: the attempt's own thread, once `thread/start` has replied; every other thread is a subagent's. */
+  rootThread: () => string | null;
 }): (method: string, payload: unknown) => void {
-  const { ceilings, items, transcript, redact, record, egress, stop, progress, rebrief, onSubagentStarted } =
+  const { ceilings, items, transcript, redact, record, egress, stop, progress, rebrief, onSubagentStarted, spoke, rootThread } =
     attempt;
   return (method, payload) => {
     const parsed = EventSchema.safeParse(payload);
@@ -218,8 +230,17 @@ export function codexNotificationHandler(attempt: {
     // the context is what it will be only once the compaction has finished.
     if (method === "item/completed" && item.type === "contextCompaction")
       rebrief(parsed.data.threadId ?? null);
+    // D-106: an item a subagent's thread reported is recorded marked as the
+    // subagent's, so what reads the record back never takes its words for
+    // the executor's.
+    const threadId = parsed.data.threadId ?? null;
+    const root = rootThread();
+    const subagent = threadId !== null && root !== null && threadId !== root;
     if (method === "item/completed")
-      transcript.push(redact(JSON.stringify({ method, item })).slice(0, 200_000));
+      transcript.push(
+        redact(JSON.stringify(subagent ? { method, item, subagent: true } : { method, item })).slice(0, 200_000),
+      );
+    if (method === "item/completed" && item.type === "agentMessage" && item.text && !subagent) spoke(item.text);
     if (item.type === "commandExecution" || item.type === "fileChange") {
       // D-096: a tool call starting and its result arriving are both the
       // executor being alive, and either resets the stall window.
@@ -227,9 +248,12 @@ export function codexNotificationHandler(attempt: {
       record(item, parsed.data.threadId ?? null);
       if (item.command && egress.observe(item.command, "command", new Date()).length > 0)
         stop("unlisted_egress_host", "Command requested a host outside the network allow-list");
+      // On one line: a command's own newline would otherwise print a line
+      // that reads as one of the run's stages. Whole, as the attempt's record
+      // keeps it (D-NEW-nothing-shown-is-cut); the Watch page lists no command.
       if (method === "item/started")
         progress(
-          `Codex ${redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type).slice(0, 160)}`,
+          `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type))}`,
         );
     }
     // D-106: a subagent's own start is reported to its parent, never announced
@@ -344,6 +368,36 @@ export async function runCodexAgent(
   /** D-106: every role lookup made, so one still in flight as the turn ends is waited for before the records are read. */
   const lookups: Array<Promise<void>> = [];
   let countedTokens = 0;
+  /**
+   * The worktree paths each file change names, by the record it made: a path
+   * counts as written once the runner has admitted that change.
+   */
+  const writtenBy = new Map<CommandRecord, string[]>();
+  /**
+   * The attempt's figures so far, to whoever tallies the run (D-104). Codex
+   * reports no dollars. A command counts once the runner has admitted it; one
+   * Codex ran without asking counts once the turn is over, when the record it
+   * keeps holds it as allowed.
+   */
+  const tell = (over = false): void => {
+    if (request.onTally === undefined) return;
+    const written = new Set<string>();
+    for (const [entry, paths] of writtenBy) {
+      if (entry.decided_by === "runner_admission" && entry.decision === "allowed")
+        for (const path of paths) written.add(path);
+    }
+    const total = usage.total();
+    request.onTally({
+      commands: admittedCommands(
+        over ? commands : commands.filter((entry) => entry.decided_by === "runner_admission"),
+      ),
+      input_tokens: total.inputTokens,
+      output_tokens: total.outputTokens,
+      cost_micros: 0,
+      cost_basis: "unavailable",
+      written: [...written],
+    });
+  };
   let finalMessage: string | null = null;
   let termination: { reason: TerminationReason; detail: string } = {
     reason: "agent_error",
@@ -428,6 +482,14 @@ export async function runCodexAgent(
     };
     commands.push(entry);
     records.set(item.id, entry);
+    const writes = (item.changes ?? []).flatMap((change) =>
+      [change.path, ...(change.kind.move_path ? [change.kind.move_path] : [])].flatMap((path) => {
+        const inside = worktreePath(request.worktree, guardStateBase.tmpdir, path);
+        return inside === null ? [] : [inside];
+      }),
+    );
+    if (item.type === "fileChange" && writes.length > 0) writtenBy.set(entry, writes);
+    tell();
     if (threadId) {
       const forThread = recordsByThread.get(threadId);
       if (forThread) forThread.push(entry);
@@ -449,6 +511,7 @@ export async function runCodexAgent(
         );
         countedTokens = fresh;
         if (breach) stop(breach.reason, breach.detail);
+        tell();
       },
       onEvent: codexNotificationHandler({
         ceilings: request.ceilings,
@@ -490,6 +553,16 @@ export async function runCodexAgent(
               }),
           );
         },
+        /**
+         * The executor's own words, as they are said, for whoever watches the
+         * run: the root thread's only, as the account is (D-106), on a line of
+         * their own marked as the executor's.
+         */
+        spoke: (words) => {
+          const said = spokenLine("executor", redact(words));
+          if (said !== null) progress(said);
+        },
+        rootThread: () => rootThreadId,
         /**
          * D-106: a subagent starting one of its own is refused reactively —
          * Codex offers no preventive gate on a spawn, so this is the first
@@ -605,6 +678,7 @@ export async function runCodexAgent(
           ? null
           : (denial?.rule ?? "command_allow_list");
         entry.denial_target = denial?.target ? redact(denial.target) : null;
+        tell();
         return accepted;
       },
     });
@@ -657,6 +731,7 @@ export async function runCodexAgent(
     process.removeListener("SIGTERM", cancel);
     process.removeListener("SIGINT", cancel);
   }
+  tell(true);
   return {
     invocation: {
       adapter: "codex",

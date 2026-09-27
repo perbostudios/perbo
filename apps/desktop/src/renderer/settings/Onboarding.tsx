@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Brand, Button, Notice, ProgressDots } from "../ui/index.js";
 import { errorMessage, useAction } from "../workspace/index.js";
 import type { PageProps } from "../shell/route.js";
+import { PERSON_NAME_MAX_CHARS } from "../../shared/protocol.js";
 import { ProviderScreen, RepositoryScreen } from "./ConnectionScreens.js";
 
 export function Onboarding(props: PageProps) {
@@ -52,7 +53,7 @@ export function Onboarding(props: PageProps) {
         <input
           aria-label="Your name"
           placeholder="your name"
-          maxLength={60}
+          maxLength={PERSON_NAME_MAX_CHARS}
           autoComplete="given-name"
           autoFocus
           value={name}

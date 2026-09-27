@@ -56,6 +56,16 @@ describe("PowerHold", () => {
     expect(w.held).toEqual([{ hold: true, displaySleep: settings.afk.displaySleep }]);
   });
 
+  it("names every run it holds the machine awake for, since runs of different tickets go on at once", () => {
+    const w = hold({ settings: afk({ holdSleep: true }) });
+    w.jobs.push(job(), job({ id: "80000000-0000-4000-8000-00000000000b", key: "PRB-2" }));
+    w.power.update();
+    expect(w.power.state.detail).toBe("Holding sleep now — PRB-1 and PRB-2 are running.");
+    w.jobs.splice(0, 1);
+    w.power.update();
+    expect(w.power.state.detail).toBe("Holding sleep now — PRB-2 is running.");
+  });
+
   it("holds nothing where the person asked for nothing", () => {
     const w = hold({ settings: afk({ holdSleep: false }) });
     w.jobs.push(job());

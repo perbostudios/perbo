@@ -33,12 +33,13 @@ The name follows D-127: beside the tickets in flight, which `depends_on` may nam
 | `file-issue.ts` | `readIssueFile`: one Markdown file as the same `SourceIssue` — first line the title, the rest the body, `file:<basename>` for the reference, and no number and no URL, because a file has neither |
 | `graph-edit.ts` | `applyGraphEdit` and `undoGraphEdit`: the one validated edit path a plan's graph changes through (D-100), applied to a copy and validated whole, recording the entity keys each edit touched. `perbo edit --graph-edit` runs it against a store; the desktop's browser preview runs the same operations with no store at all |
 | `impact.ts` | `impactReport`: the paths a draft is likely to touch that its scope does not cover, as warnings a screen shows and nothing else (D-015), with no filesystem, so the desktop's browser preview computes the same ones; and `withNoGo`, the spec's No-Gos with one warned path turned into one |
+| `ticket-name.ts` | `ticketName`: what a ticket is called under D-127 — the drafted name, the spec's title, the outcome's first sentence, each passed over where taken or past the cap, then numbered, then the key — and `keptTitleRefusal`, a person's title past the cap refused rather than cut; no filesystem, so `perbo admit` and the desktop's sample host name a ticket with one function |
 | `diff.ts` | `contractEditCount`: what changed between the contract as first rendered and the one approved |
 | `errors.ts` | `PlanningError` and `DraftRejectedError` — a draft that is not the shape is refused, not repaired |
 
 `src/index.ts` is what a Node caller imports and `src/browser.ts` the part the desktop's renderer
-does: the spec text, the impact report, the graph edit path, the drift report's shape and the
-assertions moved since the draft, none of which reach a `node:` module. `src/browser.test.ts` bundles that surface for a browser with tree shaking off and holds it,
+does: the spec text, the impact report, the graph edit path, the drift report's shape, the
+assertions moved since the draft and a ticket's name, none of which reach a `node:` module. `src/browser.test.ts` bundles that surface for a browser with tree shaking off and holds it,
 and fails for a module that needs Node, so the check can come out either way.
 
 ## What is recorded

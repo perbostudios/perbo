@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "./admission.js";
-import { runAgent } from "./adapter.js";
+import { runAgent, secondReading } from "./adapter.js";
 import { AttemptCeilings } from "./ceilings.js";
 import { buildPermissionProfile } from "./profile.js";
 import { fakeAgent } from "./test-support/fake-agent.js";
@@ -175,5 +175,80 @@ process.stdout.write(
     // a guard that stopped working and a write nobody notices.
     expect(result.termination.reason).toBe("prohibited_action");
     expect(result.prohibited.map((hit) => hit.action)).toContain("write_outside_worktree");
+  }, 60_000);
+});
+
+describe("the sentence a record keeps of the other reading", () => {
+  const detail = `Bash: node -e "${"require('node:fs').writeFileSync('/elsewhere/out', 'x'); ".repeat(4)}"`;
+
+  it("names the rule and the whole call where the transcript reading refused it and named no target", () => {
+    expect(detail.length).toBeGreaterThan(200);
+    const refused = { decision: "denied" as const, denial_rule: ADMISSION_RULES.write, denial_target: null, detail };
+    expect(secondReading(refused, "allowed")).toBe(`the transcript reading refused it: ${ADMISSION_RULES.write} on ${detail}`);
+    expect(secondReading({ ...refused, denial_target: "/elsewhere/out" }, "allowed")).toBe(
+      `the transcript reading refused it: ${ADMISSION_RULES.write} on /elsewhere/out`,
+    );
+  });
+
+  it("says the reading admitted a call the hook refused, and nothing where the two agree", () => {
+    const admitted = { decision: "allowed" as const, denial_rule: null, denial_target: null, detail };
+    expect(secondReading(admitted, "denied")).toBe("the transcript reading admitted it");
+    expect(secondReading(admitted, "allowed")).toBeNull();
+  });
+});
+
+/**
+ * The command a refusal is about is tool output, and the record keeps it whole
+ * (D-NEW-nothing-shown-is-cut): its detail and its target are what a person
+ * reads to know what was refused, however long the command ran.
+ */
+describe("a refused command, whole", () => {
+  const deep = `${outside}-whole/${"a-directory-with-a-long-name/".repeat(80)}out.txt`;
+
+  it("keeps the whole command and the whole target the guard refused", async () => {
+    const command = `echo x > ${deep}`;
+    const { result } = await run([{ tool: "Bash", input: { command } }]);
+
+    const [record] = result.commands;
+    expect(deep.length).toBeGreaterThan(2_000);
+    expect(record?.decision).toBe("denied");
+    expect(record?.detail).toBe(command);
+    expect(record?.denial_target).toBe(deep);
+  }, 60_000);
+
+  it("keeps the whole command the agent's own layer refused, as its detail and its target", async () => {
+    const command = `curl https://example.com/${"a-long-path-segment/".repeat(120)}`;
+    const { result } = await run([], { reported_denials: [command] });
+
+    const [record] = result.commands;
+    expect(command.length).toBeGreaterThan(2_000);
+    expect(record?.detail).toBe(command);
+    expect(record?.denial_target).toBe(command);
+  }, 60_000);
+
+  it("describes a tool call with no command by its whole input", async () => {
+    const pattern = "a pattern the executor searched for, ".repeat(12);
+    const { result } = await run([{ tool: "Grep", input: { pattern } }]);
+
+    expect(pattern.length).toBeGreaterThan(300);
+    expect(result.commands[0]?.detail).toBe(`Grep ${JSON.stringify({ pattern })}`);
+  }, 60_000);
+
+  it("keeps the whole command the transcript admitted and the agent's layer then refused", async () => {
+    const worktree = scratch("perbo-whole-amend-");
+    const command = `ls ${"a-directory-with-a-long-name/".repeat(10)}`;
+    const agent = fakeAgent(scratch, [{ kind: "shell", commands: [command], reported_denials: [command] }]);
+    const result = await runAgent({
+      binary: agent.binary,
+      worktree,
+      prompt: "do the thing",
+      model: "none",
+      profile: buildPermissionProfile({ worktree }),
+      ceilings: new AttemptCeilings(LimitsTableSchema.parse({ organisation: "test" })),
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
+    });
+    const record = result.commands.find((each) => each.decided_by === "agent_permission_layer");
+    expect(command.length).toBeGreaterThan(200);
+    expect(record?.denial_target).toBe(command);
   }, 60_000);
 });

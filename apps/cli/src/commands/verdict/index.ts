@@ -38,6 +38,7 @@ import { refuseUnknownReview, storedReviewSubject, storedReviewsFor } from "../r
 import type { CommandContext, Rendered } from "../../command.js";
 import type { ReportCommand } from "../../command-line/table.js";
 import { StoreTargetSchema, storeDir } from "../../store/index.js";
+import { withRecordLock } from "../../store/record-lock.js";
 import { listTickets } from "../../store/tickets.js";
 import {
   GIT_IDENTITY_COMMANDS,
@@ -779,32 +780,37 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
     superseded_at: null,
   };
 
-  // Read before the write and written whole: a refusal below leaves the file
-  // exactly as it was, which is what makes a refused second decision safe.
-  const previous = readLocalVerdicts(dir);
-  const standing = verdictFor(
-    previous.verdicts,
-    subject.ticket_id,
-    finding.finding_key,
-    verdictSlot(args.decision),
-  );
-  let next;
-  try {
-    next = recordVerdict({ previous, verdict: taking, replace: args.replace });
-  } catch (error) {
-    if (!(error instanceof VerdictConflictError)) throw error;
-    return { kind: "refused", subject, existing: error.existing, message: error.message };
-  }
-  writeLocalVerdicts(dir, next);
+  // Read under the record's lock and written whole before it is released:
+  // decisions on different tickets are recorded at the same time (D-049), and
+  // a read taken outside the lock is one another decision may already have
+  // replaced. A refusal below leaves the file exactly as it was, which is what
+  // makes a refused second decision safe.
+  return withRecordLock(verdictsPath(dir), context.now, (): VerdictReport => {
+    const previous = readLocalVerdicts(dir);
+    const standing = verdictFor(
+      previous.verdicts,
+      subject.ticket_id,
+      finding.finding_key,
+      verdictSlot(args.decision),
+    );
+    let next;
+    try {
+      next = recordVerdict({ previous, verdict: taking, replace: args.replace });
+    } catch (error) {
+      if (!(error instanceof VerdictConflictError)) throw error;
+      return { kind: "refused", subject, existing: error.existing, message: error.message };
+    }
+    writeLocalVerdicts(dir, next);
 
-  return {
-    kind: "recorded",
-    subject,
-    verdict: taking,
-    finding,
-    superseded: standing !== null,
-    path: verdictsPath(dir),
-  };
+    return {
+      kind: "recorded",
+      subject,
+      verdict: taking,
+      finding,
+      superseded: standing !== null,
+      path: verdictsPath(dir),
+    };
+  });
 }
 
 /**

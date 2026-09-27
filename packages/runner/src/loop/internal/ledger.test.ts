@@ -106,6 +106,24 @@ describe("what the run appends to the ticket's record", () => {
     ]);
   });
 
+  it("puts a park on an attempt still to be written, and refuses one already on disk", () => {
+    const run = ledger();
+    run.addAttempt(attempt({ attempt_id: "att_00000000000000d1" }), null);
+    const wait = {
+      reason: "provider_reset" as const,
+      started_at: "2026-09-04T00:15:00.000Z",
+      until: "2026-09-04T03:30:00.000Z",
+      waited_ms: 11_700_000,
+      zone: "Europe/London",
+      quoted: "resets 4:30am (Europe/London)",
+    };
+    expect(run.parkAfter("att_00000000000000d1", wait).wait).toEqual(wait);
+    run.flush();
+
+    expect(readAttemptsRecord(run.path)?.attempts[0]?.wait).toEqual(wait);
+    expect(() => run.parkAfter("att_00000000000000d1", wait)).toThrow(/still to be written/);
+  });
+
   it("names the attempt that sealed a commit, this run's and every earlier one's", () => {
     const run = ledger(
       record([attempt({ attempt_id: "att_00000000000000d1", head_commit: "aaa1111" })]),

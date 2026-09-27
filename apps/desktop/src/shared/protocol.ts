@@ -6,6 +6,7 @@ import {
   ExecutorSkillsSchema,
   GraphEditSchema,
   MaterializationEntrySchema,
+  INTERVIEW_SAID_MAX_CHARS,
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
@@ -66,7 +67,22 @@ export function parseStored<S extends z.ZodType>(schema: S, value: unknown, wher
 
 const identifier = z.string().uuid();
 const key = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/);
-const text = z.string().trim().min(1).max(12_000);
+/**
+ * The most characters each field a person types their own words into holds,
+ * in the request that carries it. The field itself holds them to it where they
+ * type, from this same constant, so nothing they typed is refused when sent or
+ * cut afterwards (D-NEW-nothing-shown-is-cut).
+ */
+export const TYPED_TEXT_MAX_CHARS = 12_000;
+/** The most characters a path or glob a person types holds. */
+export const TYPED_PATH_MAX_CHARS = 300;
+/** The most characters the name a person gives themselves holds. */
+export const PERSON_NAME_MAX_CHARS = 60;
+/** The most characters a spec's title holds. */
+export const SPEC_TITLE_MAX_CHARS = 200;
+/** The most characters a search of the archive holds. */
+export const ARCHIVE_SEARCH_MAX_CHARS = 200;
+const text = z.string().trim().min(1).max(TYPED_TEXT_MAX_CHARS);
 /** The four moments the loop may interrupt a person (S6F). */
 export const NotifyOnSchema = z.strictObject({
   decision: z.boolean().default(true),
@@ -82,7 +98,7 @@ export const AfkSchema = z.strictObject({
 });
 export type Afk = z.infer<typeof AfkSchema>;
 export const SettingsSchema = z.strictObject({
-  name: z.string().trim().max(60).default(""),
+  name: z.string().trim().max(PERSON_NAME_MAX_CHARS).default(""),
   onboardingComplete: z.boolean().default(false),
   executorProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
   executorSkills: ExecutorSkillsSchema.default([]),
@@ -169,9 +185,9 @@ export const CriterionSchema = z.strictObject({
 export const DraftSchema = z.strictObject({
   outcome: text,
   criteria: z.array(CriterionSchema).min(1),
-  paths: z.array(z.string().trim().min(1).max(300)).min(1),
+  paths: z.array(z.string().trim().min(1).max(TYPED_PATH_MAX_CHARS)).min(1),
   /** Paths the executor may not write even inside the allowed ones (D-105); admission passes each as `--prohibit`. */
-  prohibited: z.array(z.string().trim().min(1).max(300)).default([]),
+  prohibited: z.array(z.string().trim().min(1).max(TYPED_PATH_MAX_CHARS)).default([]),
 });
 export type Draft = z.infer<typeof DraftSchema>;
 /**
@@ -180,11 +196,11 @@ export type Draft = z.infer<typeof DraftSchema>;
  * written, so they arrive back on {@link SpecView} rather than travelling here.
  */
 export const SpecSectionsSchema = z.strictObject({
-  outcome: z.string().max(12_000),
-  requirements: z.string().max(12_000),
-  no_gos: z.string().max(12_000),
-  rabbit_holes: z.string().max(12_000),
-  notes: z.string().max(12_000),
+  outcome: z.string().max(TYPED_TEXT_MAX_CHARS),
+  requirements: z.string().max(TYPED_TEXT_MAX_CHARS),
+  no_gos: z.string().max(TYPED_TEXT_MAX_CHARS),
+  rabbit_holes: z.string().max(TYPED_TEXT_MAX_CHARS),
+  notes: z.string().max(TYPED_TEXT_MAX_CHARS),
 });
 export type SpecSections = z.infer<typeof SpecSectionsSchema>;
 /**
@@ -192,7 +208,7 @@ export type SpecSections = z.infer<typeof SpecSectionsSchema>;
  * beside it, what that writer read before it changed anything (SCP-321).
  */
 export const SpecDocumentSchema = z.strictObject({
-  title: z.string().trim().max(200),
+  title: z.string().trim().max(SPEC_TITLE_MAX_CHARS),
   sections: SpecSectionsSchema,
 });
 export type SpecDocument = z.infer<typeof SpecDocumentSchema>;
@@ -272,21 +288,21 @@ export interface SpecView {
 }
 // Editing accepts incomplete text. Admission still uses DraftSchema.
 const editableCriterion = z.strictObject({
-  text: z.string().max(12_000),
-  assertion: z.string().max(12_000),
+  text: z.string().max(TYPED_TEXT_MAX_CHARS),
+  assertion: z.string().max(TYPED_TEXT_MAX_CHARS),
   kind: z.enum(["test", "query", "metric", "artifact"]),
 });
 export const EditingFormSchema = z.strictObject({
   draft: z.strictObject({
-    outcome: z.string().max(12_000),
+    outcome: z.string().max(TYPED_TEXT_MAX_CHARS),
     criteria: z.array(editableCriterion),
-    paths: z.array(z.string().max(300)),
-    prohibited: z.array(z.string().max(300)).default([]),
+    paths: z.array(z.string().max(TYPED_PATH_MAX_CHARS)),
+    prohibited: z.array(z.string().max(TYPED_PATH_MAX_CHARS)).default([]),
   }),
   models: TaskModelsSchema,
   editing: z.number().int().min(0).nullable(),
   criterion: editableCriterion,
-  newPath: z.string().max(300).nullable(),
+  newPath: z.string().max(TYPED_PATH_MAX_CHARS).nullable(),
 });
 export type EditingForm = z.infer<typeof EditingFormSchema>;
 export const EditingOperationSchema = z.strictObject({
@@ -389,7 +405,8 @@ export const InterviewEditSchema = z.strictObject({
   /** Its place in the plan's history, counting from 1: what an undo names. */
   n: z.number().int().min(1),
   author: z.enum(["you", "interview"]),
-  summary: z.string().min(1).max(300),
+  /** What `perbo edit` said the edit did, whole: it names every glob it was given (D-NEW-nothing-shown-is-cut). */
+  summary: z.string().min(1),
   undone: z.boolean(),
   /** The edit this one undid, by its number, or null for an edit of its own. */
   undoes: z.number().int().min(1).nullable(),
@@ -421,10 +438,13 @@ export const InterviewEntrySchema = z.strictObject({
   n: z.number().int().min(1),
   at: z.string().datetime(),
   line: z.discriminatedUnion("kind", [
-    /** The person's turn, as it went down the interview's stdin. */
+    /** The person's turn, as it went down the interview's stdin: held to its limit where it is typed. */
     z.strictObject({ kind: z.literal("turn"), text }),
-    /** What the session said. */
-    z.strictObject({ kind: z.literal("said"), text }),
+    /**
+     * What the session said: a message past the limit is asked for again,
+     * condensed, and never cut to fit (D-NEW-nothing-shown-is-cut).
+     */
+    z.strictObject({ kind: z.literal("said"), text: z.string().trim().min(1).max(INTERVIEW_SAID_MAX_CHARS) }),
     /**
      * A call the guard refused. Shown as refused and never as a question:
      * there is nothing here to answer, because the session never asks (D-102).
@@ -434,15 +454,17 @@ export const InterviewEntrySchema = z.strictObject({
       tool: z.string().min(1).max(200),
       /** The admission rule that refused it, as the runner names it. */
       rule: z.string().min(1).max(200),
-      target: z.string().max(1000).nullable(),
-      reason: z.string().min(1).max(2000),
+      /** The command or path refused, and why, whole (D-NEW-nothing-shown-is-cut). */
+      target: z.string().nullable(),
+      reason: z.string().min(1),
     }),
     /** What one of the interview's own tools did, and the plan edit it made. */
     z.strictObject({
       kind: z.literal("tool"),
       tool: z.string().min(1).max(200),
       ok: z.boolean(),
-      detail: z.string().max(12_000),
+      /** What the tool reported, whole (D-NEW-nothing-shown-is-cut). */
+      detail: z.string(),
       edit: InterviewEditSchema.nullable(),
     }),
     /**
@@ -499,7 +521,15 @@ export const InterviewEntrySchema = z.strictObject({
      */
     z.strictObject({
       kind: z.literal("note"),
-      text,
+      /** Perbo's own line: where a tool's output is what it is about, one whole sentence saying what happened. */
+      text: z.string().trim().min(1),
+      /**
+       * The tool's output the note is about — why a line of the chat did not
+       * parse, a stopped chat's stderr, a process's error — whole and with no
+       * length cap, shown behind an `i` after the sentence
+       * (D-NEW-nothing-shown-is-cut).
+       */
+      output: z.string().trim().min(1).optional(),
       /**
        * Whether this is something to notice rather than something to know.
        *
@@ -551,15 +581,18 @@ const PlanPromiseSchema = z.strictObject({
 });
 export type PlanPromise = z.infer<typeof PlanPromiseSchema>;
 /**
- * The last change to the spec and the plan's promise, whoever made it: the
- * interview's turn, an edit by hand on the Graph or the Plan pane, a spec
- * save, an answer that closed a problem. The panes mark what it added and
- * what it took away, and the marks stand until the next change, which
- * replaces this whole (D-128). A side
+ * The last change to the spec and the plan's promise, whoever made it, and
+ * who that was: the chat — a turn, an answer that closed a problem — or the
+ * person, by hand — an edit on a basic ticket's contract, a spec save, a plan
+ * drafted again. The panes mark what a change by the chat added and what it
+ * took away, and the marks stand until the next change, which replaces this
+ * whole (D-128); a change by the person is marked nowhere, since they made it
+ * where they read it, and it replaces the chat's marks all the same. A side
  * the change did not move is null, so the panes on it mark nothing.
  */
 const EditingChangeSchema = z.strictObject({
   at: z.string().datetime(),
+  by: z.enum(["chat", "person"]),
   spec: z.strictObject({ before: SpecSectionsSchema, after: SpecSectionsSchema }).nullable(),
   plan: z.strictObject({ before: PlanPromiseSchema, after: PlanPromiseSchema }).nullable(),
 });
@@ -569,7 +602,7 @@ export type EditingChange = z.infer<typeof EditingChangeSchema>;
  * with. The rail draws each from `renderer/planning/panes.ts`, which says what
  * each one is and which of them a planning offers.
  */
-export const PlanningPaneSchema = z.enum(["spec", "graph", "criteria", "explorer", "impact", "drift"]);
+export const PlanningPaneSchema = z.enum(["spec", "graph", "explorer", "impact", "drift", "contract"]);
 export type PlanningPane = z.infer<typeof PlanningPaneSchema>;
 export const EditingSessionSchema = z.strictObject({
   version: z.literal(1),
@@ -600,16 +633,9 @@ export const EditingSessionSchema = z.strictObject({
    */
   specSlug: specSlugText.nullable().default(null),
   /**
-   * The title the host cut from the person's first turn to name this
-   * planning's spec folder (D-118), or null where the folder was named any
-   * other way. The cut is no title, so the planning is Untitled while its
-   * spec still states it.
-   */
-  specCut: z.string().min(1).max(500).nullable(),
-  /**
    * Who last wrote the title this planning's spec states, and that title: the
    * person, from the Spec pane's title field, or the Architect, in a turn of
-   * the chat. Null until one of them titles it; the cut is no title (D-118).
+   * the chat. Null until one of them titles it (D-118).
    *
    * A plan is drafted with `admit --keep-title` while the person's is the
    * title the spec still states, so the ticket takes their name and the spec
@@ -618,7 +644,7 @@ export const EditingSessionSchema = z.strictObject({
    * longer states is not mistaken for the person's.
    */
   named: z
-    .strictObject({ by: z.enum(["person", "architect"]), title: z.string().min(1).max(500) })
+    .strictObject({ by: z.enum(["person", "architect"]), title: z.string().min(1) })
     .nullable(),
   /**
    * The asking being put to the person and how much of it they have answered
@@ -632,6 +658,14 @@ export const EditingSessionSchema = z.strictObject({
    * outlives the line it came from, which the conversation's own cap can drop.
    */
   asking: AskingSchema.nullable().default(null),
+  /**
+   * The askings put while {@link asking} stood, by the `asked` entry each
+   * arrived on, in the order they arrived (D-117). The group a person is
+   * answering is never replaced: a later asking waits here and is put, from
+   * its first group, once nothing ahead of it is left to answer. Empty whenever
+   * nothing is being asked.
+   */
+  askingNext: z.array(z.number().int().min(1)).default([]),
   /**
    * How many nodes the plan this session drafted has, zero for a flat plan or
    * for no plan at all.
@@ -667,22 +701,39 @@ export const EditingSessionSchema = z.strictObject({
    */
   change: EditingChangeSchema.nullable(),
   /**
-   * The pane the person was last on in this planning, or null before they
-   * have been on one: every way back into the planning opens it there
+   * The pane the person was last on in this planning, the contract included,
+   * or null before they have been on one: every way back into the planning
+   * opens it there while the planning still offers it
    * (D-130). Recorded as the pane
    * changes, so going Home and closing Perbo each find it already written.
    */
   lastPane: PlanningPaneSchema.nullable(),
   /**
-   * Whether the person was last on this planning's contract rather than on
-   * one of its panes: "contract" from reaching the contract page until planning
-   * mode records a pane, else null. The ticket's own page opens on the contract
-   * while it says so and the plan waits for approval, where it would
-   * otherwise send the person into the planning
-   * (D-130). `lastPane` is kept, so the
-   * contract's way back goes to the pane it was left from.
+   * The state the person last reached this planning's contract at, as
+   * `contractState` in `renderer/planning/panes.ts` states it — the spec's
+   * sections, the plan as its ticket last moved and the scope this planning
+   * holds — or null before they have reached it. The contract stays a tab of
+   * the planning while the state is still this one, and goes once anything
+   * in it moves (D-NEW-basic-and-epic-flows).
+   * A fingerprint: nothing reads it but the comparison.
    */
-  lastView: z.literal("contract").nullable(),
+  confirmed: z.string().min(1).max(64).nullable(),
+  /**
+   * The state of the spec and the plan's promise the last reading of the two
+   * was of, as `readingState` in `shared/contract-editing.ts` states it, or
+   * null before one was recorded for the plan this planning holds. A basic
+   * ticket's Confirm contract reads the plan against the spec only where the
+   * state has moved since (D-NEW-basic-and-epic-flows). A fingerprint:
+   * nothing reads it but the comparison.
+   */
+  read: z.string().min(1).max(64).nullable(),
+  /**
+   * How many paths the last impact check of this planning's draft found
+   * outside its scope, or null before one was made for the plan it holds. A
+   * flat plan offers the Impact pane only where it found some
+   * (D-NEW-basic-and-epic-flows).
+   */
+  impact: z.number().int().nonnegative().nullable(),
   form: EditingFormSchema,
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
@@ -732,8 +783,18 @@ export interface OpenDraft {
   drift: { open: number; resolved: boolean } | null;
   /** The pane the person was last on, which the planning reopens on where it still offers it. */
   lastPane: PlanningPane | null;
-  /** "contract" where the person was last on the contract rather than a pane, which the ticket's page then opens on. */
-  lastView: "contract" | null;
+  /** The state the person last reached the contract at, which keeps the contract a tab while it holds. */
+  confirmed: string | null;
+  /** The state of the spec and the plan's promise the last reading of the two was of. */
+  read: string | null;
+  /**
+   * A fingerprint of the sections of the spec it writes, its title aside, or
+   * null while it has none: the part of {@link confirmed}'s state only the
+   * host can read.
+   */
+  spec: string | null;
+  /** How many paths its last impact check found outside the scope, or null before one. */
+  impact: number | null;
   /**
    * The scope this session holds, which is not yet the contract's.
    *
@@ -753,9 +814,9 @@ export interface OpenDraft {
    */
   specSlug: string | null;
   /**
-   * What the spec it writes is titled, or null while it has no spec, or one
-   * whose title is still the cut its folder was named from (D-118): the
-   * planning is Untitled until the Architect or the person titles it.
+   * What the spec it writes is titled, or null while it has no spec or its spec
+   * has no title line (D-118): the planning is shown as Untitled until the
+   * Architect or the person titles it, and the file never says so.
    */
   title: string | null;
 }
@@ -772,7 +833,10 @@ export interface OpenDraft {
 export interface SpecRow {
   repoId: string;
   slug: string;
-  /** The spec's own first heading, which is what a person named the work. */
+  /**
+   * The spec's own first heading, which is what a person named the work, or
+   * empty where it has none: the picker shows it as Untitled (D-118).
+   */
   title: string;
 }
 export const EditingTargetSchema = z.discriminatedUnion("kind", [
@@ -816,7 +880,7 @@ export const HELP_LINKS = {
 } as const;
 export const ManifestEditorSchema = z.strictObject({
   entries: z.array(MaterializationEntrySchema),
-  offLimits: z.array(z.string().trim().min(1).max(300)),
+  offLimits: z.array(z.string().trim().min(1).max(TYPED_PATH_MAX_CHARS)),
 });
 export type ManifestEditor = z.infer<typeof ManifestEditorSchema>;
 /**
@@ -1046,16 +1110,26 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * The person is now on this pane of this planning. Recorded on the session
    * as its `lastPane`, which is where the planning reopens
    * (D-130); not an edit, so it moves no
-   * revision.
+   * revision. The contract is recorded by `editingContractVisited`, with the
+   * state it was reached at.
    */
-  z.strictObject({ kind: z.literal("editingVisited"), id: identifier, pane: PlanningPaneSchema }),
+  z.strictObject({
+    kind: z.literal("editingVisited"),
+    id: identifier,
+    pane: PlanningPaneSchema.exclude(["contract"]),
+  }),
   /**
    * The person is now on this planning's contract. Recorded on the session
-   * as its `lastView`, which is where its ticket reopens
-   * (D-130); not an edit, so it moves no
-   * revision.
+   * as its `lastPane`, which is where the planning reopens
+   * (D-130), with the state they reached it at
+   * as its `confirmed` (D-NEW-basic-and-epic-flows);
+   * not an edit, so it moves no revision.
    */
-  z.strictObject({ kind: z.literal("editingContractVisited"), id: identifier }),
+  z.strictObject({
+    kind: z.literal("editingContractVisited"),
+    id: identifier,
+    state: z.string().min(1).max(64),
+  }),
   /** The spec this planning session holds, read from the repository (D-103). */
   z.strictObject({ kind: z.literal("specRead"), id: identifier }),
   /**
@@ -1079,20 +1153,25 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    */
   z.strictObject({ kind: z.literal("impactContract"), repoId: identifier, key }),
   /**
-   * The plan read against the spec it was drafted from, on the way from the
-   * plan to the contract (D-128): where
-   * the two no longer promise the same thing, and the ways to close each
-   * difference. Advice, never a gate. `driftDismiss` records that the person
-   * went on with the findings open, so the same reading is not put to them
-   * again at the same state.
+   * The plan read against the spec it was drafted from, on the way from an
+   * epic's plan to its contract and at a basic ticket's confirm of its
+   * contract (D-128, D-NEW-basic-and-epic-flows): where the two no longer
+   * promise the same thing, and the ways to close each difference.
+   * `driftDismiss`, which no page asks for, dismisses the findings at the
+   * current state as `perbo drift --dismiss` does, so the same reading is not
+   * put again at that state.
    *
    * The session names itself, as `impactRead` does: the repository, the ticket
    * and the spec are the host's to derive from its records, and the model is
    * the ticket's own or the settings', so nothing here becomes an argument
    * (ADR-0023 §4). What a finding offers goes to the interview as a turn in
    * the person's own words, through `interviewTurn`, and reaches no edit.
+   * `state` is the asker's fingerprint of the spec and the plan's promise as
+   * it asks, which the host records on the planning as `read` once the
+   * reading lands of that state, or null where the asker has none; it is
+   * compared and never read.
    */
-  z.strictObject({ kind: z.literal("driftCheck"), id: identifier }),
+  z.strictObject({ kind: z.literal("driftCheck"), id: identifier, state: z.string().min(1).max(64).nullable() }),
   z.strictObject({ kind: z.literal("driftDismiss"), id: identifier }),
   /**
    * Delete a spec folder, by the slug that names it.
@@ -1182,7 +1261,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("exportArchive"),
     repoId: identifier.nullable(),
-    search: z.string().max(200),
+    search: z.string().max(ARCHIVE_SEARCH_MAX_CHARS),
     outcome: z.enum(["all", "merged", "closed", "cancelled"]),
     sort: z.enum(["newest", "oldest", "title"]),
   }),
@@ -1213,7 +1292,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * (D-131); a desktop preference, and an
    * empty text removes it.
    */
-  z.strictObject({ kind: z.literal("askSave"), repoId: identifier, text: z.string().max(12_000) }),
+  z.strictObject({ kind: z.literal("askSave"), repoId: identifier, text: z.string().max(TYPED_TEXT_MAX_CHARS) }),
   /** A ticket's page opened, written as the time Home orders it by within its colour; a desktop preference. */
   z.strictObject({ kind: z.literal("ticketOpened"), ...reference }),
   /** Files completed tickets away from Home (S4); a desktop preference, never a Ticket state. */
@@ -1223,6 +1302,13 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     keys: z.array(key).min(1),
     archived: z.boolean(),
   }),
+  /**
+   * The person's Don't merge on the merge screen: their merge decision on a
+   * ticket whose pull request stays open, which Home then lists as completed
+   * (D-097). A desktop preference, never a Ticket state; refused where the
+   * ticket has no open pull request.
+   */
+  z.strictObject({ kind: z.literal("callOff"), ...reference }),
   z.strictObject({
     kind: z.literal("doctor"),
     repoId: identifier,
@@ -1277,6 +1363,12 @@ export const RequestSchema = z.discriminatedUnion("kind", [
       .nullable(),
   }),
   z.strictObject({ kind: z.literal("sync"), ...reference }),
+  /**
+   * The merge press on a ticket whose run retained its branch without
+   * publishing (D-NEW-publish-a-retained-branch-later): the branch is pushed
+   * and its pull request opened, then opened in the browser.
+   */
+  z.strictObject({ kind: z.literal("publish"), ...reference }),
   z.strictObject({ kind: z.literal("principle"), ...reference, answer: text }),
   z.strictObject({
     kind: z.literal("decide"),
@@ -1383,6 +1475,8 @@ export interface Snapshot {
   taskModels?: Record<string, TaskModels>;
   /** `repoId:key` of every completed ticket filed away by hand. */
   archived?: string[];
+  /** `repoId:key` of every ticket whose merge the person called off with Don't merge (D-097). */
+  calledOff?: string[];
   /** Each repository's unsent answer to "What do you want to build?", by repository id. */
   asks?: Record<string, string>;
   /** When each ticket's page was last opened, `repoId:key` to an ISO time. */
@@ -1437,7 +1531,7 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("preferences"), sequence: z.number().int().nonnegative(), settings: SettingsSchema, titles: z.record(z.string(), z.string()),
     taskModels: z.record(z.string(), TaskModelsSchema), archived: z.array(z.string()).default([]),
-    asks: z.record(z.string(), z.string()),
+    calledOff: z.array(z.string()), asks: z.record(z.string(), z.string()),
   }),
   z.object({ kind: z.literal("repositories"), sequence: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("editing"), sequence: z.number().int().nonnegative(), sessionId: identifier }),
@@ -1506,6 +1600,8 @@ export interface AttemptView {
     ceiling: number | null;
     hit: boolean;
   }[];
+  /** The commands the attempt was let run, as `perbo inspect` counts them: the loop page's strip counts these (D-104). */
+  admittedCommands: number;
   review: ReviewArtifact | null;
   reviewDecision: string | null;
   changes: {
@@ -1673,6 +1769,7 @@ export interface ReplyMap {
   saveManifest: null;
   rename: null;
   archive: null;
+  callOff: null;
   askSave: null;
   ticketOpened: null;
   discard: null;
@@ -1680,11 +1777,12 @@ export interface ReplyMap {
   admit: Job;
   edit: Job;
   generatePlan: Job;
-  /** The planning opened over the new plan, and which of its panes holds it. */
-  replan: { sessionId: string; pane: "graph" | "criteria" };
+  /** The planning opened over the new plan, its ticket, and how many nodes its plan has. */
+  replan: { sessionId: string; key: string; nodes: number };
   startOver: Job;
   run: Job;
   sync: Job;
+  publish: Job;
   principle: Job;
   decide: Job;
   verdict: Job;
@@ -1720,7 +1818,8 @@ export const CHANGED = "perbo:changed";
 export const CLOSE_REQUEST = "perbo:close-request";
 export const CLOSE_RESPONSE = "perbo:close-response";
 export const CLOSE_CANCEL = "perbo:close-cancel";
-export const CloseResponseSchema = z.strictObject({ token: identifier, ok: z.boolean(), error: z.string().max(2000).nullable() });
+/** Why the editor could not save before closing, whole: the host's own words (D-NEW-nothing-shown-is-cut). */
+export const CloseResponseSchema = z.strictObject({ token: identifier, ok: z.boolean(), error: z.string().nullable() });
 declare global {
   interface Window {
     perbo?: DesktopBridge;

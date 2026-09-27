@@ -147,12 +147,6 @@ const RULES: readonly AttemptRule[] = [
  */
 export const MAX_REPORTED_ATTEMPTS = 20;
 
-/** Long enough to read the attempt, short enough that a line cannot be a payload. */
-const QUOTE_LIMIT = 200;
-
-const clip = (text: string): string =>
-  text.length <= QUOTE_LIMIT ? text : `${text.slice(0, QUOTE_LIMIT - 1)}…`;
-
 /**
  * A run of text and where it begins in the source a person can open.
  *
@@ -207,7 +201,8 @@ export function issueAuthoredAttempts(
           attempts.push({
             kind: rule.kind,
             what: rule.what,
-            quote: clip(line),
+            // Whole: quoted evidence a person checks against the source (D-NEW-nothing-shown-is-cut).
+            quote: line,
             line: segment.firstLine + index,
           });
         }

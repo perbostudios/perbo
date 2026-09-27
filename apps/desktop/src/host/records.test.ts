@@ -321,7 +321,7 @@ describe("the edit the chat cards", () => {
     ],
   });
 
-  it("clips a summary longer than a conversation line holds, rather than losing the line", () => {
+  it("carries a summary whole, however many globs it names (D-NEW-nothing-shown-is-cut)", () => {
     // `perbo edit` caps no summary: `set_node_paths` writes every glob it was
     // given, and a plan scoped to a few long ones runs past 300 characters.
     const root = scratchDirectory("perbo-draft-record-");
@@ -332,9 +332,8 @@ describe("the edit the chat cards", () => {
 
     const edit = readLatestDraftEdit(path, "interview");
     expect(edit).not.toBeNull();
-    expect(edit!.summary.length).toBe(300);
-    expect(edit!.summary.startsWith("node_2 paths set to")).toBe(true);
-    // And what comes back is a line the conversation can hold.
+    expect(edit!.summary).toBe(summary);
+    // And what comes back is a line the conversation holds.
     expect(() => InterviewEditSchema.parse(edit)).not.toThrow();
   });
 

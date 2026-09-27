@@ -65,13 +65,15 @@ export function useSettle(): (release: () => void) => void {
   };
 }
 /**
- * Delete a ticket for good and go Home, with it off Home and the Archive from
- * the click until {@link useSettle} gives it back, so no read landing while
- * the delete finishes puts it back; a refusal puts it back at once.
+ * Delete a ticket for good, with it off Home, the Archive, the picker and the
+ * rail's counts from the click until {@link useSettle} gives it back, so no
+ * read landing while the delete finishes puts it back; a refusal puts it back
+ * at once. `deleted` is where the person goes once it has gone: Home from the
+ * ticket's own pages, and nowhere from the Archive, whose row it was.
  */
 export function useDiscardTicket(
   discard: (request: Extract<Request, { kind: "discard" }>) => Promise<unknown>,
-  navigate: (route: Route) => void,
+  deleted: () => void,
 ): (repoId: string, key: string, refused: () => void) => void {
   const { hide } = useCreate();
   const settle = useSettle();
@@ -79,7 +81,7 @@ export function useDiscardTicket(
     const release = hide([deletes.ticket(repoId, key)]);
     void discard({ kind: "discard", repoId, key })
       .then(() => {
-        navigate({ page: "home" });
+        deleted();
         settle(release);
       })
       .catch(() => {
@@ -250,11 +252,12 @@ export function withDraft(snapshot: Snapshot, session: EditingSession): Snapshot
     ...snapshot,
     drafts: [
       // Listed as the host lists it, so the row is the one its refresh brings:
-      // titled by its spec as the snapshot last read the spec folder.
-      ...openDrafts(
-        [session],
-        (repoId, slug) => snapshot.specs?.find((spec) => spec.repoId === repoId && spec.slug === slug)?.title ?? null,
-      ),
+      // titled by its spec as the snapshot last read the spec folder, whose
+      // sections only that refresh reads.
+      ...openDrafts([session], (repoId, slug) => {
+        const title = snapshot.specs?.find((spec) => spec.repoId === repoId && spec.slug === slug)?.title;
+        return title === undefined ? null : { title, sections: null };
+      }),
       ...(snapshot.drafts ?? []).filter((draft) => draft.id !== session.id),
     ],
   };
@@ -319,9 +322,16 @@ interface Row {
 }
 type Bin = { label: string; confirm: string; remove: () => Promise<void> };
 /**
+ * What a planning or a spec is called on screen while nobody has named the
+ * work. Display only: the spec's file has no title line meanwhile, and never
+ * says this (D-118).
+ */
+export const UNTITLED = "Untitled";
+
+/**
  * What to call a planning: its ticket's name, else the title of the spec it is
- * writing (D-127), else Untitled — never the cut of the person's first turn
- * that named the spec's folder, which the drafts list leaves off (D-118). Both
+ * writing (D-127), else {@link UNTITLED} — never the cut of the person's first
+ * turn that named the spec's folder, which is no title (D-118). Both
  * names are read off the snapshot: the drafts list, with each spec's title, is
  * read again on every editing change — any write to a planning's record, and a
  * Spec-pane save of a new title — and the tickets and their names on a records
@@ -331,7 +341,7 @@ export function titleOfDraft(workspace: Pick<Snapshot, "tasks" | "titles">, draf
   // The ticket's name: the one a person gave it on this machine, else the one on the ticket.
   const ticket = workspace.tasks.find((row) => row.repoId === draft.repoId && row.ticket.key === draft.key);
   const named = ticket && (workspace.titles?.[draft.repoId + ":" + ticket.ticket.key] ?? ticket.ticket.title).trim();
-  return named || draft.title?.trim() || "Untitled";
+  return named || draft.title?.trim() || UNTITLED;
 }
 
 /**
@@ -341,7 +351,8 @@ export function titleOfDraft(workspace: Pick<Snapshot, "tasks" | "titles">, draf
  * drafts list no longer holds.
  */
 export function nameOfRoute(workspace: Snapshot, route: Route): string | null {
-  if (route.page !== "planning") return null;
+  // Not on the contract tab, whose page carries the name itself.
+  if (route.page !== "planning" || route.pane === "contract") return null;
   const draft = workspace.drafts?.find((entry) => entry.id === route.sessionId);
   return draft ? titleOfDraft(workspace, draft) : null;
 }
@@ -382,13 +393,77 @@ const shortKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
  * is one thing and is deleted as one (D-101, D-103,
  * D-129).
  */
-function confirmDelete(stage: "name" | "spec" | "plan", title: string): string {
+export function confirmDelete(stage: "name" | "spec" | "plan", title: string): string {
   const named = title.trim().length > 0 ? `“${title.trim()}”` : "this planning";
   if (stage === "name")
     return `Delete ${named}? It has a name and nothing written under it yet.`;
   if (stage === "spec")
     return `Delete ${named}? A spec is written and no plan is drafted yet: the planning and the spec folder both go, and nothing of this is kept.`;
   return `Delete ${named}? A plan is drafted and not approved: the plan, its ticket and the spec folder they came from all go, and nothing of this is kept.`;
+}
+
+/**
+ * What to ask before an archived ticket is deleted, in the picker's words for
+ * the stage it is at, saying exactly what the host's delete does (D-129): it
+ * takes the ticket, its contract and plan, the attempts it recorded and the
+ * evidence they sealed, and the spec folder it was drafted from only where no
+ * other ticket or open planning names it (`removeSpecFolder`). It leaves the
+ * branch the ticket ran on and its pull request, which are git's and
+ * GitHub's, the stored objects under that evidence, which another ticket's
+ * evidence can name, and any worktree a run left, which the next provisioning
+ * reclaims. The branch is named where the ticket's delivery or its attempts
+ * record one (`recordedBranch`, the summary's); where neither does, or the
+ * summary is not read yet, it is "any branch it left".
+ */
+export function confirmDeleteFiled(
+  title: string,
+  ticket: { admission: { spec?: { path?: string } | null }; delivery: { branch?: string | null; pull_request_url?: string | null } },
+  recordedBranch?: string | null,
+): string {
+  const named = title.trim().length > 0 ? `“${title.trim()}”` : "this ticket";
+  const spec = ticket.admission.spec?.path ? ", with the spec folder it came from when nothing else names it," : "";
+  const branch = ticket.delivery.branch ?? recordedBranch ?? null;
+  const left = [
+    branch === null ? "any branch it left in git" : `the branch ${branch} in git`,
+    ...(ticket.delivery.pull_request_url ? ["its pull request on GitHub"] : []),
+  ];
+  return (
+    `Delete ${named}? It is archived: its ticket, contract and plan, every attempt it recorded and ` +
+    `the evidence those attempts sealed${spec} all go. ` +
+    `This leaves ${left.join(" and ")}, the stored objects under that evidence, which another ticket's ` +
+    "evidence can name, and any worktree a run left, which is reclaimed later."
+  );
+}
+
+/**
+ * The confirmation a delete asks first: what goes, in the words of the stage
+ * the work is at, with Keep it beside the delete, which names what it takes.
+ * The picker's bins and the Archive's Delete both ask with it.
+ */
+export function ConfirmDelete({
+  label,
+  confirm,
+  disabled = false,
+  keep,
+  remove,
+}: {
+  label: string;
+  confirm: string;
+  disabled?: boolean;
+  keep: () => void;
+  remove: () => void;
+}) {
+  return (
+    <Dialog title={label} onClose={keep}>
+      <p>{confirm}</p>
+      <div className="dialog-actions">
+        <Button onClick={keep}>Keep it</Button>
+        <Button variant="danger" disabled={disabled} onClick={remove}>
+          {label}
+        </Button>
+      </div>
+    </Dialog>
+  );
 }
 
 function Picker({
@@ -455,14 +530,8 @@ function Picker({
             ? "drafting the plan"
             : "draft in progress"),
       // Where it was left (D-130): its
-      // ticket's page where that was its contract, which that page opens on;
-      // else its problems while they are open, else the pane it was left at.
-      run: () =>
-        navigate(
-          draft.key !== null && draft.lastView === "contract"
-            ? { page: "task", repoId: draft.repoId, key: draft.key, view: "auto" }
-            : { page: "planning", sessionId: draft.id, pane: reopenPane(workspace.drafts, draft.id) },
-        ),
+      // problems while they are open, else the pane it was left at.
+      run: () => navigate({ page: "planning", sessionId: draft.id, pane: reopenPane(workspace, draft.id) }),
       bin: {
         label: "Delete planning",
         confirm: confirmDelete(
@@ -514,14 +583,14 @@ function Picker({
     ...orphaned.map((spec) => ({
       id: "spec:" + spec.repoId + "/" + spec.slug,
       glyph: "spec" as const,
-      title: spec.title,
+      title: spec.title || UNTITLED,
       detail: repoName(spec.repoId) + " · spec written, no plan yet",
       run: () => open({ kind: "spec", repoId: spec.repoId, slug: spec.slug }, "spec"),
       // This row is the spec itself, with no planning and no plan around it to
       // name in the sentence. It is kept nowhere else and nothing puts it back.
       bin: {
         label: "Delete spec",
-        confirm: `Delete the spec “${spec.title}”? Everything written in it goes, and it is not kept anywhere else.`,
+        confirm: `Delete the spec “${spec.title || UNTITLED}”? Everything written in it goes, and it is not kept anywhere else.`,
         remove: () =>
           remove(deletes.spec(spec.repoId, spec.slug), [], () =>
             bridge.request({ kind: "specDelete", repoId: spec.repoId, slug: spec.slug }),
@@ -541,10 +610,11 @@ function Picker({
    * the session is open: the Problems pane while a reading of the plan
    * against its spec has found problems still open, since they are what the
    * planning is about until they are resolved (D-128);
-   * else a graph for work the drafter divided, the criteria for work it did
-   * not, and the spec where there is no plan yet. A ticket row carries none
-   * of this, and opening a flat plan on a Graph the rail does not offer is a
-   * page with nothing on it.
+   * else the Graph for work the drafter divided, the contract for work it did
+   * not, whose plan is its contract, and the spec where there is no plan yet
+   * (D-NEW-basic-and-epic-flows). A ticket row
+   * carries none of this, and opening a flat plan on a Graph the rail does not
+   * offer is a page with nothing on it.
    */
   const open = async (target: EditingTarget, pane: PlanningPane | "plan"): Promise<void> => {
     setBusy(true);
@@ -563,7 +633,7 @@ function Picker({
               ? "drift"
               : session.nodes > 0
                 ? "graph"
-                : "criteria";
+                : "contract";
       navigate({ page: "planning", sessionId: session.id, pane: landing });
     } catch (failure) {
       setError(errorMessage(failure));
@@ -735,26 +805,17 @@ function Picker({
         // Answered here and not by the browser, so the picker behind it stays
         // up: what was asked about is on that list, and a person who keeps it
         // should be looking at it still.
-        <Dialog
-          title={confirming.label}
-          onClose={() => setConfirming(null)}
-        >
-          <p>{confirming.confirm}</p>
-          <div className="dialog-actions">
-            <Button onClick={() => setConfirming(null)}>Keep it</Button>
-            <Button
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                const bin = confirming;
-                setConfirming(null);
-                void bin.remove();
-              }}
-            >
-              {confirming.label}
-            </Button>
-          </div>
-        </Dialog>
+        <ConfirmDelete
+          label={confirming.label}
+          confirm={confirming.confirm}
+          disabled={busy}
+          keep={() => setConfirming(null)}
+          remove={() => {
+            const bin = confirming;
+            setConfirming(null);
+            void bin.remove();
+          }}
+        />
       )}
     </>
   );

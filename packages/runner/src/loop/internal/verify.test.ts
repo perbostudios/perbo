@@ -75,7 +75,7 @@ describe("a scope round that widened instead of narrowing", () => {
     expect(step?.end.detail).toContain("src/feature/**");
   });
 
-  it("names five paths and says there are more", () => {
+  it("names five paths whole and says how many more (D-NEW-nothing-shown-is-cut)", () => {
     const step = refuseWidening({
       widened: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"],
       scopeGiven: [],
@@ -83,7 +83,7 @@ describe("a scope round that widened instead of narrowing", () => {
       pathsAllowed: [],
     });
 
-    expect(step?.end.detail).toContain("a.ts, b.ts, c.ts, d.ts, e.ts, … were not in");
+    expect(step?.end.detail).toContain("a.ts, b.ts, c.ts, d.ts, e.ts and 1 more were not in");
   });
 
   it("says nothing about a round that narrowed", () => {
@@ -307,6 +307,7 @@ describe("the bundle a closure verification leaves", () => {
       changeset: { changeset_id: "cs_0000000000000001" } as never,
       head_commit: "ab12cd3",
       diff: "diff --git a/src/feature.ts b/src/feature.ts",
+      retained_diff: "diff --git a/src/feature.ts b/src/feature.ts",
       changed_paths: ["src/feature.ts"],
       excluded_paths: [],
       excluded_check_artifacts: [],

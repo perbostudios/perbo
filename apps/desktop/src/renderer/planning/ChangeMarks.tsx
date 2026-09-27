@@ -6,7 +6,7 @@ import { gatherAdded, type CriterionChange, type DiffPiece } from "./change-mark
  * The last change, drawn (D-128): what
  * it added highlighted green, what it took away red and struck through, over
  * the words as they now read. The same two elements wherever a criterion is
- * shown — a node card, the inspector, a row of the Plan pane — so a person
+ * shown — a node card, the inspector — so a person
  * reads one thing on every pane, and the spec's reading view draws the same
  * two over its own runs ({@link ./SpecReading.tsx}). Words added together
  * are one {@link Added}, so the highlight runs unbroken across them.

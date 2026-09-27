@@ -1,9 +1,12 @@
 import {
   findingKey,
   hasAcceptanceCriteria,
+  oneLine,
   redactCredentials,
+  spokenLine,
   type CheckResult,
   type Finding,
+  type AttemptWait,
   type NodeReview,
   type PlanContract,
   type PlanContractWithCriteria,
@@ -23,6 +26,8 @@ import {
 } from "@perbo/review";
 import { createModel, type Model } from "@perbo/model";
 import type { BundleStore } from "../../bundle.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "../../transport.js";
+import { providerPark } from "./attempt.js";
 import type { SealResult } from "../../seal.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
@@ -97,6 +102,8 @@ export interface ReviewFacts {
   maxRounds: number;
   /** The repository's limits file, so a stop at the cap names where to raise it. */
   configPath: string;
+  /** The reset a refused review was not taken again before, where it named one past the bound. */
+  unwaited: UnwaitedReset | null;
 }
 
 /**
@@ -107,7 +114,7 @@ export interface ReviewFacts {
  * artifact and the rounds already spent.
  */
 export function routeReview(facts: ReviewFacts): Step {
-  const { review, answeringIncomplete, remediationRound, maxRounds, configPath } = facts;
+  const { review, answeringIncomplete, remediationRound, maxRounds, configPath, unwaited } = facts;
   if (review.decision === "approve") {
     return {
       next: "stop",
@@ -144,7 +151,17 @@ export function routeReview(facts: ReviewFacts): Step {
             ? ""
             : reading.length > 0
               ? ` (reading ${reading.join(", ")})`
-              : " (no file named: the review had read nothing when the transport failed)"),
+              : " (no file named: the review had read nothing when the transport failed)") +
+          // The reset a refused review was not taken again before, said with
+          // the instant and the key, so raising the bound is a decision a
+          // person makes with the number in front of them.
+          (unwaited === null
+            ? ""
+            : `. The provider resets at ${unwaited.until} (${unwaited.zone}), which is ` +
+              `${Math.round(unwaited.parkMs / 60_000)} minute(s) away and past ` +
+              `limits.limits.wait_for_provider_ms in ${configPath} (currently ${unwaited.waitBoundMs} ms). ` +
+              "Reviewing again before it would spend a review against a limit still in force, so the run " +
+              "stops rather than reviewing early."),
       },
       carry: { reviewingAgain: false },
     };
@@ -283,6 +300,18 @@ export function writeReviewBundle(args: {
   /** The graph's per-node reviews, recorded beside `review` (D-107); empty for a flat plan. */
   node_reviews: NodeReview[];
   sealed: { excluded_paths: string[] };
+  /**
+   * The review its provider refused before this one was taken over the same
+   * commit, whose usage the bundle's adds to this review's; null where the
+   * review was taken once.
+   */
+  refused: ReviewArtifact | null;
+  /**
+   * The attempt whose change set this review judged: the key every reader joins
+   * a review to its attempt by (`attemptBundles`). Null for a re-level's review
+   * of a merged change set, which no attempt sealed.
+   */
+  attempt_id: string | null;
   round: number;
   remediation_available: boolean;
 }): void {
@@ -292,10 +321,9 @@ export function writeReviewBundle(args: {
     subject_id: review.review_id,
     ticket_id: contract.ticket_id,
     inputs: {
-      // The target the verdict states, which is the key every reader joins
-      // a review to its attempt by — `perbo inspect` among them. Copied,
-      // never restated from the seal: what a bundle records as reviewed is
-      // what the review says it reviewed.
+      attempt_id: args.attempt_id,
+      // The target the verdict states. Copied, never restated from the seal:
+      // what a bundle records as reviewed is what the review says it reviewed.
       changeset_id: review.target.id,
       base_commit: review.target.base_commit,
       head_commit: review.target.head_commit,
@@ -311,12 +339,15 @@ export function writeReviewBundle(args: {
       model: review.model.model_id,
       tool: review.model.provider,
     },
+    // Usage as the provider reported it (D-104): every call this review made,
+    // the refused one included. The basis stays the retried review's, as a
+    // graphed review's stays its overall call's (`combineReviews`).
     usage: {
-      input_tokens: review.model.input_tokens,
-      output_tokens: review.model.output_tokens,
-      cost_micros: review.cost_micros,
+      input_tokens: review.model.input_tokens + (args.refused?.model.input_tokens ?? 0),
+      output_tokens: review.model.output_tokens + (args.refused?.model.output_tokens ?? 0),
+      cost_micros: review.cost_micros + (args.refused?.cost_micros ?? 0),
       cost_basis: review.model.cost_basis,
-      wall_clock_ms: review.latency_ms,
+      wall_clock_ms: review.latency_ms + (args.refused?.latency_ms ?? 0),
     },
     artifacts: [
       // D-063: the artifact is redacted on the way out, not in memory. The
@@ -414,6 +445,28 @@ export function flakyCheckFindings(checks: readonly CheckResult[]): Finding[] {
 }
 
 /**
+ * What a round prints of the findings its review left open, for whoever
+ * watches the run, in the order the review on record lists them: each
+ * redacted as the artifact is and folded to one line. A finding the reviewer
+ * filed is its own words, on a line marked as the reviewer's; one the runner
+ * or the review's own checks state (`source: "deterministic"`), such as a
+ * flaky check, is the runner's own line, `finding: …`, and never passes for
+ * the reviewer's words. Words to show, never read back.
+ */
+export function openFindingLines(findings: readonly Finding[], secrets: SecretIndex): string[] {
+  return findings.flatMap((finding) => {
+    if (finding.status !== "open") return [];
+    const words = redactCredentials(secrets.redact(finding.statement).text).text;
+    if (finding.source === "deterministic") {
+      const flat = oneLine(words);
+      return flat === "" ? [] : [`finding: ${flat}`];
+    }
+    const said = spokenLine("reviewer", words);
+    return said === null ? [] : [said];
+  });
+}
+
+/**
  * The reviewer transport.
  *
  * The submit schema is built from **this** plan's criteria and this change
@@ -454,6 +507,79 @@ export function contractWithCriteria(
   return hasAcceptanceCriteria(contract) ? contract : ticketContract;
 }
 
+/** A provider's stated reset past `wait_for_provider_ms`, which a refused review is not taken again before. */
+export interface UnwaitedReset {
+  until: string;
+  zone: string;
+  /** How far away the reset was when it was read. */
+  parkMs: number;
+  waitBoundMs: number;
+}
+
+/** What a review its provider refused comes to: one more review after a wait, or none. */
+export type ReviewRetry =
+  | {
+      retry: true;
+      waitMs: number;
+      /** The park the wait is, recorded before it starts; null for the fixed delay and for no wait. */
+      park: AttemptWait | null;
+      say: string;
+    }
+  | { retry: false; unwaited: UnwaitedReset };
+
+/**
+ * The wait a review its provider refused sits out before it is taken once more.
+ *
+ * Until the reset the provider stated where it named one within
+ * `wait_for_provider_ms`; at once where the reset it named has already passed;
+ * the fixed transport delay where it named none. A reset past the bound is not
+ * waited for, because waking before it spends a review against a limit still
+ * in force. The reset is read from the transport's own sentence, as an
+ * attempt's is, and only ever sets a wait.
+ */
+export function reviewRetry(args: { message: string; waitBoundMs: number; clock: () => Date }): ReviewRetry {
+  const { reset, parkMs, park } = providerPark({
+    termination: { reason: "transport_unavailable", detail: args.message },
+    transportRetry: 0,
+    waitBoundMs: args.waitBoundMs,
+    clock: args.clock,
+  });
+  if (park !== null) {
+    return {
+      retry: true,
+      waitMs: park.waited_ms,
+      park,
+      say:
+        `the review's provider resets at ${park.until} (${park.zone}); waiting ` +
+        `${Math.round(park.waited_ms / 60_000)} minute(s) and reviewing the same change set once more`,
+    };
+  }
+  if (reset === null) {
+    return {
+      retry: true,
+      waitMs: TRANSPORT_RETRY_DELAY_MS,
+      park: null,
+      say:
+        `the review's provider was unavailable; waiting ${Math.round(TRANSPORT_RETRY_DELAY_MS / 1000)}s ` +
+        "and reviewing the same change set once more",
+    };
+  }
+  if (parkMs <= 0) {
+    return {
+      retry: true,
+      waitMs: 0,
+      park: null,
+      say:
+        `the review's provider named a reset at ${reset.until.toISOString()} (${reset.zone}), which has ` +
+        "already passed; reviewing the same change set once more now",
+    };
+  }
+  return {
+    retry: false,
+    unwaited: { until: reset.until.toISOString(), zone: reset.zone, parkMs, waitBoundMs: args.waitBoundMs },
+  };
+}
+
 /** What the round's independent review came to, and the state it leaves. */
 export interface Reviewed {
   state: RoundState;
@@ -492,6 +618,12 @@ export async function reviewRound(args: {
   configPath: string;
   secrets: SecretIndex;
   review: LoopPorts["review"];
+  /** `wait_for_provider_ms`: the longest a provider's stated reset is waited for. */
+  waitBoundMs: number;
+  /** How the loop waits, so a test observes the wait rather than serving it. */
+  wait: (ms: number) => Promise<void>;
+  /** The run lock's record of a wait, set before it and cleared after. */
+  parked: (wait: AttemptWait | null) => void;
   clock: () => Date;
   progress: (message: string) => void;
 }): Promise<Reviewed> {
@@ -506,7 +638,7 @@ export async function reviewRound(args: {
   // executor's: the review asks once for a correction and, failing that,
   // records `review_failed` with the reasons (SCP-165). The change set is
   // sealed either way and stays on the branch.
-  const graphOutcome = await reviewGraph(
+  const reviewOnce = () => reviewGraph(
     {
       contract,
       diff: sealed.diff,
@@ -538,6 +670,36 @@ export async function reviewRound(args: {
     args.review,
     { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
   );
+  let graphOutcome = await reviewOnce();
+  // A review its provider refused has judged nothing, and runs of different
+  // tickets side by side (D-049) make a rate limit likely. So the review waits
+  // and is taken once more over the same sealed commit before its verdict is
+  // routed (`reviewRetry`). A park is on the record before the sleep, as an
+  // attempt's is: the attempt the review judged carries the wait and is
+  // flushed to the ticket's record, so a run restarted mid-wait honours what
+  // is left of it. The refused review's usage is the provider's to report, so
+  // it is added to the retried review's bundle rather than dropped.
+  let attempt = args.attempt;
+  let refused: ReviewArtifact | null = null;
+  let unwaited: UnwaitedReset | null = null;
+  const outage = graphOutcome.combined.error;
+  if (graphOutcome.combined.decision === "error" && outage?.kind === "provider_unavailable") {
+    const retry = reviewRetry({ message: outage.message, waitBoundMs: args.waitBoundMs, clock });
+    if (retry.retry) {
+      if (retry.park !== null) {
+        attempt = args.ledger.parkAfter(attempt.attempt_id, retry.park);
+        args.ledger.flush();
+        args.parked(retry.park);
+      }
+      progress(retry.say);
+      if (retry.waitMs > 0) await args.wait(retry.waitMs);
+      if (retry.park !== null) args.parked(null);
+      refused = graphOutcome.combined;
+      graphOutcome = await reviewOnce();
+    } else {
+      unwaited = retry.unwaited;
+    }
+  }
   const reviewOutcome = graphOutcome.overall;
 
   // The artifact is the review as written. Provenance stamping belonged to
@@ -563,6 +725,7 @@ export async function reviewRound(args: {
     target: { ...graphOutcome.combined.target, prior_commits: args.priorCommits },
     findings: [...graphOutcome.combined.findings, ...flakyCheckFindings(args.gating)],
   };
+  for (const line of openFindingLines(review.findings, args.secrets)) progress(line);
   const nodeReviewsThisRound: NodeReview[] = graphOutcome.nodes.map((entry) => ({
     node_id: entry.node_id,
     review: entry.outcome?.artifact ?? null,
@@ -577,6 +740,8 @@ export async function reviewRound(args: {
     outcome: reviewOutcome,
     node_reviews: nodeReviewsThisRound,
     sealed,
+    refused,
+    attempt_id: attempt.attempt_id,
     round: state.round,
     remediation_available: state.remediationRound < args.maxRounds,
   });
@@ -585,7 +750,7 @@ export async function reviewRound(args: {
   args.ledger.addRound({
     round: state.round,
     kind: state.kind,
-    attempt: args.attempt,
+    attempt,
     superseded_attempts: state.superseded,
     review,
     node_reviews: nodeReviewsThisRound,
@@ -606,6 +771,7 @@ export async function reviewRound(args: {
     remediationRound: state.remediationRound,
     maxRounds: args.maxRounds,
     configPath: args.configPath,
+    unwaited,
   });
   return { state, step, escalated: review.decision === "incomplete" };
 }

@@ -4,9 +4,13 @@
  * for one refusal whichever adapter answered.
  */
 
-/** A command running in the repository may be writing what the delete would remove. */
-export const DELETE_WAITS_FOR_COMMANDS =
-  "Wait for the commands running in this repository to finish before deleting a contract.";
+/**
+ * A command running for this ticket — its run, a decision on it, its
+ * publication — may be writing what the delete would remove. Another ticket's
+ * run does not hold it (D-129).
+ */
+export const DELETE_WAITS_FOR_TICKET_COMMAND =
+  "Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.";
 
 /** The ticket asked about is not among the repository's tickets. */
 export const DELETE_TICKET_GONE = "This task is no longer in the repository's ticket store.";

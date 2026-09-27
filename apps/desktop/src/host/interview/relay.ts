@@ -19,9 +19,10 @@ export type Relayed =
   /** A message carrying nothing to show: the chat is left as it is. */
   | { kind: "nothing" }
   /**
-   * What the session said, redacted and clipped: the host decides whether it
-   * is said now, held, or dropped, because that depends on what the turn does
-   * next (D-102).
+   * What the session said, redacted and whole: the host decides whether it is
+   * said now, held, dropped, or asked for again condensed, because that
+   * depends on what the turn does next (D-102) and on whether it fits the
+   * record (D-NEW-nothing-shown-is-cut).
    */
   | { kind: "said"; text: string }
   /** The session admitted a write to the spec; the file lands as the call returns. */
@@ -71,9 +72,10 @@ export function interviewSaid(message: Record<string, unknown>): string | null {
  * itself is never relayed, because a host that passed unparsed output through
  * would be relaying whatever wrote it rather than the protocol it declared.
  *
- * Everything the session wrote is redacted and clipped on the way through, to
- * the caps the record holds: a line the record would refuse is the line lost,
- * and a note naming four hundred fields is the same loss again.
+ * Everything the session wrote is redacted on the way through and nothing is
+ * cut (D-NEW-nothing-shown-is-cut): the session's own words that do not fit
+ * the record are the host's to ask for again, and an identifier — a session
+ * id, a tool or rule name — is held to its field's width.
  */
 export function relayed(line: string): Relayed {
   let raw: unknown;
@@ -90,17 +92,15 @@ export function relayed(line: string): Relayed {
   }
   const parsed = InterviewEventSchema.safeParse(raw);
   if (!parsed.success) {
-    // The reason is the child's text like any other: redacted, and clipped,
-    // because a line refused for four hundred fields names all four hundred
-    // and a note the record will not hold is the line lost again.
-    const why = redact(parsed.error.issues[0]?.message ?? "no reason given").slice(0, 2000);
+    // The reason is the parser's output: said in one sentence, and redacted
+    // and whole behind the note's `i`.
+    const why = redact(parsed.error.issues[0]?.message ?? "no reason given");
     return {
       kind: "line",
       line: {
         kind: "note",
-        text:
-          "The chat wrote a line this build could not read: it is not one of the chat's " +
-          `events (${why}).`,
+        text: "The chat wrote a line this build could not read: it is not one of the chat's events.",
+        output: why,
       },
     };
   }
@@ -118,13 +118,13 @@ export function relayed(line: string): Relayed {
       // folder it may write that is on screen nowhere.
       note: {
         kind: "note",
-        text: redact(`Writing ${event.spec} and ${event.adr}.`).slice(0, 2000),
+        text: redact(`Writing ${event.spec} and ${event.adr}.`),
       },
     };
   }
   if (event.type === "message") {
     const said = interviewSaid(event.message);
-    return said === null ? { kind: "nothing" } : { kind: "said", text: redact(said).slice(0, 12_000) };
+    return said === null ? { kind: "nothing" } : { kind: "said", text: redact(said) };
   }
   if (event.type === "refused")
     return {
@@ -133,8 +133,8 @@ export function relayed(line: string): Relayed {
         kind: "refused",
         tool: event.tool.slice(0, 200),
         rule: event.rule.slice(0, 200),
-        target: event.target === null ? null : redact(event.target).slice(0, 1000),
-        reason: redact(event.reason).slice(0, 2000),
+        target: event.target === null ? null : redact(event.target),
+        reason: redact(event.reason),
       },
     };
   if (event.type === "tool")
@@ -144,7 +144,7 @@ export function relayed(line: string): Relayed {
         kind: "tool",
         tool: event.tool.slice(0, 200),
         ok: event.ok,
-        detail: redact(event.detail).slice(0, 12_000),
+        detail: redact(event.detail),
       },
       planMoved: event.ok && (event.tool === "edit_plan" || event.tool === "undo_edit"),
     };
@@ -153,8 +153,9 @@ export function relayed(line: string): Relayed {
   if (event.type === "asked")
     return {
       kind: "asked",
-      // Clipped the way every other field the session wrote is, and redacted:
-      // this is the session's text and the person reads it.
+      // Redacted, and never cut: this is the session's text and the person
+      // reads it. The session was held to each field's length as it asked; one
+      // that redaction lengthened past it is the host's to ask for again.
       //
       // Whitespace is flattened on the way through for two reasons a reader
       // would not guess. A label goes back down as the person's turn and, in a
@@ -167,12 +168,12 @@ export function relayed(line: string): Relayed {
       line: {
         kind: "asked",
         groups: event.groups.map((group) => ({
-          title: group.title === null ? null : said(group.title, 200, `${INTERVIEWER_NAME} asks`),
+          title: group.title === null ? null : said(group.title, `${INTERVIEWER_NAME} asks`),
           parts: group.parts.map((part) => ({
-            question: said(part.question, 600, "(the question did not survive redaction)"),
+            question: said(part.question, "(the question did not survive redaction)"),
             options: part.options.map((option) => ({
-              label: said(option.label, 200, "(unreadable answer)"),
-              detail: option.detail === null ? null : said(option.detail, 600, "") || null,
+              label: said(option.label, "(unreadable answer)"),
+              detail: option.detail === null ? null : said(option.detail, "") || null,
               recommended: option.recommended,
             })),
           })),
@@ -183,23 +184,23 @@ export function relayed(line: string): Relayed {
     kind: "ended",
     line: {
       kind: "note",
-      text: `The chat ended: ${redact(event.reason).slice(0, 2000)}.`,
+      text: `The chat ended: ${redact(event.reason)}.`,
     },
   };
 }
 
 /**
- * A model's text on its way to the person: redacted, its whitespace flattened
- * and clipped to what the field holds — as every line the interview relay
- * records is, so the same rule reads a question, an answer and a finding.
- * Empty where nothing survived, which the caller decides about: a field its
- * schema requires cannot be shown as nothing.
+ * A model's text on its way to the person: redacted and its whitespace
+ * flattened, and never cut (D-NEW-nothing-shown-is-cut) — so the same rule
+ * reads a question, an answer and a finding. Empty where nothing survived,
+ * which the caller decides about: a field its schema requires cannot be shown
+ * as nothing.
  */
-export function readable(text: string, cap: number): string {
-  return redact(text).replace(/\s+/g, " ").trim().slice(0, cap).trim();
+export function readable(text: string): string {
+  return redact(text).replace(/\s+/g, " ").trim();
 }
 
-const said = (text: string, cap: number, empty: string): string => {
-  const kept = readable(text, cap);
+const said = (text: string, empty: string): string => {
+  const kept = readable(text);
   return kept.length > 0 ? kept : empty;
 };

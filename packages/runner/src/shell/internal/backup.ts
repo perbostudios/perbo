@@ -55,7 +55,7 @@ export function backupFindings(
   const label = `the ${verb} backup`;
   const findings: WriteFinding[] = [];
   const unread = (reason: string): WriteFinding => ({
-    detail: `${label} cannot be resolved — ${reason}: ${context.segment.slice(0, 200)}`,
+    detail: `${label} cannot be resolved — ${reason}: ${context.segment}`,
     target: null,
     resolved: null,
   });

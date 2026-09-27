@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  TICKET_STATES,
-  TICKET_STATES_REACHABLE,
-  TICKET_TRANSITIONS,
-} from "./ticket.js";
+import { TICKET_STATES, TICKET_STATES_REACHABLE } from "./ticket.js";
+import { TICKET_TRANSITIONS } from "./ticket-transitions.js";
 
 /**
  * `TICKET_STATES_REACHABLE` is a hand-written list of what Stage 3 can actually

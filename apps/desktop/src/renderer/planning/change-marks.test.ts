@@ -5,6 +5,7 @@ import { MarkedCriterion } from "./ChangeMarks.js";
 import { SpecReading } from "./SpecReading.js";
 import {
   changeKey,
+  chatChange,
   criteriaChange,
   gatherAdded,
   markRun,
@@ -173,10 +174,10 @@ describe("the marks on the last change (D-128)", () => {
   });
 
   it("tells a reworded criterion from one added and one removed by its words, never by its id", () => {
-    // The Plan pane's Next goes through `perbo edit --criterion`, which
-    // numbers the criteria afresh: after deleting the second of three, the
-    // third carries the second's id. By words, the survivors are unchanged
-    // and the one that went is struck through.
+    // A basic ticket's contract is written through `perbo edit --criterion`,
+    // which numbers the criteria afresh: after deleting the second of three,
+    // the third carries the second's id. By words, the survivors are
+    // unchanged and the one that went is struck through.
     const [a, b, c] = ["The person can choose Light or Dark.", "Text meets WCAG AA contrast.", "The rail follows the mode."];
     const middleGone = criteriaChange(
       [{ id: "ac_1", text: a }, { id: "ac_2", text: b }, { id: "ac_3", text: c }],
@@ -232,6 +233,7 @@ describe("the marks on the last change (D-128)", () => {
     const sections = { outcome: "", requirements: "- R1: one email.", no_gos: "", rabbit_holes: "", notes: "" };
     const change = {
       at: "2026-09-21T10:00:00.000Z",
+      by: "chat" as const,
       spec: { before: { ...sections, requirements: "" }, after: sections },
       plan: { before: { outcome: "One", criteria: [{ id: "ac_1", text: "a" }] }, after: { outcome: "One", criteria: [{ id: "ac_1", text: "b" }] } },
     };
@@ -243,6 +245,14 @@ describe("the marks on the last change (D-128)", () => {
     ).not.toBe(changeKey(change));
     expect(changeKey({ ...change, spec: null })).not.toBe(changeKey(change));
     expect(changeKey(null)).toBeNull();
+  });
+
+  it("marks only a change the chat made: the person's own is marked nowhere (D-128)", () => {
+    const change = { at: "2026-09-21T10:00:00.000Z", spec: null, plan: null };
+    expect(chatChange({ ...change, by: "chat" })).toEqual({ ...change, by: "chat" });
+    expect(chatChange({ ...change, by: "person" })).toBeNull();
+    expect(chatChange(null)).toBeNull();
+    expect(chatChange(undefined)).toBeNull();
   });
 
   it("places a change in the after-text: added stretches by offset, removals where they stood", () => {

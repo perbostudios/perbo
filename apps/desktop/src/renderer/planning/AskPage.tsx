@@ -4,7 +4,7 @@ import { Notice } from "../ui/index.js";
 import { bridge, errorMessage } from "../workspace/index.js";
 import { withDraft } from "../shell/create.js";
 import { SendButton, sendOnEnter } from "./InterviewDock.js";
-import type { EditingSession, Snapshot } from "../../shared/protocol.js";
+import { TYPED_TEXT_MAX_CHARS, type EditingSession, type Snapshot } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
 
 /** How long typing rests before what is typed is kept. */
@@ -122,7 +122,7 @@ export function AskPage({ workspace, navigate, repoId }: PageProps & { repoId: s
             <textarea
               aria-labelledby={heading}
               rows={1}
-              maxLength={12_000}
+              maxLength={TYPED_TEXT_MAX_CHARS}
               placeholder="Start planning"
               ref={box}
               value={text}

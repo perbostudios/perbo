@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphColumns } from "./graph-layout.js";
+import { graphColumns, nodeSummary } from "./graph-layout.js";
 
 /**
  * The Graph pane's own layout (D-100): columns by rank, deterministic, and
@@ -27,5 +27,12 @@ describe("the layered layout", () => {
     for (let index = 0; index < columns.length; index += 1)
       expect(index in columns, `column ${index}`).toBe(true);
     expect(columns.flat().sort()).toEqual(["node_1", "node_2"]);
+  });
+});
+
+describe("what a node's card says under its title (D-NEW-basic-and-epic-flows)", () => {
+  it("counts its criteria and names its paths", () => {
+    expect(nodeSummary({ criteria: [1, 2], paths: ["src/a/**", "src/b.ts"] })).toBe("2 criteria · src/a/** · src/b.ts");
+    expect(nodeSummary({ criteria: [1], paths: [] })).toBe("1 criterion");
   });
 });

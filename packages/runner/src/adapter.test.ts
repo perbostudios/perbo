@@ -309,6 +309,14 @@ describe("asserting what the agent loaded (ADR-0030 req 3)", () => {
     ).toThrow(/attempted and failed/);
   });
 
+  it("says every tool server that was attempted, whole (D-NEW-nothing-shown-is-cut)", () => {
+    const errors = [1, 2, 3, 4, 5, 6].map((n) => ({ name: `a-tool-server-with-a-long-name-${n}`, error: "refused" }));
+    expect(JSON.stringify(errors).length).toBeGreaterThan(200);
+    expect(() => assertNeutralised({ ...clean, mcp_servers: [], mcp_server_errors: errors }, worktree)).toThrow(
+      JSON.stringify(errors),
+    );
+  });
+
   it("fails closed when configuration loaded from inside the worktree", () => {
     expect(() =>
       assertNeutralised(

@@ -10,6 +10,7 @@ import {
   INTERVIEW_CONVERSATION_CAP,
   INTERVIEW_WROTE_THE_SPEC,
   INTERVIEWER_NAME,
+  TYPED_TEXT_MAX_CHARS,
 } from "../../shared/protocol.js";
 import type {
   Asking,
@@ -435,6 +436,8 @@ export function InterviewDock({
             ref={box}
             aria-label="Message the chat"
             value={text}
+            // Held to what a turn carries where it is typed, never cut after (D-NEW-nothing-shown-is-cut).
+            maxLength={TYPED_TEXT_MAX_CHARS}
             disabled={id === null}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={sendOnEnter(sendTurn)}
@@ -817,20 +820,33 @@ export function QuestionCard({
     group.parts.length === 1
       ? "Your own words"
       : `Your own words for ${number}${PART_LETTERS[index] ?? index + 1}`;
+  /** Each part's answer as it goes down: its own words, its pick, or nothing yet. */
+  const answerOf = (index: number): string =>
+    typedIn(picked, index)
+      ? said(index)
+      : (choicesOf(group.parts[index]!)[picked[index] ?? -1]?.label ?? "");
+  // One part goes as the sentence whole; several are lettered as they were
+  // read, so the answers arrive in the shape the question was put. A lone
+  // part keeps no letter, which is what tells its own words from an answer
+  // to the question it was asked.
+  const turnOf = (chosen: readonly string[]): string =>
+    chosen.length === 1
+      ? chosen[0]!
+      : chosen.map((label, index) => `${PART_LETTERS[index] ?? index + 1}) ${label}`).join("\n");
+  /**
+   * The room a part's own words have: what a turn carries, less what the
+   * rest of the group's answer already takes, so the answer typed in is never
+   * refused when it goes down as one turn (D-NEW-nothing-shown-is-cut).
+   */
+  const roomFor = (index: number): number =>
+    Math.max(
+      0,
+      TYPED_TEXT_MAX_CHARS -
+        turnOf(group.parts.map((_part, at) => (at === index ? "" : answerOf(at)))).length,
+    );
   const send = (): void => {
     if (!answered || busy) return;
-    const chosen = group.parts.map((part, index) =>
-      typedIn(picked, index) ? said(index) : choicesOf(part)[picked[index]!]!.label,
-    );
-    // One part goes as the sentence whole; several are lettered as they were
-    // read, so the answers arrive in the shape the question was put. A lone
-    // part keeps no letter, which is what tells its own words from an answer
-    // to the question it was asked.
-    onSend(
-      chosen.length === 1
-        ? chosen[0]!
-        : chosen.map((label, index) => `${PART_LETTERS[index] ?? index + 1}) ${label}`).join("\n"),
-    );
+    onSend(turnOf(group.parts.map((_part, index) => answerOf(index))));
   };
   /**
    * Make a pick, never taking it back: the keyboard's Enter, or Space, on an
@@ -929,6 +945,7 @@ export function QuestionCard({
             }}
             aria-label={ownLabel(index)}
             value={own[index] ?? ""}
+            maxLength={roomFor(index)}
             disabled={busy}
             onChange={(event) => setOwn((held) => ({ ...held, [index]: event.target.value }))}
           />
@@ -1034,19 +1051,7 @@ function Line({
         {line.text}
       </div>
     );
-  // A note the host marked is about a page the person is not on, so it is
-  // drawn to be read rather than to be scrolled past. It is told, not warned:
-  // nothing has gone wrong, so it takes no danger colour. A note is words and
-  // never a press: drafting and confirming are the panes' own.
-  if (line.kind === "note")
-    return (
-      <p
-        className={cx("msg", "msg--note", line.notable && "msg--notable")}
-        {...(line.notable ? { role: "note", "aria-label": "Worth knowing" } : {})}
-      >
-        {line.text}
-      </p>
-    );
+  if (line.kind === "note") return <NoteLine line={line} />;
   // The questions are put one group at a time under the conversation, and they
   // are written out here as well. A person who says something of their own
   // takes the rest off the card — the session is about to answer what they
@@ -1075,20 +1080,13 @@ function Line({
     // later wants from this line. The count is what is left when the session
     // titled none of them.
     const about = line.groups.flatMap((group) => (group.title === null ? [] : [group.title]));
-    // Titles are the session's own words, four groups of up to two hundred
-    // characters: said in the line they would be the long account the card
-    // exists to keep out of the chat.
-    const subjects = (titles: string[]): string => {
-      const joined =
-        titles.length === 1 ? titles[0]! : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
-      return joined.length > 120 ? `${joined.slice(0, 117).trimEnd()}…` : joined;
-    };
+    const subjects = askedSubjects(about);
     return (
       <p className="msg msg--note asked-said">
         {`Asked ${parts === 1 ? "one question" : `${parts} questions`}${
           line.groups.length > 1 ? ` in ${line.groups.length} groups` : ""
         }`}
-        {about.length > 0 && `, about ${subjects(about)}`}.
+        {subjects !== null && `, about ${subjects}`}.
         {/* The questions alone: the answers given are in the chat, as the
             person's own turns. */}
         <InfoHint
@@ -1130,6 +1128,27 @@ function Line({
       </div>
     );
   return <ToolCard line={line} edit={line.edit} onUndo={onUndo} undoable={undoable} busy={busy} />;
+}
+
+/**
+ * A note of Perbo's own in the chat. One the host marked is about a page the
+ * person is not on, so it is drawn to be read rather than to be scrolled past.
+ * It is told, not warned: nothing has gone wrong, so it takes no danger
+ * colour. A note is words and never a press: drafting and confirming are the
+ * panes' own. A note about a tool's output says what happened in its one
+ * sentence, and the output is behind the `i` after it, whole, as the run's
+ * ending card and a refused call's reason are (D-NEW-nothing-shown-is-cut).
+ */
+export function NoteLine({ line }: { line: Extract<InterviewEntry["line"], { kind: "note" }> }) {
+  return (
+    <p
+      className={cx("msg", "msg--note", line.notable && "msg--notable")}
+      {...(line.notable ? { role: "note", "aria-label": "Worth knowing" } : {})}
+    >
+      {line.text}
+      {line.output !== undefined && <InfoHint text={line.output} label="What it said" />}
+    </p>
+  );
 }
 
 /**
@@ -1187,6 +1206,29 @@ export function ToolCard({
       )}
     </div>
   );
+}
+
+/**
+ * What the "Asked …" line names the questions as being about, composed to fit
+ * `limit` characters in whole titles, since nothing a person reads is cut
+ * mid-sentence. Titles are the session's own words, four groups of up to two
+ * hundred characters: said in full they would be the long account the card
+ * exists to keep out of the chat. So as many whole titles as fit are named and
+ * the rest counted ("and 2 more"); where not even the first fits, `null`, and
+ * the line says the count alone.
+ */
+export function askedSubjects(titles: readonly string[], limit = 120): string | null {
+  for (let named = titles.length; named > 0; named -= 1) {
+    const rest = titles.length - named;
+    const text =
+      rest > 0
+        ? `${titles.slice(0, named).join(", ")} and ${rest} more`
+        : named === 1
+          ? titles[0]!
+          : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+    if (text.length <= limit) return text;
+  }
+  return null;
 }
 
 /** The first sentence of what a tool said, or all of it where it has no end to a sentence. */

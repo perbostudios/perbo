@@ -13,7 +13,7 @@ ipcRenderer.on(CLOSE_REQUEST, (_event, token: string) => {
   if (document.body) document.body.inert = true;
   void Promise.all([...closeListeners].map((listener) => Promise.resolve().then(listener))).then(
     () => ipcRenderer.send(CLOSE_RESPONSE, { token, ok: true, error: null }),
-    (error: unknown) => ipcRenderer.send(CLOSE_RESPONSE, { token, ok: false, error: String(error instanceof Error ? error.message : error).slice(0, 2000) }),
+    (error: unknown) => ipcRenderer.send(CLOSE_RESPONSE, { token, ok: false, error: String(error instanceof Error ? error.message : error) }),
   );
 });
 ipcRenderer.on(CLOSE_CANCEL, () => { if (document.body) document.body.inert = false; });

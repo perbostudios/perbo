@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { nameOfRoute, ticketsNoDraftStandsFor, titleOfDraft, unclaimedSpecs } from "./create.js";
+import { confirmDeleteFiled, nameOfRoute, ticketsNoDraftStandsFor, titleOfDraft, unclaimedSpecs } from "./create.js";
 import { openDrafts } from "../../shared/contract-editing.js";
 import type { EditingSession, OpenDraft, Snapshot } from "../../shared/protocol.js";
 
@@ -35,19 +35,23 @@ it("names a planning by its spec, then by the plan's own shorter name, and Untit
 describe("the title the drafts list carries (D-118)", () => {
   const session = (over: Partial<EditingSession> = {}) =>
     ({ id: "s-1", repoId: "repo-1", key: null, admitted: false, phase: "editing", nodes: 0, drift: null,
-      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, lastView: null,
+      specSlug: "dark-mode-toggle", named: null, lastPane: null, confirmed: null, read: null, impact: null,
       form: { draft: { outcome: "", criteria: [], paths: [], prohibited: [] } }, ...over }) as unknown as EditingSession;
-  const titled = (title: string | null) => () => title;
+  const titled = (title: string | null) => () => (title === null ? null : { title, sections: null });
 
   it("is the spec's title", () => {
     expect(openDrafts([session()], titled("Dark mode toggle"))[0]!.title).toBe("Dark mode toggle");
   });
 
-  it("is none while the spec still states the cut of the first turn that named its folder", () => {
-    const cut = session({ specCut: "Dark mode toggle" });
-    expect(openDrafts([cut], titled("Dark mode toggle"))[0]!.title).toBeNull();
+  it("is none while the spec has no title line, as the first turn that named its folder leaves it", () => {
+    expect(openDrafts([session()], titled(""))[0]!.title).toBeNull();
+    expect(openDrafts([session()], titled("  "))[0]!.title).toBeNull();
     // And the spec's own the moment the Architect or the person titles it.
-    expect(openDrafts([cut], titled("A dark mode for the store"))[0]!.title).toBe("A dark mode for the store");
+    expect(openDrafts([session()], titled("A dark mode for the store"))[0]!.title).toBe("A dark mode for the store");
+  });
+
+  it("is whatever the spec states, a title that is the word Untitled included: the word is the app's display, never a mark in the file", () => {
+    expect(openDrafts([session()], titled("Untitled"))[0]!.title).toBe("Untitled");
   });
 
   it("is none with no spec, or a spec with no file to read", () => {
@@ -72,6 +76,8 @@ describe("the name in the top bar", () => {
   });
 
   it("is none on a ticket's own pages, which name it themselves, and on a page about no one piece of work", () => {
+    // The planning's contract tab is the contract page, which names it.
+    expect(nameOfRoute(workspace, { page: "planning", sessionId: "s-2", pane: "contract" })).toBeNull();
     for (const view of ["contract", "loop", "stopped"] as const)
       expect(nameOfRoute(workspace, { page: "task", repoId: "repo-1", key: "PRB-2", view })).toBeNull();
     expect(nameOfRoute(workspace, { page: "home" })).toBeNull();
@@ -161,5 +167,48 @@ describe("which specs the picker offers", () => {
 
   it("is unbothered by a ticket that was never drafted from a spec", () => {
     expect(unclaimedSpecs({ specs: [spec], tasks: [ticketFor(null)] }, [])).toEqual([spec]);
+  });
+});
+
+describe("what the Archive's Delete asks (D-129)", () => {
+  const ticket = (over: { spec?: string; branch?: string | null; pullRequest?: string | null } = {}) => ({
+    admission: { spec: over.spec === undefined ? null : { path: over.spec } },
+    delivery: { branch: over.branch ?? null, pull_request_url: over.pullRequest ?? null },
+  });
+  const GOES =
+    "Delete “Retry”? It is archived: its ticket, contract and plan, every attempt it recorded and the evidence " +
+    "those attempts sealed";
+
+  it("names the branch its delivery records, and the pull request it has", () => {
+    expect(confirmDeleteFiled("Retry", ticket({ branch: "prb/409/retry", pullRequest: "https://github.com/o/r/pull/9" }))).toBe(
+      `${GOES} all go. This leaves the branch prb/409/retry in git and its pull request on GitHub, the stored ` +
+        "objects under that evidence, which another ticket's evidence can name, and any worktree a run left, " +
+        "which is reclaimed later.",
+    );
+  });
+
+  it("names the branch its attempts record where its delivery records none, and prefers the delivery's", () => {
+    expect(confirmDeleteFiled("Retry", ticket(), "prb/409/from-the-attempts")).toContain(
+      "This leaves the branch prb/409/from-the-attempts in git, the stored objects",
+    );
+    expect(confirmDeleteFiled("Retry", ticket({ branch: "prb/409/delivered" }), "prb/409/from-the-attempts")).toContain(
+      "the branch prb/409/delivered in git",
+    );
+  });
+
+  it("says any branch it left where nothing records one, or the attempts are not read yet", () => {
+    for (const recorded of [null, undefined])
+      expect(confirmDeleteFiled("Retry", ticket(), recorded)).toBe(
+        `${GOES} all go. This leaves any branch it left in git, the stored objects under that evidence, which ` +
+          "another ticket's evidence can name, and any worktree a run left, which is reclaimed later.",
+      );
+  });
+
+  it("takes the spec folder it came from only when nothing else names it", () => {
+    expect(confirmDeleteFiled("Retry", ticket({ spec: "specs/retry/spec.md" }))).toContain(
+      `${GOES}, with the spec folder it came from when nothing else names it, all go`,
+    );
+    expect(confirmDeleteFiled("Retry", ticket())).not.toContain("spec folder");
+    expect(confirmDeleteFiled(" ", ticket())).toMatch(/^Delete this ticket\?/);
   });
 });

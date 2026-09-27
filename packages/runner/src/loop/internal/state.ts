@@ -11,6 +11,7 @@ import { attemptId as makeAttemptId } from "@perbo/contracts";
 import type { ClosureVerification } from "@perbo/review";
 import type { Workspace } from "@perbo/workspace";
 import type { Decline } from "../../declines.js";
+import type { ResumeOutcome } from "../../resume.js";
 import type { Direction, remediationToContinue } from "./continuation.js";
 
 /**
@@ -296,6 +297,13 @@ export interface RoundState {
    * Empty where no decision handed anything on.
    */
   readonly directions: readonly Direction[];
+  /**
+   * SCP-154: what a resumed round did with the retained diff — applied, held
+   * by the branch already, or dropped — and null where the round resumes
+   * nothing. Held here so the further attempts of that round, which do not
+   * apply it again, record and brief the same fact.
+   */
+  readonly resumeOutcome: ResumeOutcome | null;
 }
 
 /** What one round hands the next beyond the counters and the round's own kind. */
@@ -382,6 +390,7 @@ export function initialRoundState(workspace: Workspace, continuing: Continuation
     conflict: null,
     continuing,
     directions: continuing?.directions ?? [],
+    resumeOutcome: null,
   };
 }
 

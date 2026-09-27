@@ -132,7 +132,7 @@ function storeWithBundle(name: string): Fixture {
   const review = write(
     "review",
     artifact.review_id,
-    { changeset_id: "cs_verify00000001", decision: "approve", remediation_round: 0 },
+    { attempt_id: ATTEMPT, changeset_id: "cs_verify00000001", decision: "approve", remediation_round: 0 },
     [{ name: "review.json", media_type: "application/json", body: JSON.stringify(artifact) }],
     "2026-09-03T09:06:00.000Z",
   );

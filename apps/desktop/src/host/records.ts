@@ -225,10 +225,9 @@ export function readLatestDraftEdit(path: string, by: InterviewEdit["author"]): 
   return {
     n: at + 1,
     author: last.author,
-    // Clipped to what a conversation line holds. `perbo edit` caps none of
-    // these — a `set_node_paths` summary carries every glob it was given — and
-    // a line the record rejects is one the chat never draws.
-    summary: summary.slice(0, 300),
+    // Whole: a `set_node_paths` summary carries every glob it was given, and
+    // the conversation line holds it all (D-NEW-nothing-shown-is-cut).
+    summary,
     undone: last.undone,
     undoes: last.undoes,
     before: entityKeys(last.before),
@@ -236,7 +235,7 @@ export function readLatestDraftEdit(path: string, by: InterviewEdit["author"]): 
   };
 }
 
-/** The entity keys of one side of an edit, every one, each clipped to what the line holds. */
+/** The entity keys of one side of an edit, every one, each held to the line's field width: identifiers, not prose. */
 const entityKeys = (side: Record<string, unknown>): string[] =>
   Object.keys(side)
     .filter((key) => key.length > 0)

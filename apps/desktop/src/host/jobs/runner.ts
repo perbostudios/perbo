@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { busyMessage, exclusiveJob, isLive, journal, lane } from "../../shared/jobs.js";
-import { redact, requireSuccess } from "../process.js";
+import { busyMessage, inTheWay, isLive, journal } from "../../shared/jobs.js";
+import { logTail, redact, requireSuccess } from "../process.js";
 import type { Cli } from "../cli.js";
 import type { Changes } from "../changes.js";
 import type { ContractEditing, EditingOwner } from "../../shared/contract-editing.js";
@@ -38,9 +38,10 @@ const SAVE_INTERVAL_MS = 1500;
 /**
  * Every command this host runs, and what running one means for the rest of it.
  *
- * Planning runs beside a run (D-101): only the exclusive lane refuses a second
- * job, and within a repository the admissions take turns, because the ticket
- * store hands out a key by scanning what it holds.
+ * Planning runs beside a run (D-101), and runs of different tickets beside one
+ * another (D-049): the exclusive lane refuses only a second job over the same
+ * ticket, and within a repository the admissions take turns, because the
+ * ticket store hands out a key by scanning what it holds.
  */
 export class JobRunner {
   private readonly deps: JobRunnerDeps;
@@ -89,7 +90,7 @@ export class JobRunner {
     operation: JobOperation,
   ): Job {
     const { repo, key, kind, label, owner, publish } = options;
-    const blocking = lane(kind) === "exclusive" ? exclusiveJob(this.live()) : undefined;
+    const blocking = inTheWay(this.live(), { repoId: repo.id, key, kind });
     if (blocking) throw new Error(busyMessage(blocking.label));
     const controller = new AbortController();
     const job: Job = {
@@ -221,7 +222,7 @@ export class JobRunner {
         this.deps.progressed(job);
       },
     });
-    job.log = redact([result.stderr, result.stdout].filter(Boolean).join("\n")).slice(-80_000);
+    job.log = logTail(redact([result.stderr, result.stdout].filter(Boolean).join("\n")));
     requireSuccess(result);
     if (result.stdout.trim()) {
       try {

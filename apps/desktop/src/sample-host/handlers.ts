@@ -7,19 +7,22 @@ import {
   renderSpec,
   specSlug,
 } from "@perbo/planning/browser";
-import { isNeverReadPath } from "@perbo/contracts/browser";
+import { DECIDED_DELIVERY_NOTE, isNeverReadPath, retainedBranch } from "@perbo/contracts/browser";
 import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { openDrafts, titleChanged, turnMark } from "../shared/contract-editing.js";
+import { openDrafts, problemsHoldApproval, titleChanged, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
-import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
-import { heldRepository, isLive, isRun } from "../shared/jobs.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
+import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
+import { heldTicket, isLive, isRun } from "../shared/jobs.js";
+import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
-import type { Job, ReplyMap, Request, RequestHandlers } from "../shared/protocol.js";
+import { untilItRuns } from "../shared/reading-retry.js";
+import type { Job, ReplyMap, Request, RequestHandlers, TaskRow } from "../shared/protocol.js";
 import {
   afterTheNote,
   applyDraft,
+  moveTicket,
+  reopenTicket,
   approved,
   at,
   decisionsAnswered,
@@ -29,6 +32,7 @@ import {
   principlesRecorded,
   detail,
   draftFromSpec,
+  keepsSpecTitle,
   driftEpoch,
   driftKeys,
   driftLanded,
@@ -43,6 +47,7 @@ import {
   forgetDrift,
   graphLog,
   graphView,
+  handEdited,
   initial,
   interviewStatus,
   isWorking,
@@ -55,6 +60,7 @@ import {
   plans,
   readings,
   readingSettled,
+  sampleReadings,
   recordDrift,
   removeSpecFile,
   SAMPLE_INDEX,
@@ -82,13 +88,9 @@ import {
   answerSampleTurn,
   askingChanged,
   converse,
+  draftedReading,
+  sampleSpecText,
 } from "./records.js";
-
-/** The title a sample spec states, as the host reads one for the drafts list. */
-const sampleSpecTitle = (_repoId: string, slug: string): string | null => {
-  const markdown = specFiles()[slug];
-  return markdown === undefined ? null : readSpecSections(markdown).text.title;
-};
 
 /**
  * The sample host's answer to every Request kind, one entry each (D-100's
@@ -113,13 +115,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     return editing.open(request.target, request.legacy);
   },
   editingRead: (request) => editing.read(request.id),
-  drafts: () => openDrafts(editingRecords(), sampleSpecTitle),
+  drafts: () => openDrafts(editingRecords(), sampleSpecText),
   editingSave: (request) => editing.save(request.id, request.revision, request.repoId, request.form),
   editingSubmit: (request) =>
     editing.submit(request.id, request.revision, request.operationId, request.intent),
   editingStop: (request) => editing.stop(request.id),
   editingVisited: (request) => editing.visit(request.id, request.pane),
-  editingContractVisited: (request) => editing.visitContract(request.id),
+  editingContractVisited: (request) => editing.visitContract(request.id, request.state),
   explorerList: (request) => {
     const tracked = sampleFiles(request.repoId);
     const files = tracked.filter((path) => !isNeverReadPath(path)).sort();
@@ -152,7 +154,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
           null,
         );
         job.resultKey = request.key;
-        marks.recordPlanChange({ id: request.repoId }, request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
+        handEdited.add(request.key);
       },
       120,
     ),
@@ -165,7 +168,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         const before = marks.promiseAt({ id: request.repoId }, request.key);
         undoGraphEditAt(request.key, request.edit);
         job.resultKey = request.key;
-        marks.recordPlanChange({ id: request.repoId }, request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
+        handEdited.add(request.key);
       },
       120,
     ),
@@ -194,11 +198,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // way back to the plan, whatever stage it had reached (D-129). One this
     // planning was merely opened over was never its to throw away.
     const held = editing.read(request.id);
-    // A command running in the repository holds the delete of the ticket this
-    // planning drafted, so the discard is refused before anything goes, as the
-    // host refuses it.
-    if (held.key !== null && held.admitted && heldRepository(snapshot.jobs, held.repoId))
-      throw new Error(DELETE_WAITS_FOR_COMMANDS);
+    // A command running for the ticket this planning drafted holds its delete,
+    // so the discard is refused before anything goes, as the host refuses it;
+    // another ticket's run does not.
+    if (held.key !== null && held.admitted && heldTicket(snapshot.jobs, held.repoId, held.key))
+      throw new Error(DELETE_WAITS_FOR_TICKET_COMMAND);
     const session = editing.discard(request.id, request.revision);
     endPlanningChat(request.id);
     let refused: string | null = null;
@@ -302,10 +306,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const index = SAMPLE_INDEX[session.repoId];
     if (index === undefined) throw new Error("This sample repository is no longer connected.");
     const markdown = session.specSlug === null ? null : (specFiles()[session.specSlug] ?? null);
-    return {
-      ...impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index }),
-      readAt: new Date().toISOString(),
-    };
+    const report = impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index });
+    // How many it found outside the scope, on the session, as the host writes
+    // it (D-NEW-basic-and-epic-flows).
+    editing.recordImpact(request.id, report.warnings.length + report.truncated);
+    return { ...report, readAt: new Date().toISOString() };
   },
   // The same reading, of a compiled contract's own scope. Answered from the
   // ticket rather than from a planning session, as the host answers it: the
@@ -342,22 +347,44 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // Whether the interview's turn is in flight as the reading starts, and the
     // last one sent, as the host takes them.
     const before = turnMark(editing.read(id), isWorking(id));
-    // The spec and the plan as the reading starts, which is when `perbo drift`
+    // The spec and the plan as a try starts, which is when `perbo drift`
     // reads them: a turn that moves either while it runs is not in what it
-    // finds.
+    // finds. The first try starts here; one made again after a pause reads
+    // them as they stand then.
     const slug = specOf.get(key);
-    const unreadable = slug !== undefined && specFiles()[slug] === undefined;
-    const keys = driftKeys(key);
-    const findings = unreadable ? [] : sampleDriftFindings(key);
+    const tryReading = () => {
+      sampleReadings.attempt(slug);
+      return { keys: driftKeys(key), findings: sampleDriftFindings(key) };
+    };
+    let first: (() => ReturnType<typeof tryReading>) | null;
+    try {
+      const read = tryReading();
+      first = () => read;
+    } catch (error) {
+      first = () => {
+        throw error;
+      };
+    }
     const reading = job(
       "drift",
       editing.read(id).repoId,
       key,
-      (job) => {
-        // A spec that cannot be read is the reading failing, as `perbo drift`
-        // fails on one: the job carries the error, and the page reads it off
-        // the job.
-        if (unreadable) throw new Error(`specs/${slug}/spec.md could not be read.`);
+      async (job) => {
+        // Tried until it runs, as the host tries `perbo drift`: a try that
+        // does not run — a spec that cannot be read, as `perbo drift` fails
+        // on one — is made again after each pause, and only once every try
+        // has failed does the job carry the error, which the page reads off
+        // the job. A job stopped meanwhile is not tried again. What is
+        // recorded is what the try that ran found.
+        const { keys, findings } = await untilItRuns(
+          () => {
+            const made = first ?? tryReading;
+            first = null;
+            return made();
+          },
+          (ms) => sampleReadings.pause(ms),
+          () => job.state !== "running",
+        );
         const held = driftRecords.get(key);
         const verdict: DriftVerdict =
           held !== undefined &&
@@ -367,7 +394,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
             ? { ...held, cached: true }
             : recordDrift(key, "read", findings, false, keys);
         job.result = verdict;
-        driftLanded(id, key, epoch, before, verdict);
+        driftLanded(id, key, epoch, before, verdict, request.state);
       },
       600,
       undefined,
@@ -379,6 +406,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   driftDismiss: (request) => {
     const key = driftTarget(request.id);
+    // Refused once a person has edited the plan since it was drafted, in the
+    // CLI's words, as the host's dismissal is refused by `perbo drift`.
+    if (handEdited.has(key))
+      throw new Error(
+        `${key}'s plan has been edited by hand since it was drafted, so its problems cannot be ` +
+          "dismissed: answer them, or edit the plan until a reading finds none",
+      );
     const held = driftRecords.get(key);
     const keys = driftKeys(key);
     if (held === undefined || keys === null || held.spec !== keys.spec || held.promises !== keys.promises)
@@ -426,8 +460,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     });
     if (merged.conflicting.length > 0)
       return { view: specView(request.id), conflicting: merged.conflicting };
-    // What the file said before, for the marks on what this save changed of
-    // it: nothing at all where there is no file yet.
+    // What the file said before, for the change this save records, the
+    // person's (D-128): nothing at all where there is no file yet.
     const before = session.specSlug === null ? null : specSectionsAt(session.specSlug);
     const rendered = renderSpec(merged.text, {
       highWater: current?.highWater ?? 0,
@@ -440,9 +474,10 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     if (titleChanged(request)) editing.personTitled(request.id, request.title);
     // The change this save made, on every planning writing this spec: a save
     // of the same words changes nothing and marks nothing.
-    marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug);
-    // A new title has the drafts list read again, as the host has it.
-    if (titleChanged(request)) emit({ kind: "editing", sessionId: request.id });
+    marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug, "person");
+    // The drafts list read again, as the host has it: it names the planning
+    // by the spec's title and holds its contract tab by the spec's sections.
+    emit({ kind: "editing", sessionId: request.id });
     return { view: specView(request.id), conflicting: [] };
   },
   replan: async (request) => {
@@ -494,6 +529,17 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // A fresh admission, not a move: the approved contract is frozen
     // (ADR-0016), so the plan is drafted again from the spec.
     const markdown = specFiles()[named] ?? "";
+    // A person's title past the cap is refused by the admission, which the
+    // host runs after the delete, in the host's words for that (D-127).
+    try {
+      keepsSpecTitle(markdown, planning);
+    } catch (error) {
+      throw new Error(
+        `${request.key} was deleted and its plan could not be drafted again: ${(error as Error).message}. ` +
+          "Its spec is in Create's picker; draft the plan from there.",
+        { cause: error },
+      );
+    }
     const drafted = newSampleTicket("", "plan_review");
     snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket: drafted });
     draftFromSpec(drafted.key, markdown, named, planning);
@@ -503,7 +549,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // Who named the spec goes with it to the new planning, as the host carries it (D-127).
     editing.carryNamed(opened.id, planning?.named ?? null);
     emit({ kind: "records", repoId: request.repoId, key: drafted.key });
-    return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
+    // Read by its drafting, as the host records it, so its first confirm
+    // unchanged reads nothing again (D-NEW-basic-and-epic-flows).
+    const read = draftedReading(editing.read(opened.id));
+    if (read !== null) editing.recordRead(opened.id, read);
+    return { sessionId: opened.id, key: drafted.key, nodes: opened.nodes };
   },
   generatePlan: (request, owner) =>
     job(
@@ -526,6 +576,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         stopSampleInterview(request.id);
         const markdown = specFiles()[session.specSlug] ?? "";
         refuseUnnumbered(markdown);
+        // A person's title past the cap is refused before the ticket is on
+        // the board, as `admit --keep-title` refuses it before writing one.
+        keepsSpecTitle(markdown, editing.read(request.id));
         const ticket = newSampleTicket("", "plan_review");
         // Admitted now, as `admit --from-spec` stamps it: the chat reads the
         // interview that came before the plan off this moment.
@@ -551,8 +604,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         refuseUnnumbered(markdown);
         const { ticket } = ticketRow(request.key);
         if (ticket.approved_at) throw new Error("An approved contract is immutable.");
-        // What the plan promised before it is drafted again, for the marks on
-        // the re-draft.
+        // What the plan promised before it is drafted again, for the change
+        // the re-draft records, the person's (D-128).
         const before = marks.promiseAt({ id: request.repoId }, request.key);
         draftFromSpec(request.key, markdown, session.specSlug, session);
         // A name the person gave the ticket outlives the re-draft, as the host
@@ -561,7 +614,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         if (given !== undefined) nameSampleSpec(request.repoId, request.key, given);
         ticket.plan_version += 1;
         job.resultKey = request.key;
-        marks.recordPlanChange({ id: request.repoId }, request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
       },
       1400,
       owner,
@@ -575,15 +628,15 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   snapshot: () => ({
     ...structuredClone(snapshot),
-    drafts: openDrafts(editingRecords(), sampleSpecTitle),
+    drafts: openDrafts(editingRecords(), sampleSpecText),
     // The specs this sample workspace holds, as the host reads its own folder:
     // the picker subtracts the ones a planning or a ticket names and offers
     // what is left (D-129).
     specs: Object.entries(specFiles()).flatMap(([slug, markdown]) => {
       const repoId = snapshot.repositories[0]?.id;
       if (repoId === undefined) return [];
-      const title = readSpecSections(markdown).text.title.trim();
-      return title.length > 0 ? [{ repoId, slug, title }] : [];
+      // Empty where nobody has named the work: the picker calls it Untitled (D-118).
+      return [{ repoId, slug, title: readSpecSections(markdown).text.title.trim() }];
     }),
     interviews: [...sampleInterviews],
     working: [...sampleWorking.keys()],
@@ -692,6 +745,16 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     snapshot.archived = request.archived
       ? [...new Set([...(snapshot.archived ?? []), ...entries])]
       : (snapshot.archived ?? []).filter((entry) => !entries.includes(entry));
+    emitPreferences();
+    return null;
+  },
+  callOff: (request) => {
+    const { ticket } = ticketRow(request.key);
+    if (ticket.state !== "pr_open" || ticket.delivery.pull_request_url === null)
+      throw new Error(notCallable(request.key));
+    snapshot.calledOff = [
+      ...new Set([...(snapshot.calledOff ?? []), calledOffEntry(request.repoId, request.key, ticket.delivery.pull_request_url)]),
+    ];
     emitPreferences();
     return null;
   },
@@ -819,11 +882,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
       if (ticket.approved_at) throw new Error("An approved contract cannot be edited.");
       if (detail(request.key).digest !== request.digest) throw new Error("The contract changed since you viewed it.");
-      // What the plan promised before this edit, for the marks on it.
+      // What the plan promised before this edit, for the change it records,
+      // the person's (D-128).
       const before = marks.promiseAt({ id: request.repoId }, request.key);
       applyDraft(ticket, request.draft);
       ticket.plan_version += 1;
-      marks.recordPlanChange({ id: request.repoId }, request.key, before);
+      marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
+      handEdited.add(request.key);
       if (request.models) {
         snapshot.taskModels = {
           ...snapshot.taskModels,
@@ -833,7 +898,14 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       }
       job.resultKey = request.key;
     }, 1000, owner),
-  run: (request) => startWork(request.kind, request.repoId, request.key, request.publish),
+  run: (request) => {
+    // Refused while a planning over the ticket records problems open, in the
+    // host's words: an open problem holds approving for either shape
+    // (D-NEW-basic-and-epic-flows).
+    const held = request.approve ? problemsHoldApproval(editingRecords(), request.repoId, request.key) : null;
+    if (held !== null) throw new Error(held);
+    return startWork(request.kind, request.repoId, request.key, request.publish);
+  },
   decide: (request) => {
     // Each answer is recorded on its finding before the run, as the host does.
     decisionsTaken.set(request.key, [
@@ -873,10 +945,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const active = snapshot.jobs.find((job) => job.id === request.jobId);
     // As the host has it: a job that has finished is not one a stop can reach.
     if (!active || !isLive(active)) throw new Error("That command is no longer active.");
+    // The ticket stays where the run left it, with no row for the stop, as the
+    // host leaves it: the stopped run beside it is what reads as the stop.
     const settle = async (): Promise<void> => {
       active.state = "cancelled";
       active.endedAt = new Date().toISOString();
-      if (active.key && isRun(active)) ticketRow(active.key).ticket.state = "cancelled";
       await editing.settled(active);
       emit({ kind: "records", repoId: active.repoId, key: active.resultKey ?? active.key, job: active });
     };
@@ -894,10 +967,24 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     job("sync", request.repoId, request.key, () => {
       const { ticket } = ticketRow(request.key);
       if (ticket.delivery.state === "open") {
-        ticket.state = "merged";
+        moveTicket(ticket, [{ to: "merged", note: "The pull request was merged." }]);
         ticket.delivery.state = "merged";
         ticket.delivery.observed_at = new Date().toISOString();
       }
+    }),
+  // The merge press on a retained branch: pushed and its pull request opened
+  // as the host does it, refused as the CLI refuses it
+  // (D-NEW-publish-a-retained-branch-later).
+  publish: (request) =>
+    job("publish", request.repoId, request.key, () => {
+      const { ticket } = ticketRow(request.key);
+      const retained = retainedBranch(ticket);
+      if (retained.refusal !== null) throw new Error(retained.refusal);
+      ticket.delivery.state = "open";
+      ticket.delivery.pull_request_number = 418;
+      ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
+      ticket.delivery.opened_by = "loop";
+      ticket.delivery.observed_at = new Date().toISOString();
     }),
   // The screens show the GitHub handoff; no external site opens in this sandbox.
   openPullRequest: () => null,
@@ -928,6 +1015,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
 };
 
+/** The states a sample round proves on its way to the review's answer, as the CLI records them. */
+const REVIEWED = [
+  { to: "executing", note: "1 attempt executed" },
+  { to: "verifying", note: "the pinned checks ran" },
+  { to: "independent_review", note: "reviewed independently" },
+] as const;
+
 /**
  * A run or a decision, which move the ticket the moment the command is
  * accepted: a refused one leaves it where it was, so the job is opened first
@@ -935,6 +1029,15 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
  */
 function startWork(kind: "run" | "decide", repoId: string, key: string, publish: boolean): Job {
   const row = ticketRow(key);
+  // As the CLI starts a run: back through `ready` from anywhere else, then to
+  // `provisioning` before the attempt. Tried first on a copy, so a ticket the
+  // lifecycle has no route for is refused before a job opens.
+  const start = (ticket: TaskRow["ticket"]): void => {
+    if (ticket.state !== "ready")
+      reopenTicket(ticket, ticket.state === "plan_review" ? "contract approved" : `new attempt after ${ticket.state}`);
+    moveTicket(ticket, [{ to: "provisioning", note: `run started against ${ticket.plan_id}` }]);
+  };
+  start(structuredClone(row.ticket));
   const opened = job(
     kind,
     repoId,
@@ -947,15 +1050,18 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
       // no pull request (D-132).
       if (kind === "decide" && everyDecisionTaken(key)) {
         if (decisionsHandWork(key)) approved.add(key);
-        row.ticket.state = "pr_open";
+        moveTicket(row.ticket, [
+          { to: "pr_open", note: `${DECIDED_DELIVERY_NOTE} on the commit the review judged; nothing was executed or reviewed again` },
+        ]);
         if (publish) {
           row.ticket.delivery.state = "open";
           row.ticket.delivery.pull_request_number = 418;
           row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
         }
-      } else if (!decisionsAnswered.has(key)) row.ticket.state = "changes_requested";
+      } else if (!decisionsAnswered.has(key))
+        moveTicket(row.ticket, [...REVIEWED, { to: "changes_requested", note: "A finding waits on the person." }]);
       else {
-        row.ticket.state = "pr_open";
+        moveTicket(row.ticket, [...REVIEWED, { to: "pr_open", note: "The review passed; the pull request is open." }]);
         row.ticket.delivery.state = "open";
         row.ticket.delivery.pull_request_number = 418;
         row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
@@ -967,18 +1073,46 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
   // On the job, as the host records it: what an attempt carried on from this
   // one after a stop publishes by.
   opened.publish = publish;
+  streamProgress(opened, key);
   row.ticket.approved_at = at;
-  row.ticket.state = "executing";
-  // A filed ticket whose loop starts again is back on Home, as the host has it.
+  start(row.ticket);
+  // A filed ticket whose loop starts again is back on Home, and a call-off it
+  // carried is over, as the host has it.
   const entry = repoId + ":" + row.ticket.key;
-  if (snapshot.archived?.includes(entry)) {
-    snapshot.archived = snapshot.archived.filter((item) => item !== entry);
+  const calledOff = (snapshot.calledOff ?? []).filter((item) => !item.startsWith(calledOffPrefix(repoId, row.ticket.key)));
+  if (snapshot.archived?.includes(entry) || calledOff.length !== (snapshot.calledOff ?? []).length) {
+    snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+    snapshot.calledOff = calledOff;
     emitPreferences();
   }
   // Approved, so what the plan promises is settled: every planning over it
   // forgets its problems, as the host does.
   forgetDrift(key, null);
   return opened;
+}
+
+/**
+ * What a run prints while it works, as the CLI prints it and the host relays
+ * it: the stages it reaches and the agents' own words, one line at a time on
+ * the job's log, each told as progress while the job is still running.
+ */
+const SAMPLE_PROGRESS = (key: string): string[] => [
+  `worktree /sample/worktrees/${key} on prb/sample/${key.toLowerCase()} at 4f1c9a2`,
+  "executing",
+  "executor says: Reading the mailer and its tests before changing anything.",
+  "executor says: Adding a capped retry to the send path, with a test for the cap.",
+  "sealing the change set",
+  "check unit: pnpm test",
+  "review round 0",
+];
+function streamProgress(job: Job, key: string): void {
+  SAMPLE_PROGRESS(key).forEach((line, index) =>
+    setTimeout(() => {
+      if (job.state !== "running") return;
+      job.log += `\n  ${line}`;
+      emit({ kind: "progress", job });
+    }, 150 * (index + 1)),
+  );
 }
 
 /**

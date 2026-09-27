@@ -20,7 +20,7 @@ import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { perboPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
-import { sectionsOf, titleChanged } from "../../shared/contract-editing.js";
+import { readingStateOf, sectionsOf, titleChanged, type SpecReader } from "../../shared/contract-editing.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
 import { specSlugOf } from "../../shared/spec-slug.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
@@ -28,6 +28,7 @@ import type { ChangeMarks } from "./marks.js";
 import type { RegisteredRepository } from "../profile/store.js";
 import type {
   Detail,
+  EditingSession,
   RequestOf,
   SpecRow,
   SpecSaveReply,
@@ -57,20 +58,55 @@ export function specPath(repo: RegisteredRepository, slug: string): string {
 }
 
 /**
- * The title each spec states, by repository id and slug, for the drafts list
- * to name a planning by: null where the repository or the file has gone or
- * the file cannot be read.
+ * Each spec as its file states it, by repository id and slug — its title and
+ * its five sections — for the drafts list to name a planning by and to say
+ * whether its spec has moved since the contract was reached
+ * (D-NEW-basic-and-epic-flows): null where the
+ * repository or the file has gone or the file cannot be read.
  */
-export function specTitles(
-  repository: (id: string) => RegisteredRepository,
-): (repoId: string, slug: string) => string | null {
+export function specTexts(repository: (id: string) => RegisteredRepository): SpecReader {
   return (repoId, slug) => {
     try {
-      return readSpecText(specPath(repository(repoId), slug)).text.title;
+      const { text } = readSpecText(specPath(repository(repoId), slug));
+      return { title: text.title, sections: sectionsOf(text) };
     } catch {
       return null;
     }
   };
+}
+
+/**
+ * The state a plan just drafted from its spec was read at by its drafting
+ * (D-128): admission writes a verdict that finds nothing beside the ticket,
+ * keyed by the spec's bytes it drafted from, so while the spec is still those
+ * bytes the plan the planning holds has been read, at
+ * {@link readingStateOf} of it. Null where the planning has no spec or no
+ * plan, or the verdict is not there, found something, or is of other bytes —
+ * the plan is then read when the person confirms it.
+ */
+export function draftedReading(
+  repository: (id: string) => RegisteredRepository,
+  record: EditingSession,
+): string | null {
+  if (record.specSlug === null || record.key === null) return null;
+  try {
+    const repo = repository(record.repoId);
+    assertNoSymlink(repo.path, `${specFolder(repo)}/${record.specSlug}/spec.md`);
+    const bytes = readFileSync(specPath(repo, record.specSlug));
+    const verdict = readDriftRecord(perboPath(repo), record.key);
+    if (verdict === null || verdict.findings.length > 0 || verdict.spec !== driftHash(bytes)) return null;
+    return readingStateOf(record, specTexts(repository));
+  } catch {
+    return null;
+  }
+}
+
+/** The title each spec states, as {@link specTexts} reads it. */
+export function specTitles(
+  repository: (id: string) => RegisteredRepository,
+): (repoId: string, slug: string) => string | null {
+  const read = specTexts(repository);
+  return (repoId, slug) => read(repoId, slug)?.title ?? null;
 }
 
 /**
@@ -110,8 +146,8 @@ export function repositorySpecs(repo: RegisteredRepository): SpecRow[] {
     if (!entry.isDirectory() || !SPEC_SLUG.test(entry.name)) return [];
     try {
       const { text } = readSpecText(join(root, entry.name, "spec.md"));
-      const title = text.title.trim();
-      return title.length > 0 ? [{ repoId: repo.id, slug: entry.name, title }] : [];
+      // Empty where nobody has named the work: the picker calls it Untitled (D-118).
+      return [{ repoId: repo.id, slug: entry.name, title: text.title.trim() }];
     } catch {
       return [];
     }
@@ -275,7 +311,7 @@ export function saveSpec(
   // on the contract page and at approval, not here
   // (D-128).
   //
-  // What the file said before, for the marks on what this save changed of it:
+  // What the file said before, for the change this save records, the person's:
   // nothing at all where there is no file yet, so a first save is a change from
   // nothing, and no reading where the file will not read, so the save is not
   // measured.
@@ -321,25 +357,30 @@ export function saveSpec(
         { spec: before, plan: null },
         { spec: after, plan: null },
         (each) => each.repoId === repo.id && each.specSlug === written.slug,
+        "person",
       );
   }
   return { view: specView(deps, request.id), conflicting: [] };
 }
 
 /**
- * A spec named from a title, minted in the repository's spec folder. The
- * folder is minted once and never moves, so what it was called is worth
- * saying while the spec is still empty enough to start again.
+ * A spec whose folder is named from the words cut from the person's first
+ * turn, minted in the repository's spec folder with no title line: the cut
+ * names the folder and is no title, and the work has none until the Architect
+ * or the person names it (D-118). The folder is minted once and never moves,
+ * so what it was called is worth saying while the spec is still empty enough
+ * to start again.
  */
 export function mintSpecFromTitle(
   repo: RegisteredRepository,
-  title: string,
+  cut: string,
 ): { slug: string; folder: string } {
   const written = writeSpecFile({
     repositoryRoot: repo.path,
     folder: specFolder(repo),
     slug: null,
-    text: { ...EMPTY_SPEC_TEXT, title },
+    folderName: cut,
+    text: EMPTY_SPEC_TEXT,
     base: EMPTY_SPEC_TEXT,
   });
   return { slug: written.slug, folder: written.folder };

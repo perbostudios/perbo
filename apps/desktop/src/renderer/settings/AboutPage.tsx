@@ -26,10 +26,10 @@ export function AboutPage({ workspace, navigate }: PageProps) {
             </div>
           </div>
           <p className="about-copy">
-            A desktop loop that takes one ticket at a time, agrees a contract
-            with you, does the work in a throwaway worktree, and has a second
-            agent check the result against the criteria you approved. It opens
-            a pull request. It never merges one.
+            A desktop loop that agrees a contract with you for each ticket,
+            runs every ticket you confirm side by side, each in a throwaway
+            worktree, and has a second agent check the result against the
+            criteria you approved. It opens a pull request. It never merges one.
           </p>
           <FactList
             rows={[

@@ -8,7 +8,8 @@
  */
 export { APPROACH_SCHEMA_VERSION, approachProblems, ApproachRecordSchema } from "./approach.js";
 export type { ApproachRecord, GraphEdge } from "./approach.js";
-export { formatUsd } from "./cost.js";
+export { costOf, formatUsd, rollCosts } from "./cost.js";
+export type { Cost, CostRoll } from "./cost.js";
 export {
   answersReview,
   DECISION_CHOICES,
@@ -27,6 +28,7 @@ export type { GraphEdit } from "./graph-edit.js";
 export { CriterionIdSchema } from "./ids.js";
 export {
   answersGroup,
+  INTERVIEW_SAID_MAX_CHARS,
   InterviewOptionSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
   MAX_QUESTION_GROUPS,
@@ -54,10 +56,18 @@ export {
   VERIFICATION_KINDS,
 } from "./plan.js";
 export type { AcceptanceCriterion, PlanContract, PlanNode, VerificationKind } from "./plan.js";
+export { gateClosedNote, retainedBranch } from "./retained.js";
+export type { RetainedBranch } from "./retained.js";
 export { isPlannedP3Path } from "./risk.js";
 export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";
 export type { SizeEstimate } from "./size.js";
+export { readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
+export type { Speaker } from "./spoken.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";
+export { admittedCommands, readTally, tallyLine } from "./tally.js";
+export type { Tally } from "./tally.js";
 export type { SymbolIndex, UnsupportedRepository } from "./symbol-index.js";
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
+export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
+export type { TicketTransition } from "./ticket-transitions.js";

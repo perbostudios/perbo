@@ -35,6 +35,7 @@ export const USAGE = `perbo — contract to pull request, locally
 
   perbo run --ticket PRB-1 [--publish] [--resume-from <bundle_id>]
   perbo run --ticket PRB-1 --relevel [--publish]
+  perbo run --ticket PRB-1 --publish-retained
   perbo run --contract c.json --config run.json [--publish]
   perbo run --outcome "..." [--criterion "..."] [--path "src/**"]
   perbo run --pr owner/repo#412
@@ -55,6 +56,26 @@ export const USAGE = `perbo — contract to pull request, locally
       approved contracts of what merged — where the merge stops. With
       --publish it pushes and reads the merge step; it opens nothing new, and
       the ticket stays at pr_open. Exit 0 when the branch is level.
+
+      With --publish-retained, a run that ended approved or escalated without
+      publishing has its retained branch published now: pushed, and its pull
+      request opened against the base with the review on record, the answers
+      a person gave under it, exactly as a publishing run opens it — nothing
+      is executed or reviewed again. It refuses, pushing nothing and naming
+      what it found, where the ticket's last run did not end approved or
+      escalated, which is said before the machine is asked anything; where
+      the ticket already has its pull request, or its delivery is not the
+      loop's own; where a run of the ticket holds its run lock; where the
+      plan has no acceptance criteria, so no review judged it; where the
+      branch is not one the loop minted; where no review, or no attempt that
+      sealed the commit it judged, is on record; where the run ended escalated
+      and an attempt's record does not say what its executor declined; where
+      the branch has moved past the commit the review judged, where what it
+      carries past its base could not be listed whole, or where it carries a
+      commit the loop did not make; or where the base names no commit or has
+      moved past what the run judged. A run with
+      --publish judges what is there instead. The ticket stays where it is
+      and its delivery record gets the pull request. Exit 0 once it is open.
 
       With --ticket, the contract comes from the admitted ticket and the run
       configuration from <repo>/.perbo/config.json — the checks and the
@@ -83,14 +104,19 @@ export const USAGE = `perbo — contract to pull request, locally
       and ceilings a ticket run is, and \`perbo inspect <run id>\` reads it back.
       The run prints what it cost when it ends, whatever ended it.
 
-      With --resume-from, the run starts from the retained change.diff of the
-      execution bundle it names — the work an attempt a ceiling cut had already
-      done. The diff is applied into the new attempt's worktree at the same base
-      commit before the executor is invoked, which is told the diff is a prior
-      attempt's unfinished work to check rather than trust; the new attempt
-      records the cut one as what it continues. A base commit that has moved, or
-      a diff that no longer applies, refuses the run rather than merging
-      something nobody asked for. The bundle it reads is never rewritten.
+      With --resume-from, the run starts from the work of the attempt whose
+      execution bundle it names — one a ceiling cut or a person stopped. Where
+      the ticket's branch still holds the commit that attempt sealed, the work
+      is already there and nothing is applied; otherwise the bundle's retained
+      change.diff is applied into the new attempt's worktree at the same base
+      commit before the executor is invoked. The executor is told where the
+      prior attempt's unfinished work is, committed or applied, and to check it
+      rather than trust it; the new attempt records the stopped one as what it
+      continues. A base commit that has moved refuses the run rather than
+      merging something nobody asked for. A diff that no longer applies to the
+      branch is dropped whole: the executor starts from the branch's commit,
+      and the run's log and the attempt's record say so. The bundle it reads is
+      never rewritten.
       \`perbo inspect <ticket>\` names the bundle of every attempt on record.
 
   perbo review --contract c.json --diff change.diff --checks checks.json --repo .
@@ -266,8 +292,9 @@ export const USAGE = `perbo — contract to pull request, locally
       .perbo/config.json sets merge to "loop", asks each in queue order to
       merge under sync --merge's conditions until one does), reconciles any ticket a dead
       run left mid-state, decides who waits, and starts perbo run --ticket as
-      a child process for each ready ticket up to concurrent_local_attempts,
-      counting a run a person started by hand. Queue order is a ticket's
+      a child process for every ready ticket not already running, in the same
+      tick — up to concurrent_local_attempts where the limits set it, counting
+      a run a person started by hand. Queue order is a ticket's
       dependencies first, then priority, then admission time. A ticket waits — state blocked, the reason on its record
       and in perbo list — while a depends_on key has not merged, or while a
       ticket ahead of it holds a scope this one's reaches: its globs until it
@@ -374,10 +401,16 @@ export const USAGE = `perbo — contract to pull request, locally
       plan just drafted agrees with its spec, and an interview edit of the
       plan is held to the spec, so it is your own edit of one or the other, or
       an interview turn that wrote the spec and left the plan, that gives it
-      something to read. It is advice and not a gate: the exit code is 0
-      whatever it finds. --dismiss records that you went on to the contract
-      with the differences open, so the same reading is not put to you again
-      at the same state; it calls no model and needs a verdict at this state.
+      something to read. The exit code is 0 whatever it finds; the desktop
+      refuses to approve the contract while a difference it records is open.
+      --dismiss sets the differences of the verdict at this state aside, so
+      they are not put to you again at the same state and the desktop's
+      planning drops them; no page offers it. It calls no model, needs a
+      verdict at this state, and is refused where the ticket has no record of
+      the edits made to its plan since it was drafted and once anyone has
+      edited the plan by hand since then (the interview's edits do not
+      count): answer the differences instead, or edit the plan until a
+      reading finds none.
 
   perbo inspect PRB-1 [--attempt <id>] [--json] [--repo .] [--store <dir>]
   perbo inspect <local run id> [--attempt <id>] [--json]

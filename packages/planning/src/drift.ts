@@ -1,3 +1,4 @@
+import { credentialValuesOf, redactCredentials, replaceValues } from "@perbo/contracts";
 import { SUBMIT_REVIEW_TOOL, openSession, type Model } from "@perbo/model";
 import { delimit } from "./delimit.js";
 import {
@@ -36,6 +37,8 @@ export interface DriftInput {
   spec: DriftSpec;
   plan: DriftPlan;
   model: Model;
+  /** The environment whose credential values are redacted from the report; this process's by default. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface DriftResult {
@@ -45,6 +48,45 @@ export interface DriftResult {
 
 /** The most turns a reading gets: the report, or one reminder and the report. */
 const MAX_DRIFT_TURNS = 2;
+
+/**
+ * How many times a report whose words run past a field's length is handed
+ * back to be condensed, each a turn past {@link MAX_DRIFT_TURNS}: the words
+ * are the person's to read, and they are asked for again rather than cut
+ * (D-NEW-nothing-shown-is-cut).
+ */
+const MAX_CONDENSE_ASKS = 2;
+
+/**
+ * One of the report's words as a person is shown them: the values of the
+ * environment's credentials and every credential the shared detector knows
+ * redacted, terminal escapes dropped, and the whole flattened onto one line.
+ * It is the report's text about the spec and the plan, and a secret either
+ * quoted would otherwise land in the record and on the page.
+ *
+ * Applied before the report's lengths are measured, so a field that redaction
+ * lengthens past its length — a short secret written as `[redacted]` — is
+ * handed back to the same session to condense like any other long field, and
+ * is never cut (D-NEW-nothing-shown-is-cut).
+ */
+export function shownDriftText(text: string, env: NodeJS.ProcessEnv): string {
+  const values = replaceValues(text, credentialValuesOf(env), "[redacted]").text;
+  return redactCredentials(values)
+    .text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g"), "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Every string in a submitted report, as it is shown; its shape is left to the schema. */
+function shownReport(value: unknown, env: NodeJS.ProcessEnv): unknown {
+  if (typeof value === "string") return shownDriftText(value, env);
+  if (Array.isArray(value)) return value.map((entry) => shownReport(entry, env));
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([name, entry]) => [name, shownReport(entry, env)]),
+    );
+  return value;
+}
 
 /**
  * The one instruction position. Nothing from the spec or the plan reaches it.
@@ -135,12 +177,36 @@ export async function readDrift(input: DriftInput): Promise<DriftResult> {
   );
   let report: DriftReport | null = null;
 
+  let condenseAsks = 0;
   try {
-    for (let turn = 0; turn < MAX_DRIFT_TURNS && report === null; turn += 1) {
+    for (let turn = 0; turn < MAX_DRIFT_TURNS + condenseAsks && report === null; turn += 1) {
       const result = await session.next(true);
       const submit = result.toolCalls.find((call) => call.name === SUBMIT_REVIEW_TOOL);
       if (submit) {
-        const parsed = DriftReportSchema.safeParse(submit.input);
+        // Measured as it will be shown: redacted first, so a field redaction
+        // lengthens is asked for again rather than failing where it lands.
+        const parsed = DriftReportSchema.safeParse(shownReport(submit.input, input.env ?? process.env));
+        // Words past a field's length, and nothing else wrong: handed back to
+        // be condensed, in the same session, naming only the lengths.
+        const long = parsed.success
+          ? []
+          : parsed.error.issues.filter((issue) => issue.code === "too_big" && issue.origin === "string");
+        if (!parsed.success && long.length === parsed.error.issues.length && condenseAsks < MAX_CONDENSE_ASKS) {
+          condenseAsks += 1;
+          session.answer([
+            {
+              call: submit,
+              content:
+                long
+                  .map((issue) => `${issue.path.join(".")} runs past the ${"maximum" in issue ? String(issue.maximum) : ""} characters it may hold`)
+                  .join("; ") +
+                ", measured as the person is shown it, with any credential in it written as [redacted]. " +
+                "Submit the findings again with those fields condensed to fit, leaving out nothing they say.",
+              isError: true,
+            },
+          ]);
+          continue;
+        }
         if (!parsed.success) {
           throw new DraftRejectedError(
             parsed.error.issues.map(
@@ -161,7 +227,7 @@ export async function readDrift(input: DriftInput): Promise<DriftResult> {
 
   if (report === null) {
     throw new PlanningError(
-      `the model did not return its reading within ${MAX_DRIFT_TURNS} turns; try again, or go on to the contract`,
+      `the model did not return its reading within ${MAX_DRIFT_TURNS} turns; try again`,
     );
   }
 

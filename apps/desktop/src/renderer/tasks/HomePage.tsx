@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { formatUsd } from "@perbo/contracts/browser";
 import {
   Button,
@@ -14,24 +14,32 @@ import {
 import { Rename } from "./Rename.js";
 import { timeAgo } from "../time-ago.js";
 import { errorMessage, useAction, useTaskSummary } from "../workspace/index.js";
-import { useCreate, withoutDeleting } from "../shell/create.js";
+import { ConfirmDelete, confirmDeleteFiled, useCreate, useDiscardTicket, withoutDeleting } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
-import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
-import { archiveRows, isArchivable, isArchived, isFiled } from "../../shared/archive.js";
-import { HOME_TONES, HOME_TONE_LABELS, displayKey, homeOrder, homeRows, homeTally, homeTone, projectTicket, stageName, type HomeTone } from "./ticket-workspace.js";
+import { ARCHIVE_SEARCH_MAX_CHARS, type Snapshot, type TaskRow, type TaskSummary } from "../../shared/protocol.js";
+import { archiveRows, isArchivable, isFiled, isMergeDecided } from "../../shared/archive.js";
+import { HOME_TONES, HOME_TONE_LABELS, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
 const lower = (word: string): string => word.toLowerCase();
-/** The tone each Show filter but "all" keeps; "running" is every ticket with none. */
-const SHOW_TONE = { needs: "yellow", running: null, stopped: "red", completed: "green" } as const;
-/** Each tone's count in Home's header: its class and its icon. */
-const HEADER_COUNT: Record<HomeTone, [className: string, icon: InkIconName, size: number]> = {
+/**
+ * The group each Show filter but "all" keeps: "running" is every ticket with
+ * no colour, "merge" the pull requests waiting on the merge decision, and
+ * "completed" only the tickets whose merge is decided.
+ */
+const SHOW_GROUP = { needs: "yellow", running: null, stopped: "red", merge: "green", completed: "decided" } as const;
+/** Each tone's count in Home's header, and the completed count after them: its class and its icon. */
+const HEADER_COUNT: Record<HomeTone | "completed", [className: string, icon: InkIconName, size: number]> = {
   yellow: ["attention-count", "alert", 13],
   red: ["stopped-count", "locked", 12],
-  green: ["completed-count", "approve", 12],
+  green: ["merge-count", "inbox", 12],
+  completed: ["completed-count", "approve", 12],
 };
+
+/** What a card's blue circle says: the ticket needs the person and was not opened since. */
+const UNSEEN = "Not opened since it needed you";
 
 /** `+added −removed · files`, or the honest reason there is none (S4, S5). */
 export function DiffLabel({
@@ -69,21 +77,29 @@ export function DiffLabel({
 function StageRing({
   stage,
   tone = null,
-  complete = false,
+  decided = false,
 }: {
   stage: number;
-  /** The row's colour, which the ring's centre takes and a completed ring is drawn in. */
+  /** The row's colour, which the ring's centre takes. */
   tone?: "green" | "yellow" | "red" | null;
-  complete?: boolean;
+  /** The merge is decided: the ring is whole and holds a check mark where its progress was. */
+  decided?: boolean;
 }) {
-  const share = complete ? 100 : (stage / 6) * 100;
-  const fill = complete ? (tone === "red" ? "var(--red)" : "var(--green)") : "var(--ink)";
+  if (decided)
+    return (
+      <span className="stage-ring stage-ring--green stage-ring--decided" aria-label="Completed">
+        <span>
+          <InkIcon name="approve" size={11} />
+        </span>
+      </span>
+    );
+  const share = (stage / 6) * 100;
   return (
     <span
       className={cx("stage-ring", tone && "stage-ring--" + tone)}
-      aria-label={complete ? "Completed" : `Stage ${stage} of 6`}
+      aria-label={`Stage ${stage} of 6`}
       style={{
-        background: `conic-gradient(${fill} 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
+        background: `conic-gradient(var(--ink) 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
       }}
     >
       <span />
@@ -111,7 +127,8 @@ function TaskCard({
   onRenameChange: (open: boolean) => void;
 }) {
   const { stage, tone, description } = projectTicket(workspace, row);
-  const completed = isArchived(row.ticket.state);
+  // Completed is a decided merge alone: a cancelled or rolled-back ticket is a stop, or work a run carries again.
+  const completed = isMergeDecided(workspace, row);
   const stopped = tone === "red";
   const summary = useTaskSummary(row.repoId, row.ticket.key);
   const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
@@ -123,16 +140,19 @@ function TaskCard({
       ? `merged as ${row.repository}#${row.ticket.delivery.pull_request_number}`
       : row.ticket.state === "closed"
         ? "closed unmerged"
-        : row.ticket.state === "cancelled"
-          ? "cancelled"
-          : row.ticket.state.replaceAll("_", " ");
+        : row.ticket.state.replaceAll("_", " ");
   // A space holds the line's height while the outcome is read, or where there is none.
   const outcome = summary.data?.outcome;
+  // The circle's words reach a screen reader through the card, whose children
+  // a `button` role makes presentational, and show on hover as its title.
+  const unseen = unseenAttention(workspace, row);
+  const unseenId = useId();
   return (
     <article
       role="button"
       tabIndex={0}
       aria-label={title}
+      aria-describedby={unseen ? unseenId : undefined}
       className={cx(
         "task-card",
         tone && "task-card--" + tone,
@@ -149,8 +169,11 @@ function TaskCard({
         }
       }}
     >
+      {unseen && (
+        <span id={unseenId} className="task-card-unseen" role="img" aria-label={UNSEEN} title={UNSEEN} />
+      )}
       <div className="task-card-header">
-        <StageRing stage={stage} tone={tone} complete={completed} />
+        <StageRing stage={stage} tone={tone} decided={completed} />
         <span className="stage-pill">{stopped ? "loop stopped" : completed ? "completed" : stageName(stage)}</span>
         <span className="task-key" title={row.ticket.key}>
           {displayKey(row.ticket.key)}
@@ -208,12 +231,18 @@ function ArchiveRow({
   open,
   rename,
   restore,
+  remove,
+  held,
   title,
 }: {
   row: TaskRow;
   open: (row: TaskRow) => void;
   rename: (row: TaskRow, title: string) => Promise<unknown>;
   restore: (row: TaskRow) => void;
+  /** Ask first, then delete the ticket for good. */
+  remove: (row: TaskRow) => void;
+  /** A command is running for this ticket, which holds its delete as the host does. */
+  held: boolean;
   title: string;
 }) {
   const summary = useTaskSummary(row.repoId, row.ticket.key);
@@ -259,7 +288,26 @@ function ArchiveRow({
             ? "closed unmerged"
             : row.ticket.state}
       </span>
-      <span role="cell">
+      {/* Delete first and to Home at the right: the way back is the row's
+          own action, and a destructive one is never the one at the end. A
+          ticket whose pull request is open is not offered it, as its contract
+          page does not offer it and the host refuses it (D-129): a called-off
+          ticket is filed with its pull request still open, and the delete is
+          offered again once that pull request is merged or closed. */}
+      <span role="cell" className="archive-actions">
+        {row.ticket.state !== "pr_open" && (
+          <button
+            className="text-button small muted archive-delete"
+            aria-label={`Delete ticket: ${title}`}
+            disabled={held}
+            onClick={(event) => {
+              event.stopPropagation();
+              remove(row);
+            }}
+          >
+            Delete
+          </button>
+        )}
         <button
           className="text-button small muted"
           aria-label="Return this ticket to Home"
@@ -287,21 +335,32 @@ export function HomePage({
   const workspace = withoutDeleting(read, create.deleting);
   const [search, setSearch] = useState(""),
     [repoFilter, setRepoFilter] = useState("all"),
-    [homeFilter, setHomeFilter] = useState<"all" | keyof typeof SHOW_TONE>("all"),
+    [homeFilter, setHomeFilter] = useState<"all" | keyof typeof SHOW_GROUP>("all"),
     [outcome, setOutcome] = useState<"all" | "merged" | "closed" | "cancelled">(
       "all",
     ),
     [sort, setSort] = useState<"recent" | "newest" | "oldest" | "title" | "stage">("recent"),
     [page, setPage] = useState(0),
-    [renaming, setRenaming] = useState<string | null>(null);
+    [renaming, setRenaming] = useState<string | null>(null),
+    // The archived ticket whose Delete was pressed and not yet answered.
+    [removing, setRemoving] = useState<TaskRow | null>(null);
+  // Its summary, for the branch its attempts ran on where its delivery names none.
+  const removingSummary = useTaskSummary(removing?.repoId ?? "", removing?.ticket.key ?? "", removing !== null);
+  // Deleted where it is listed: the row leaves the Archive at the click and
+  // the person stays on the Archive; a refusal puts it back and says why below.
+  const discard = useDiscardTicket(action.mutateAsync, () => undefined);
   const searchInput = useRef<HTMLInputElement>(null);
   useShortcut(archive ? "archiveSearch" : "search", () => searchInput.current?.focus());
   const all = homeRows(workspace);
-  // The greeting, the filters and the sort read the three colours the header's
-  // counts and the rail's Home badge read (S4), so no two of them disagree.
+  // The greeting, the filters and the sort read the groups the header's counts
+  // and the rail's Home badge read (S4), so no two of them disagree on where a
+  // ticket stands; the badge counts only those owed a look.
   const tally = homeTally(workspace, all);
-  const toneOf = (row: TaskRow) => homeTone(workspace, row);
-  const running = all.length - tally.green - tally.red;
+  const groupOf = (row: TaskRow) => homeGroup(workspace, row);
+  const running = all.length - tally.green - tally.red - tally.completed;
+  // A ticket whose merge is decided stays below every other under each sort.
+  const decidedLast = (a: TaskRow, b: TaskRow): number =>
+    Number(groupOf(a) === "decided") - Number(groupOf(b) === "decided");
   const archivable = all.filter((row) => isArchivable(workspace, row));
   const open = (row: TaskRow): void => {
     const { primary, screen } = projectTicket(workspace, row);
@@ -357,13 +416,13 @@ export function HomePage({
   const shown = all
     .filter(matches)
     .filter((row) => repoFilter === "all" || row.repoId === repoFilter)
-    .filter((row) => homeFilter === "all" || toneOf(row) === SHOW_TONE[homeFilter]);
+    .filter((row) => homeFilter === "all" || groupOf(row) === SHOW_GROUP[homeFilter]);
   const tasks = archive
     ? archiveRows(workspace, filters)
     : sort === "title"
-      ? shown.sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+      ? shown.sort((a, b) => decidedLast(a, b) || titleOf(a).localeCompare(titleOf(b)))
       : sort === "stage"
-        ? shown.sort((a, b) => projectTicket(workspace, b).stage - projectTicket(workspace, a).stage)
+        ? shown.sort((a, b) => decidedLast(a, b) || projectTicket(workspace, b).stage - projectTicket(workspace, a).stage)
         : homeOrder(workspace, shown, sort === "recent" ? "opened" : sort);
   const repository = workspace.repositories[0],
     pageCount = Math.max(1, Math.ceil(tasks.length / 10)),
@@ -375,14 +434,14 @@ export function HomePage({
         title={archive ? "Archive" : <span className="header-wordmark">perbo</span>}
         subtitle={archive ? filed.length + " archived" : undefined}
       >
-        {/* The rail's Home badge's three counts, in its order (S4). */}
+        {/* Each colour's count, in the order the rail's Home badge shows them (S4), then the completed. */}
         {!archive &&
-          HOME_TONES.map((tone) => {
-            const [className, icon, size] = HEADER_COUNT[tone];
-            return tally[tone] > 0 && (
-              <span key={tone} className={className}>
+          [...HOME_TONES, "completed" as const].map((count) => {
+            const [className, icon, size] = HEADER_COUNT[count];
+            return tally[count] > 0 && (
+              <span key={count} className={className}>
                 <InkIcon name={icon} size={size} />
-                {HOME_TONE_LABELS[tone](tally[tone])}
+                {count === "completed" ? completedLabel(tally[count]) : HOME_TONE_LABELS[count](tally[count])}
               </span>
             );
           })}
@@ -407,7 +466,10 @@ export function HomePage({
                   ? lower(countWord(tally.yellow)) + " waiting on you"
                   : "nothing waiting on you"}
                 {tally.green
-                  ? ` · ${lower(countWord(tally.green))} completed`
+                  ? ` · ${lower(countWord(tally.green))} waiting on your merge decision`
+                  : ""}
+                {tally.completed
+                  ? ` · ${lower(countWord(tally.completed))} completed`
                   : ""}
               </p>
             </div>
@@ -417,6 +479,7 @@ export function HomePage({
               <input
                 ref={searchInput}
                 aria-label="Search running tickets"
+                maxLength={ARCHIVE_SEARCH_MAX_CHARS}
                 placeholder="Search running tickets…"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -432,6 +495,7 @@ export function HomePage({
               <option value="needs">Show · needs you</option>
               <option value="running">Show · running</option>
               <option value="stopped">Show · stopped</option>
+              <option value="merge">Show · waiting on your merge decision</option>
               <option value="completed">Show · completed</option>
             </Dropdown>
             {workspace.repositories.length > 1 && (
@@ -487,6 +551,7 @@ export function HomePage({
             <input
               ref={searchInput}
               aria-label="Search archived tasks"
+              maxLength={ARCHIVE_SEARCH_MAX_CHARS}
               placeholder="Search title, ticket or PR…"
               value={search}
               onChange={(event) => {
@@ -553,6 +618,8 @@ export function HomePage({
                 open={open}
                 rename={rename}
                 restore={(target) => file([target], false)}
+                remove={setRemoving}
+                held={projectTicket(workspace, row).held}
                 title={titleOf(row)}
               />
             ))}
@@ -595,6 +662,21 @@ export function HomePage({
             Create a task
           </Button>
         </div>
+      )}
+      {removing !== null && (
+        // The picker's confirmation, in the words of the stage this ticket is
+        // at, asked here and not by the browser, so the row stays in view.
+        <ConfirmDelete
+          label="Delete ticket"
+          confirm={confirmDeleteFiled(titleOf(removing), removing.ticket, removingSummary.data?.branch)}
+          disabled={action.isPending}
+          keep={() => setRemoving(null)}
+          remove={() => {
+            const row = removing;
+            setRemoving(null);
+            discard(row.repoId, row.ticket.key, () => undefined);
+          }}
+        />
       )}
       {action.error && (
         <div className="workspace-errors">

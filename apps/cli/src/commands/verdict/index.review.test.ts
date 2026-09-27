@@ -388,7 +388,7 @@ describe("a review an attempt filed still resolves through the attempts record",
       { name: "attempt.json", media_type: "application/json", body: JSON.stringify(attempt) },
       { name: "transcript.jsonl", media_type: "application/x-ndjson", body: "" },
     ]);
-    write("review", "rev_open00000002", { changeset_id: "cs_open00000002", decision: "approve", remediation_round: 0 }, [
+    write("review", "rev_open00000002", { attempt_id: "att_open00000000001", changeset_id: "cs_open00000002", decision: "approve", remediation_round: 0 }, [
       { name: "review.json", media_type: "application/json", body: JSON.stringify(ran) },
     ]);
     return { repo, store, key: ranKey };

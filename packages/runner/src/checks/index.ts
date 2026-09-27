@@ -174,7 +174,7 @@ function summarise(stdout: string, stderr: string, code: number | null): string 
   const interesting = lines
     .reverse()
     .find((line) => /\b(passed|failed|error|errors|tests?|files?)\b/i.test(line));
-  return interesting?.slice(0, 120) ?? `exited ${code ?? "unknown"}`;
+  return interesting ?? `exited ${code ?? "unknown"}`;
 }
 
 /** The exit code decides the status; a run that never finished measured nothing. */

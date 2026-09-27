@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { InkIcon, cx } from "../ui/index.js";
-import { curates, panesFor } from "../planning/panes.js";
+import { flowFor } from "../planning/panes.js";
 import type { Snapshot } from "../../shared/protocol.js";
-import { HOME_TONES, HOME_TONE_LABELS, homeRows, homeTally, type HomeTone } from "../tasks/ticket-workspace.js";
+import { HOME_TONES, HOME_TONE_LABELS, homeRows, homeTally, unseenAttention, type HomeTone } from "../tasks/ticket-workspace.js";
 import { useCreate, withoutDeleting } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
 import { RAIL_WIDTH, setRailSize, useRailSize } from "./rail-size.js";
@@ -78,9 +78,11 @@ const BADGE_HOLD = 10_000;
 const BADGE_SWAP = 180;
 
 /**
- * The count on Home's rail icon, one colour at a time (S4): the tickets
- * waiting on a decision in yellow, those whose loop stopped in red, those at
- * the journey's end in green, each in that order for as long as it has any.
+ * The count on Home's rail icon, one colour at a time (S4), of the tickets
+ * that need the person and have not been opened since: those waiting on a
+ * decision in yellow, those whose loop stopped in red, those whose pull
+ * request waits on the merge decision in green, each in that order for as
+ * long as it has any.
  * Each holds ten seconds, then shrinks away and reappears as the next; with
  * one colour it stays, and with none there is no badge.
  */
@@ -126,32 +128,9 @@ function HomeBadge({ tally }: { tally: Record<HomeTone, number> }) {
 }
 
 /**
- * The planning curating a plan whose contract this ticket page shows while the
- * plan waits for approval, as the contract's Back to planning finds it, with
- * no pane of it current; null on any other page of a ticket.
- */
-function contractPlanning(
-  workspace: Snapshot,
-  route: Extract<Route, { page: "task" }>,
-): { sessionId: string; pane: null } | null {
-  if (route.edit || !["auto", "contract"].includes(route.view ?? "auto")) return null;
-  const waiting = workspace.tasks.some(
-    (row) =>
-      row.repoId === route.repoId &&
-      row.ticket.key === route.key &&
-      row.ticket.state === "plan_review" &&
-      row.ticket.approved_at === null,
-  );
-  const curating = workspace.drafts?.find(
-    (draft) => draft.repoId === route.repoId && draft.key === route.key && curates(draft),
-  );
-  return waiting && curating ? { sessionId: curating.id, pane: null } : null;
-}
-
-/**
  * The rail: Create first (D-101), with planning's panes under it while a
- * piece of work is being planned and on the contract of its plan until that
- * is approved, then Home, Archive, and a settings icon
+ * piece of work is being planned — its contract the last of them
+ * (D-NEW-basic-and-epic-flows) — then Home, Archive, and a settings icon
  * that grows upward into a pill of General, Usage and Connections. Outside
  * settings the pill opens on hover or focus; inside settings it stays open
  * and the tab you are on carries the bordered plate. It sits beneath the top
@@ -203,15 +182,13 @@ export function Rail({
     return undefined;
   }, [open]);
   const create = useCreate();
-  // Counted over what Home lists, work being deleted left out as Home leaves it.
+  // Counted over what Home lists, work being deleted left out as Home leaves
+  // it, and only what needs the person and was not opened since.
   const visible = withoutDeleting(workspace, create.deleting);
-  const tally = homeTally(visible, homeRows(visible));
-  // The planning whose panes sit under Create: the one open, or the one whose
-  // plan's contract is open awaiting approval, its panes each going back to
-  // planning as the contract's Back to planning does, landing on that pane
-  // (D-130). Approved, the contract is frozen and has none.
-  const planning =
-    route.page === "planning" ? route : route.page === "task" ? contractPlanning(workspace, route) : null;
+  const tally = homeTally(visible, homeRows(visible).filter((row) => unseenAttention(visible, row)));
+  // The planning whose panes sit under Create: the one open, which offers
+  // the panes `flowFor` says (D-NEW-basic-and-epic-flows).
+  const planning = route.page === "planning" ? route : null;
   // A repository's question page is Create's own page: Create is lit there,
   // and there is no planning, so no panes under it, until it is answered
   // (D-131).
@@ -250,7 +227,7 @@ export function Rail({
         </button>
         {planning && (
           <div className="rail-children" role="group" aria-label="Planning panes">
-            {panesFor(workspace.drafts, planning.sessionId).map((pane) => (
+            {flowFor(workspace, planning.sessionId, planning.pane).panes.map((pane) => (
               <button
                 key={pane.id}
                 className={cx("rail-item", "rail-child", planning.pane === pane.id && "selected")}

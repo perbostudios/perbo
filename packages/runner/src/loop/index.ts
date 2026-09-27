@@ -14,6 +14,7 @@ import {
 import { cleanup, type Workspace } from "@perbo/workspace";
 import { PROMPT_VERSION } from "@perbo/review";
 import { Ledger } from "./internal/ledger.js";
+import { RunTally } from "../tally.js";
 import { acquireRunLock, type HeldRunLock } from "../lock.js";
 import { pathsWithConflictMarkers } from "./internal/merge-up.js";
 import { sweepWorktree } from "./internal/orphans.js";
@@ -101,6 +102,11 @@ export { resolvePorts, type LoopPorts, type RunLimits } from "./internal/context
 export { incompleteReviewCauses } from "./internal/review.js";
 export { type DecidedFinding } from "../decisions.js";
 export { type RoundKind, type RoundRecord, type RunOutcome } from "./internal/state.js";
+export {
+  publishRetained,
+  type RetainedPublishRequest,
+  type RetainedPublishResult,
+} from "./internal/retained.js";
 
 export {
   BaseSourceSchema,
@@ -248,7 +254,14 @@ async function runLockedTicket(
   const { config } = args;
   const clock = args.now ?? (() => new Date());
   const wait = args.sleep ?? ((ms: number) => setTimeout(ms));
-  const progress = args.onProgress ?? (() => undefined);
+  const onProgress = args.onProgress ?? (() => undefined);
+  /**
+   * Every message on one physical line. A message can carry text the run did
+   * not write — a refused command, a check's output — and a line break in it
+   * would print a line of its own that reads as one of the runner's stages or
+   * its tally (ADR-0023).
+   */
+  const progress = (message: string): void => onProgress(message.replace(/\r\n|[\n\r\u2028\u2029]/g, " "));
   const ports = resolvePorts(config, args.hooks);
   const agentRunner = ports.agent;
   const reviewRunner = ports.review;
@@ -280,6 +293,13 @@ async function runLockedTicket(
     previousRunAccount,
   } = started.record;
   const ledger = new Ledger({ path: attemptsPath, prior: priorAttempts, ticketId: contract.ticket_id });
+  /** What the run has done so far, printed as its `tally:` line whenever a figure moves (D-104). */
+  const tally = new RunTally({
+    bundles,
+    ticketId: contract.ticket_id,
+    before: priorAttempts?.attempts ?? [],
+    progress,
+  });
 
   const {
     workspace,
@@ -335,7 +355,7 @@ async function runLockedTicket(
    * Read before the loop so the first round's brief is the right one — the
    * ticket's own outcome, or the findings its last review left open. An
    * explicit `--resume-from` says what the run is for and is not overridden:
-   * that run is continuing a cut attempt's diff, not a review's findings.
+   * that run is continuing a stopped attempt's work, not a review's findings.
    *
    * Whether the branch is still at the commit that review judged is checked in
    * the loop, against the branch itself.
@@ -470,6 +490,7 @@ async function runLockedTicket(
         detail = briefed.end.detail;
         break;
       }
+      state = { ...state, resumeOutcome: briefed.brief.resumeOutcome };
       const { prior_commits, toClose, pathsAllowed } = briefed.brief;
 
       const executed = await execute({
@@ -483,6 +504,7 @@ async function runLockedTicket(
         secrets,
         agent: agentRunner,
         progress,
+        tally: (running) => tally.attempt(running),
       });
       if ("next" in executed) {
         state = applyStep(state, executed);
@@ -553,6 +575,7 @@ async function runLockedTicket(
         progress,
       });
       state = recorded.state;
+      tally.recount(ledger.attempts);
       const { attempt, termination, declines, widened, scopeGiven, reset, park, parkMs } = recorded;
 
       /** This round's record where no review and no verification judged it. */
@@ -690,6 +713,7 @@ async function runLockedTicket(
           clock,
           progress,
         });
+        tally.recount(ledger.attempts);
         state = applyStep(state, verificationStep);
         if (verificationStep.next === "stop") {
           outcome = verificationStep.end.outcome;
@@ -715,9 +739,13 @@ async function runLockedTicket(
         configPath,
         secrets,
         review: reviewRunner,
+        waitBoundMs,
+        wait,
+        parked: (park) => lock.parked(park),
         clock,
         progress,
       });
+      tally.recount(ledger.attempts);
       state = reviewed.state;
       if (reviewed.escalated) outcome = "escalated";
       const reviewStep = reviewed.step;
@@ -815,8 +843,9 @@ async function runLockedTicket(
         config,
         contract,
         state,
-        ledger,
         attempts: delivered,
+        verificationCosts: ledger.verificationCosts,
+        declines: ledger.declines,
         rootAttemptId: deliveredUnder,
         finalReview: state.finalReview,
         detail,

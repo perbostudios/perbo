@@ -212,6 +212,7 @@ function storeWithNodeReviews(): { repo: string; store: string } {
     subject_id: "rev_0000000000000f01",
     ticket_id: TICKET_ID,
     inputs: {
+      attempt_id: ATTEMPT,
       changeset_id: "cs_graph00000001",
       base_commit: "a1b2c3d",
       head_commit: "b2c3d4e",
@@ -298,6 +299,7 @@ function storeWithNodeReviewsNoChecks(): { repo: string; store: string } {
     subject_id: "rev_0000000000000f02",
     ticket_id: TICKET_ID,
     inputs: {
+      attempt_id: NO_CHECKS_ATTEMPT,
       changeset_id: "cs_graph00000002",
       base_commit: "a1b2c3d",
       head_commit: "b2c3d4e",
@@ -373,6 +375,7 @@ function storeWithReviewButNoNodeReviewsArtifact(): { repo: string; store: strin
     subject_id: "rev_0000000000000f03",
     ticket_id: TICKET_ID,
     inputs: {
+      attempt_id: "att_graphed000003",
       changeset_id: "cs_graph00000003",
       base_commit: "a1b2c3d",
       head_commit: "b2c3d4e",

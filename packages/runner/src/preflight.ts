@@ -69,8 +69,8 @@ export interface PreflightRequest {
    * an `agentBinary` but does not know which transport it is, or has none.
    */
   agentProvider: "claude-cli" | "codex-cli" | null;
-  /** Which reviewer transport the run will use. */
-  reviewerProvider: ModelProvider;
+  /** Which reviewer transport the run will use; null where nothing is reviewed. */
+  reviewerProvider: ModelProvider | null;
   /** Whether the run will push and open a pull request through `gh`. */
   needsGh: boolean;
   /**

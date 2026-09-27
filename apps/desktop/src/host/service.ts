@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { TicketSchema } from "@perbo/contracts";
 import type {
@@ -22,7 +23,7 @@ import { discoverModels } from "./model-catalog.js";
 import { ModelCatalogs } from "./providers/catalogs.js";
 import { ChangeMarks } from "./plan/marks.js";
 import { DriftReadings } from "./plan/drift.js";
-import { repositorySpecs, specTitles } from "./plan/spec.js";
+import { draftedReading, repositorySpecs, specTexts } from "./plan/spec.js";
 import { draftedFrom } from "./tickets/work.js";
 import { probeProviders } from "./providers/status.js";
 import { readStanding, specFolder, writeStanding } from "./repository/config.js";
@@ -31,6 +32,7 @@ import type { SpecDeps } from "./plan/spec.js";
 import {
   ContractEditing,
   openDrafts,
+  readingStateOf,
   type EditingOwner,
 } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "./workspace-reads.js";
@@ -81,6 +83,11 @@ export interface ServiceOptions {
    * provably after the ending they are asserting about.
    */
   specSettleMs?: number;
+  /**
+   * The wait between tries of a reading of the plan against its spec that
+   * did not run; injected by tests, which make it instant.
+   */
+  readingPause?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -182,7 +189,7 @@ export class DesktopService {
         converse: (id, line, at) => this.editing.converse(id, line, at),
         recordInterview: (id, session, provider, model) =>
           this.editing.recordInterview(id, session, provider, model),
-        recordSpec: (id, slug, cut) => this.editing.recordSpec(id, slug, cut),
+        recordSpec: (id, slug) => this.editing.recordSpec(id, slug),
         architectTitled: (id, title) => this.editing.architectTitled(id, title),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
@@ -210,6 +217,7 @@ export class DesktopService {
         landDrift: (id, verdict, overlapped, say, asking) =>
           this.editing.landDrift(id, verdict, overlapped, say, asking),
         clearDrift: (id) => this.editing.clearDrift(id),
+        recordRead: (id, state) => this.editing.recordRead(id, state),
       },
       sessions: () => this.state.editingSessions,
       repository: (id) => this.repository(id),
@@ -218,6 +226,14 @@ export class DesktopService {
       jobs: this.jobs,
       cli: this.cli,
       models: (repoId, key) => this.state.taskModels[repoId + ":" + key] ?? this.state.settings,
+      pause: options.readingPause ?? (async (ms) => void (await delay(ms))),
+      state: (id) => {
+        try {
+          return readingStateOf(this.editing.read(id), specTexts((repoId) => this.repository(repoId)));
+        } catch {
+          return null;
+        }
+      },
       interview: {
         working: (id) => this.interviews.isWorking(id),
         say: (id, line) => this.interviews.say(id, line),
@@ -260,6 +276,7 @@ export class DesktopService {
       },
       id: randomUUID,
       specFolder: (repoId) => specFolder(this.repository(repoId)),
+      drafted: (record) => draftedReading((id) => this.repository(id), record),
       standing: (repoId) => readStanding(this.repository(repoId)),
       setStanding: (repoId, entries) => {
         const repo = this.repository(repoId);
@@ -328,13 +345,14 @@ export class DesktopService {
         taskModels: this.state.taskModels,
         sequence: this.changes.sequence,
         archived: this.state.archived,
+        calledOff: this.state.calledOff,
         asks: this.state.asks,
         lastOpened: this.state.lastOpened,
         power: this.power.state,
         repositoryErrors: Object.fromEntries(
           records.map((entry) => [entry.repository.id, entry.errors]),
         ),
-        drafts: openDrafts(this.state.editingSessions, specTitles((id) => this.repository(id))),
+        drafts: openDrafts(this.state.editingSessions, specTexts((id) => this.repository(id))),
         specs: this.state.repositories.flatMap((repo) => {
           try {
             return repositorySpecs(this.repository(repo.id));

@@ -59,6 +59,36 @@ for a person takes any, `answersReview`, which says which review an answer answe
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
 
+`spoken.ts` is the single home for an agent's words as a run prints them while it works: one
+progress line per turn, carrying the whole turn with its line breaks escaped so it stays one
+physical line, and marked with whose words they are, which the runner's adapters and review stage
+write and the desktop's Watch page reads back, breaks restored, to show them as they arrive. A line is words to show and nothing else ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)).
+`oneLine` is that folding on its own, for a line of the runner's that carries text it did not
+write, such as a command or a test's name. It imports nothing, so the renderer takes it from `@perbo/contracts/browser`.
+
+`tally.ts` is the single home for the tally a run prints while it works: one progress line,
+printed again whenever a figure on it moves, carrying the run's commands, the paths it changed
+that no earlier attempt of the ticket had, and the tokens and dollars each provider reported, each
+over the whole run so the latest line alone is enough. The runner's loop writes it with `tallyLine`
+and the desktop's loop page reads it with `readTally`; every figure is Perbo's own count or a
+provider's number, never read from an agent's words
+([D-104](../../docs/11-open-decisions.md), [ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)).
+It imports nothing, so the renderer takes it, and `costOf` and `rollCosts` beside it, from
+`@perbo/contracts/browser`.
+
+`retained.ts` is the single home for whether a ticket's last run retained a branch to publish
+([D-NEW-publish-a-retained-branch-later](../../docs/11-open-decisions.md)): `retainedBranch`
+reads it from the ticket alone, as the branch and the outcome the ticket records for that run or the
+refusal that says why there is none, and `gateClosedNote` is the row an escalated run writes that
+it reads back. `perbo run --publish-retained` refuses with that refusal, and the desktop's merge
+screen says it; it imports only the ticket's types, so the renderer takes it from
+`@perbo/contracts/browser`.
+
+`ticket-transitions.ts` is the single home for the ticket lifecycle's rows, `TICKET_TRANSITIONS`:
+`transition` in `ticket.ts` refuses a move with no row, `perbo run` walks and reopens a ticket along
+them, and the desktop's sample host moves its tickets by the same rows. It imports only the ticket's
+types, so the renderer takes it from `@perbo/contracts/browser`.
+
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays
 scoreable — a plain default would silently relabel every blocking finding in an older artifact as

@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { sizeEstimate } from "@perbo/contracts/browser";
-import { GraphPane } from "./GraphPane.js";
+import { GraphPane, OutsidePathsForTests } from "./GraphPane.js";
 import { bridge } from "../workspace/index.js";
 import { editingForm } from "../../shared/contract-editing.js";
 import { EditingSessionSchema } from "../../shared/protocol.js";
@@ -16,10 +18,11 @@ const sessionId = "90000000-0000-4000-8000-000000000002";
 const jobId = "90000000-0000-4000-8000-000000000003";
 const key = "PRB-901";
 
-afterEach(() => { vi.useRealTimers(); cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); cleanup(); vi.restoreAllMocks(); nodes = []; });
 
+let nodes: GraphView["nodes"] = [];
 const graph = (): GraphView => ({
-  key, state: "planning", approved: false, outcome: "A sample plan", nodes: [], criteria: [],
+  key, state: "planning", approved: false, outcome: "A sample plan", nodes, criteria: nodes.flatMap((node) => node.criteria),
   edges: [], pathsAllowed: [], size: sizeEstimate({ nodes: 0, criteria: 0, files: 0, packages: 0 }),
   editCount: 0, history: [], digest: "0".repeat(64),
   live: { attempt: null, nodes: [], outside: [], note: null },
@@ -31,7 +34,7 @@ async function pane() {
   const editor: ReturnType<typeof useContractEditing> = {
     session: EditingSessionSchema.parse({
       version: 1, id: sessionId, repoId, key, digest: null, revision: 0, resumeNew: false,
-      lastPane: null, lastView: null, specCut: null, named: null, drift: null, change: null, interviewModel: null,
+      lastPane: null, confirmed: null, read: null, impact: null, named: null, drift: null, change: null, interviewModel: null,
       form, phase: "editing", error: null, operation: null,
     }),
     form, repoId, record: undefined, loading: false, saving: false, submitting: null, error: null,
@@ -82,5 +85,42 @@ describe("the Graph pane's reads", () => {
       view.emit({ kind: "progress", sequence, job: { ...job(), log: "progress " + String(sequence) } });
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(view.reads()).toBe(1);
+  });
+});
+
+describe("a node on the Graph pane (D-NEW-basic-and-epic-flows)", () => {
+  it("says under its title how many criteria it covers and the paths expected to satisfy them", async () => {
+    const criterion = { id: "ac_1", text: "It holds.", kind: "test" as const, assertion: "It holds.", requirement: null, manual: null };
+    nodes = [{ id: "node_1", title: "First part", criteria: [criterion], paths: ["src/a/**", "src/b.ts"], page: null }];
+    await pane();
+    const node = await screen.findByRole("button", { name: "Node node_1: First part" });
+    expect(node.textContent).toContain("1 criterion · src/a/** · src/b.ts");
+  });
+});
+
+/**
+ * The bar of paths changed outside every node holds two rows of chips however
+ * many there are: the list scrolls past them, so the graph above keeps its
+ * height, and every path is still in it and reachable from the keyboard.
+ */
+describe("the paths changed outside every node", () => {
+  it("scroll inside a bar of fixed height, every one of them kept", () => {
+    const sheet = document.createElement("style");
+    sheet.textContent = readFileSync(join(import.meta.dirname, "..", "styles.css"), "utf8");
+    document.head.append(sheet);
+    try {
+      const outside = Array.from({ length: 40 }, (_, index) => `src/changed/file-${String(index)}.ts`);
+      render(<OutsidePathsForTests outside={outside} note={null} />);
+      expect(screen.getByText("Changed outside every node · 40")).toBeTruthy();
+      const list = screen.getByRole("region", { name: "Paths changed outside every node" });
+      expect(list.className).toContain("outside-paths");
+      expect(list.tabIndex).toBe(0);
+      const style = getComputedStyle(list);
+      expect(style.overflowY).toBe("auto");
+      expect(style.height).toContain("--outside-chip-row");
+      expect([...list.querySelectorAll(".path-chip")].map((chip) => chip.textContent)).toEqual(outside);
+    } finally {
+      sheet.remove();
+    }
   });
 });

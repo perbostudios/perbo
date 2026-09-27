@@ -61,3 +61,13 @@ export function graphColumns(
   }
   return Array.from(columns, (column) => column ?? []);
 }
+
+/**
+ * What a node's card says under its title: how many criteria it covers and
+ * the paths expected to satisfy them, on the Graph pane and on the contract's
+ * graph alike (D-NEW-basic-and-epic-flows).
+ */
+export function nodeSummary(node: { criteria: readonly unknown[]; paths: readonly string[] }): string {
+  const count = `${node.criteria.length} ${node.criteria.length === 1 ? "criterion" : "criteria"}`;
+  return node.paths.length > 0 ? `${count} · ${node.paths.join(" · ")}` : count;
+}

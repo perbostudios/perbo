@@ -246,7 +246,7 @@ export const DEFAULT_SHORTCUTS: readonly ShortcutDefinition[] = [
   },
   {
     action: "openPullRequest",
-    label: "Open the pull request",
+    label: "Open the pull request, pushing a retained branch first",
     group: "fixed",
     binding: "Shift+Meta+M",
     fixed: true,

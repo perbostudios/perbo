@@ -31,6 +31,7 @@ export type { DraftModelRecord } from "./model-record.js";
 export { assertNodePagesWritable, writeNodePages } from "./node-pages.js";
 export {
   EMPTY_SPEC_TEXT,
+  firstSentence,
   requirementNodes,
   SpecConflict,
   specTitleFromMessage,
@@ -38,3 +39,5 @@ export {
 export type { Spec } from "./spec-text.js";
 export { assertNoSymlink, readSpecText, retitleSpecFile, writeSpecFile } from "./spec-write.js";
 export { parseSpec, readSpecFile } from "./spec.js";
+export { keptTitleRefusal, ticketName } from "./ticket-name.js";
+export type { TicketNaming } from "./ticket-name.js";

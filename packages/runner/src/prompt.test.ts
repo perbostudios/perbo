@@ -202,7 +202,7 @@ describe("the executor's brief states the two SCP-201 refusals", () => {
   });
 
   it("moved the version with the two sentences", () => {
-    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v13");
+    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v14");
   });
 });
 
@@ -269,7 +269,7 @@ describe("the remediation brief carries the D-065 protocol", () => {
   it("moved the version with the protocol", () => {
     // The version tracks the one prompt the constant names, not the ticket
     // that last moved it, so every brief's assertion moves with any of them.
-    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v13");
+    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v14");
   });
 });
 
@@ -302,7 +302,7 @@ describe("the executor's brief names the edits the guard always reads", () => {
   });
 
   it("moved the version with the sentence", () => {
-    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v13");
+    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v14");
   });
 });
 
@@ -340,6 +340,6 @@ describe("the executor's brief names the subagents it may start", () => {
   });
 
   it("moved the version with the section", () => {
-    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v13");
+    expect(EXECUTOR_PROMPT_VERSION).toBe("executor_v14");
   });
 });

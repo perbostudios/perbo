@@ -14,7 +14,7 @@ A worktree is provisioned and then **materialized** from an explicit contract.
 1. **Materialization manifest.** The repository declares the files and directories every worktree needs that git does not track: the `.env` family, local certificates, seed data, tool caches. `perbo doctor` proposes the manifest by inspecting the person's checkout, and the person confirms it.
 2. **Secrets stay local.** Materialized secrets are copied by the runner on the person's machine and are excluded from every change set, run bundle, log and artifact by content hash, not by filename alone ([D-012](../11-open-decisions.md)).
 3. **The install strategy is declared.** A shared package-manager store with offline-preferred installs is the default.
-4. **Parallel attempts are isolated or serialized.** Each attempt records its allocated port range in its lease, where a concurrent attempt can see it. Where a repository cannot be isolated, its attempts run one at a time.
+4. **Parallel attempts are isolated or serialized.** Each attempt records its allocated port range in its lease, where a concurrent attempt can see it. A repository that cannot be isolated sets `concurrent_local_attempts` to 1 in its limits, and its attempts run one at a time ([D-049](../11-open-decisions.md)).
 
 ## Consequences
 

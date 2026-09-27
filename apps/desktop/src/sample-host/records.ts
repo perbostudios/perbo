@@ -18,6 +18,8 @@ import {
   retitleSpec,
   specSlug,
   specTitleFromMessage,
+  keptTitleRefusal,
+  ticketName,
   undoGraphEdit,
   type GraphEditOutcome,
   type Spec,
@@ -31,8 +33,8 @@ import {
   isNeverReadPath,
   planNodes,
   planSizeCounts,
-  sameName,
   sizeEstimate,
+  TICKET_TRANSITIONS,
   type ApproachRecord,
   type EffortLevel,
   type StandingProhibitedEntry,
@@ -43,19 +45,23 @@ import {
   interviewProviderFor,
   keepsPersonsTitle,
   REREAD_COULD_NOT_START,
+  readingStateOf,
   sectionsOf,
   specFindings,
+  redraftedSince,
   turnOverlapped,
   type EditingOwner,
   type PromisePair,
+  type SpecReader,
   type TurnMark,
 } from "../shared/contract-editing.js";
 import { ChangeMarks } from "../shared/change-marks.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
-import { busyMessage, exclusiveJob, heldRepository, isLive, journal, lane } from "../shared/jobs.js";
+import { calledOffPrefix } from "../shared/archive.js";
+import { busyMessage, heldTicket, inTheWay, isLive, journal } from "../shared/jobs.js";
 import {
   DELETE_TICKET_GONE,
-  DELETE_WAITS_FOR_COMMANDS,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
   deletePullRequestOpen,
 } from "../shared/discard.js";
 import type {
@@ -250,6 +256,10 @@ function sample(number: number, title: string, state: Ticket["state"]): Ticket {
         : null,
       observed_at: at,
       branch: "retry-activation-email",
+      // The loop's own delivery, as the host's schema reads a record that
+      // names no other: what a merge press asks before it publishes.
+      opened_by: ["pr_open", "merged", "closed"].includes(state) ? "loop" : null,
+      arm: "loop",
     },
     history: [],
   } as unknown as Ticket;
@@ -371,6 +381,7 @@ export const initial: Snapshot = {
   lastOpened: {},
   // Every sample ticket that finished before today is filed; #409 stays on Home in green until it is archived by hand (S4).
   archived: archive.filter((row) => row.ticket.key !== "PRB-409").map((row) => row.repoId + ":" + row.ticket.key),
+  calledOff: [],
   power: { holding: false, detail: null, since: null },
 };
 /** The boards' branch and diff figures, per sample ticket; everything else gets a small deterministic diff. */
@@ -419,6 +430,7 @@ export const snapshot: Snapshot = new URLSearchParams(location.search).has("empt
       repositories: [],
       tasks: [],
       archived: [],
+      calledOff: [],
     }
   : initial;
 export const sampleManifests = new Map<
@@ -447,11 +459,53 @@ export const emit = (input: ChangeInput = { kind: "records", repoId: null, key: 
 };
 /** The preferences as they now stand, as the host announces them after any of them changes. */
 export const emitPreferences = (): void =>
-  emit({ kind: "preferences", settings: snapshot.settings, asks: snapshot.asks ?? {}, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [] });
+  emit({ kind: "preferences", settings: snapshot.settings, asks: snapshot.asks ?? {}, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [], calledOff: snapshot.calledOff ?? [] });
 export function ticketRow(key: string): TaskRow {
   const row = snapshot.tasks.find((row) => row.ticket.key === key);
   if (!row) throw new Error("Sample task not found.");
   return row;
+}
+/** Whether the lifecycle has a row taking `ticket` from `from` to `to` with this note, its guard read against the ticket. */
+const rowAllows = (ticket: Ticket, from: Ticket["state"], to: Ticket["state"], note: string): boolean =>
+  TICKET_TRANSITIONS.some((row) => row.from === from && row.to === to && (row.when?.(ticket, note) ?? true));
+
+/**
+ * Move a sample ticket as the CLI moves one: through `steps`, the states a
+ * run's result proves, each a row the lifecycle allows (`TICKET_TRANSITIONS`)
+ * and each its own history row with its note, then when it last moved. A step
+ * with no row refuses the whole move and leaves the ticket where it was.
+ */
+export function moveTicket(ticket: Ticket, steps: readonly { to: Ticket["state"]; note: string }[]): void {
+  const walk = steps.map((step, index) => ({ from: index === 0 ? ticket.state : steps[index - 1]!.to, ...step }));
+  const refused = walk.find((step) => !rowAllows(ticket, step.from, step.to, step.note));
+  if (refused) throw new Error(`${ticket.key} cannot move from ${refused.from} to ${refused.to}: the lifecycle has no row for it.`);
+  const now = new Date().toISOString();
+  ticket.history = [...ticket.history, ...walk.map((step) => ({ at: now, ...step }))];
+  ticket.state = walk.at(-1)?.to ?? ticket.state;
+  ticket.updated_at = now;
+}
+
+/**
+ * Bring a sample ticket back to `ready` for a new attempt as `perbo run`
+ * reopens one: by the shortest route the lifecycle's rows allow, each state
+ * on the way noted as reopened through, and `ready` with `note`. A ticket the
+ * rows give no route back is refused, and left where it was.
+ */
+export function reopenTicket(ticket: Ticket, note: string): void {
+  const noteFor = (to: Ticket["state"]): string => (to === "ready" ? note : `reopened through ${to} to start a new attempt`);
+  const queue: Ticket["state"][][] = [[]];
+  const seen = new Set<Ticket["state"]>([ticket.state]);
+  while (queue.length > 0) {
+    const route = queue.shift()!;
+    const from = route.at(-1) ?? ticket.state;
+    for (const row of TICKET_TRANSITIONS) {
+      if (row.from !== from || seen.has(row.to) || !rowAllows(ticket, from, row.to, noteFor(row.to))) continue;
+      if (row.to === "ready") return moveTicket(ticket, [...route, row.to].map((to) => ({ to, note: noteFor(to) })));
+      seen.add(row.to);
+      queue.push([...route, row.to]);
+    }
+  }
+  throw new Error(`${ticket.key} is ${ticket.state}, which the lifecycle has no route out of back to ready.`);
 }
 export function applyDraft(ticket: Ticket, draft: Draft): void {
   const plan = plans.get(ticket.key)!;
@@ -617,6 +671,7 @@ export function detail(key: string): Detail {
     costBasis: "sample",
     partial: false,
     ceilings: [{ resource: "attempt_commands", used: 23, ceiling: 40, hit: false }],
+    admittedCommands: 21,
     review: reviewFor(key),
     reviewDecision: "escalate",
     changes: sampleChanges,
@@ -741,6 +796,7 @@ const LABELS: Record<string, string> = {
   decide: "Run engineering loop",
   doctor: "Check repository readiness",
   sync: "Refresh delivery from GitHub",
+  publish: "Open the pull request",
   principle: "Record a product decision",
   verdict: "Record finding feedback",
 };
@@ -748,13 +804,14 @@ export function job(
   kind: string,
   repository: string,
   key: string | null,
-  operation: (job: Job) => void,
+  /** The job's work; a promise it returns is what the job waits on. */
+  operation: (job: Job) => void | Promise<void>,
   delay = 1000,
   owner?: EditingOwner,
   /** Called once the job has settled and been said, however it ended. */
   settled?: () => void,
 ): Job {
-  const blocking = lane(kind) === "exclusive" ? exclusiveJob(snapshot.jobs) : undefined;
+  const blocking = inTheWay(snapshot.jobs, { repoId: repository, key, kind });
   if (blocking) throw new Error(busyMessage(blocking.label));
   const job: Job = {
     id: crypto.randomUUID(),
@@ -774,24 +831,49 @@ export function job(
   snapshot.jobs = journal([...snapshot.jobs, job]);
   if (owner) editing.started(owner, job);
   emit({ kind: "progress", job });
+  const failed = (error: unknown): void => {
+    job.state = "failed";
+    job.error = String(error instanceof Error ? error.message : error);
+  };
+  const end = (): void => {
+    job.endedAt = new Date().toISOString();
+    void editing.settled(job).catch((error: unknown) => {
+      job.error = String(error);
+      job.state = "failed";
+    }).finally(() => {
+      emit({ kind: "records", repoId: repository, key: job.resultKey ?? key, job });
+      settled?.();
+    });
+  };
   setTimeout(
     () => {
       if (job.state !== "running") return;
+      let pending: void | Promise<void>;
       try {
-        operation(job);
-        job.state = "completed";
+        pending = operation(job);
       } catch (error) {
-        job.state = "failed";
-        job.error = String(error instanceof Error ? error.message : error);
+        failed(error);
+        end();
+        return;
       }
-      job.endedAt = new Date().toISOString();
-      void editing.settled(job).catch((error: unknown) => {
-        job.error = String(error);
-        job.state = "failed";
-      }).finally(() => {
-        emit({ kind: "records", repoId: repository, key: job.resultKey ?? key, job });
-        settled?.();
-      });
+      if (pending === undefined) {
+        job.state = "completed";
+        end();
+        return;
+      }
+      // A job stopped while its work was pending was settled by the stop.
+      pending.then(
+        () => {
+          if (job.state !== "running") return;
+          job.state = "completed";
+          end();
+        },
+        (error: unknown) => {
+          if (job.state !== "running") return;
+          failed(error);
+          end();
+        },
+      );
     },
     new URLSearchParams(location.search).has("slow") ? 8000 : delay,
   );
@@ -1168,6 +1250,28 @@ if (specFiles()[stoppedSlug] === undefined)
  * plan's promise texts, and held while neither moves.
  */
 export const driftRecords = new Map<string, DriftVerdict>();
+
+/**
+ * One try at reading a sample plan against its spec, and the wait between
+ * tries of one that did not run, as the host tries `perbo drift` until it
+ * runs (D-NEW-basic-and-epic-flows). A try throws where the reading does not
+ * run — here, a spec that cannot be read, as `perbo drift` fails on one.
+ * Tests replace either, to make a try fail or the wait instant.
+ */
+export const sampleReadings = {
+  attempt(slug: string | undefined): void {
+    if (slug !== undefined && specFiles()[slug] === undefined) throw new Error(`specs/${slug}/spec.md could not be read.`);
+  },
+  pause: (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms)),
+};
+/**
+ * The sample tickets whose plan a person has edited by hand since it was
+ * drafted — on a basic ticket's contract page or in an epic's Graph pane — as
+ * `perbo drift --dismiss` reads it off the edit log in `<KEY>.draft.json`:
+ * the chat's edits are not here, and a re-draft empties it for its ticket.
+ * A dismissal is refused for a ticket in it (D-NEW-basic-and-epic-flows).
+ */
+export const handEdited = new Set<string>();
 /**
  * A sample digest: the shape `perbo drift` keys its record by, over the same
  * bytes, so a verdict holds and lets go exactly when the real one would. Not
@@ -1225,8 +1329,8 @@ export function sampleDriftFindings(key: string): DriftFinding[] {
   plan.acceptance_criteria.forEach((criterion, index) => {
     const cited = stated.find((each) => each.id === criterion.requirement_id);
     if (cited === undefined) {
-      // A criterion that cites nothing — a compile on the Plan pane numbers
-      // them afresh — answers a requirement in the same words, or promises
+      // A criterion that cites nothing — a compile of a basic ticket's
+      // criteria on its contract numbers them afresh — answers a requirement in the same words, or promises
       // something the spec does not ask for.
       const worded = stated.find((each) => each.text.trim() === criterion.text.trim());
       if (worded !== undefined) {
@@ -1417,6 +1521,13 @@ export function writeGraphEdit(
     log.filter((edit) => edit.author === "you" && !edit.replaced).flatMap((edit) => edit.changes),
   ).size;
   ticket.updated_at = new Date().toISOString();
+  // The plan as it now reads, on every planning over the ticket, as the host
+  // leaves it after an edit: what a confirm compares with the last reading is
+  // the plan the planning holds.
+  const now = detail(key);
+  for (const record of editingRecords())
+    if (record.key === key && record.phase !== "discarded")
+      editing.countNodes(record.id, planNodes(now.contract).length, now.digest, now);
 }
 
 /** `perbo edit --undo <n>`, with D-100's rule about a later edit in the way. */
@@ -1562,22 +1673,40 @@ export function graphView(repoId: string, key: string): GraphView {
 }
 
 /**
- * What a ticket drafted from a spec is called, as `admit` calls it where
- * nothing drafted a name, which is always here because the sample has no
- * drafter: the spec's title, unless another ticket in the repository carries
- * it, else the plan's outcome (D-127). With `keepTitle`, as `admit
- * --keep-title` calls it, the spec's title is the person's name and stands
- * whatever another ticket is called.
- * Read after the plan is drafted, which is where the outcome comes from.
+ * What a ticket drafted from a spec is called, by `ticketName` as `admit`
+ * calls it (D-127), where nothing drafted a name, which is always here
+ * because the sample has no drafter: the spec's title, then the plan's
+ * outcome's first sentence, each passed over where another ticket in the
+ * repository carries it or it runs past the cap, then numbered, then the key.
+ * With `keepTitle` the spec's title stands as the person gave it. Read after
+ * the plan is drafted, which is where the outcome comes from.
  */
 function specTicketName(repo: string, key: string, markdown: string, keepTitle: boolean): string {
-  const title = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
-  const taken =
-    !keepTitle &&
-    snapshot.tasks.some(
-      (row) => row.repoId === repo && row.ticket.key !== key && sameName(row.ticket.title, title),
-    );
-  return title.length > 0 && !taken ? title : plans.get(key)!.outcome;
+  return ticketName({
+    drafted: "",
+    specTitle: readSpecSections(markdown).text.title,
+    outcome: plans.get(key)!.outcome,
+    taken: snapshot.tasks
+      .filter((row) => row.repoId === repo && row.ticket.key !== key)
+      .map((row) => row.ticket.title),
+    key,
+    keepTitle,
+  });
+}
+
+/**
+ * Whether a plan drafted from this spec keeps the person's title, as the host
+ * adds `--keep-title` (D-127): where `planning` records the person titling the
+ * spec and it still states that title. One past the cap is refused in
+ * `admit`'s words, before anything is drafted, as `admit` refuses it before a
+ * model is asked.
+ */
+export function keepsSpecTitle(markdown: string, planning: EditingSession | undefined): boolean {
+  const title = readSpecSections(markdown).text.title;
+  const keep = planning !== undefined && keepsPersonsTitle(planning, title);
+  const refusal = keep ? keptTitleRefusal(title) : null;
+  if (refusal !== null) throw new Error(refusal);
+  return keep;
 }
 
 /**
@@ -1585,11 +1714,12 @@ function specTicketName(repo: string, key: string, markdown: string, keepTitle: 
  * requirement, each citing it, grouped into two nodes so a requirement's node
  * is something to look at. Where `planning` records the person titling the
  * spec and it still states that title, it is `--keep-title`: the ticket takes
- * the spec's title and the spec is left as it is (D-127).
+ * the spec's title and the spec is left as it is, and a title past the cap is
+ * refused before anything is drafted (D-127).
  */
 export function draftFromSpec(key: string, markdown: string, slug: string, planning: EditingSession | undefined): void {
+  const keepTitle = keepsSpecTitle(markdown, planning);
   const read = readSpecSections(markdown);
-  const keepTitle = planning !== undefined && keepsPersonsTitle(planning, read.text.title);
   const plan = plans.get(key)!;
   // The spec this plan was drafted from, as the CLI records it on admission.
   // Written here because the picker reads it: a ticket is what says a spec has
@@ -1634,6 +1764,7 @@ export function draftFromSpec(key: string, markdown: string, slug: string, plann
   // A re-draft replaces the plan the edits were made to (D-103): they stay in
   // the log, marked replaced, and none of them can be undone from here.
   for (const edit of graphEdits.get(key) ?? []) edit.replaced = true;
+  handEdited.delete(key);
   approaches.set(key, {
     ...approaches.get(key)!,
     edges: (plan.nodes?.length ?? 0) > 1 ? [{ from: "node_1", to: "node_2" }] : [],
@@ -1677,6 +1808,7 @@ export const editing = new ContractEditing({
   id: () => crypto.randomUUID(),
   // The sample repository keeps its specs in the default folder.
   specFolder: () => "specs",
+  drafted: (record) => draftedReading(record),
   standing: (id) => standingFor(id),
   setStanding: (id, entries) => {
     writeStanding(id, entries);
@@ -1711,6 +1843,8 @@ const sampleDoing = new Map<string, InterviewDoing>();
 const doingOf = (id: string): InterviewDoing | null =>
   isWorking(id) ? (sampleDoing.get(id) ?? null) : null;
 const sampleTurns = new Map<string, number>();
+/** The plannings whose sample asked in waves and asks again on the answer to its first group. */
+const askingInWaves = new Set<string>();
 /** Whether this planning is still there to be spoken to. */
 function stillThere(id: string): boolean {
   try {
@@ -1764,7 +1898,8 @@ export function interviewStatus(id: string): InterviewStatus {
 }
 /**
  * The host's own naming of an unnamed spec from the person's first turn, in
- * the preview's terms: the same title, the same slug, the same note.
+ * the preview's terms: the same folder, the same spec with no title line, the
+ * same note.
  */
 export function nameSpecFromTurn(id: string, text: string): void {
   const session = editing.read(id);
@@ -1782,8 +1917,8 @@ export function nameSpecFromTurn(id: string, text: string): void {
         "Two pieces of work are two specs: give this one a title of its own, or open the spec " +
         "that is already there",
     );
-  saveSpec(slug, renderSpec({ ...EMPTY_SPEC_TEXT, title }, { highWater: 0, existing: [] }).markdown);
-  editing.recordSpec(id, slug, title);
+  saveSpec(slug, renderSpec(EMPTY_SPEC_TEXT, { highWater: 0, existing: [] }).markdown);
+  editing.recordSpec(id, slug);
   converse(id, { kind: "note", text: `Named specs/${slug} from your first message.` });
 }
 /**
@@ -1984,21 +2119,57 @@ export const driftEpoch = new Map<string, number>();
 /** A reading's job has settled: the next one owed to the planning starts. */
 export function readingSettled(id: string): void {
   readings.delete(id);
-  if (rereadOwed.delete(id)) void rereadDrift(id);
+  if (rereadOwed.delete(id)) void rereadDrift(id, true);
+}
+
+/** A sample spec as it states itself, as the host reads one for the drafts list. */
+export const sampleSpecText: SpecReader = (_repoId, slug) => {
+  const markdown = specFiles()[slug];
+  if (markdown === undefined) return null;
+  const { text } = readSpecSections(markdown);
+  return { title: text.title, sections: sectionsOf(text) };
+};
+
+/**
+ * The state a plan just drafted from its spec was read at by its drafting, as
+ * the host takes it: where the verdict drafting wrote still holds for the spec
+ * and the plan and found nothing, the plan the record holds; null otherwise.
+ */
+export function draftedReading(record: EditingSession): string | null {
+  if (record.key === null) return null;
+  const held = driftRecords.get(record.key);
+  const keys = driftKeys(record.key);
+  if (held === undefined || keys === null || held.findings.length > 0) return null;
+  if (held.spec !== keys.spec || held.promises !== keys.promises) return null;
+  return readingStateOf(record, sampleSpecText);
+}
+
+/** The state a reading of this planning is of now, as the host takes it for a reading it asks for itself. */
+export function sampleReadingState(id: string): string | null {
+  try {
+    return readingStateOf(editing.read(id), sampleSpecText);
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Read the plan against the spec again, as the host does once a turn ends
- * with a record on the planning: never over a reading already in flight, but
+ * while a problem is open on the planning, or where a reading a turn
+ * overlapped owes one (`owed`): never over a reading already in flight, but
  * never lost either — a turn that ends while one is running is owed its
  * reading, which starts as that one settles, and however many turns end
  * meanwhile owe one reading between them. A reading that cannot be started
- * is said in the chat, because the page is waiting on it.
+ * is said in the chat in one sentence, with why behind its `i`, because the
+ * page is waiting on it. The state it is of
+ * is recorded as the host records it, so the confirm after it reads nothing
+ * again.
  */
-async function rereadDrift(id: string): Promise<void> {
+async function rereadDrift(id: string, owed = false): Promise<void> {
   if (!stillThere(id)) return;
   const session = editing.read(id);
   if (session.drift === null || session.key === null) return;
+  if (!owed && session.drift.open.length === 0) return;
   const key = session.key;
   const live = snapshot.jobs.some((job) => job.kind === "drift" && job.key === key && isLive(job));
   if (readings.has(id) || live) {
@@ -2011,14 +2182,16 @@ async function rereadDrift(id: string): Promise<void> {
     // is between the turn's end and the reading for that long: the same gap
     // here, so the page is held to the same rule.
     await new Promise((done) => setTimeout(done, 0));
-    await answer({ kind: "driftCheck", id });
+    await answer({ kind: "driftCheck", id, state: sampleReadingState(id) });
   } catch (error) {
     readings.delete(id);
     rereadOwed.delete(id);
     if (!stillThere(id)) return;
+    const why = (error instanceof Error ? error.message : String(error)).trim();
     converse(id, {
       kind: "note",
-      text: `${REREAD_COULD_NOT_START}: ${error instanceof Error ? error.message : String(error)}`,
+      text: `${REREAD_COULD_NOT_START}.`,
+      ...(why === "" ? {} : { output: why }),
     });
   }
 }
@@ -2042,7 +2215,8 @@ export function forgetDrift(key: string, only: string | null): void {
 /**
  * Land a reading on the planning it was of, as the host does: nothing is
  * recorded on a plan the person went past — dismissed or approved — while it
- * was read (D-128).
+ * was read (D-128), and the state the asker read at is recorded only where no
+ * turn overlapped the reading (D-NEW-basic-and-epic-flows).
  */
 export function driftLanded(
   id: string,
@@ -2050,14 +2224,18 @@ export function driftLanded(
   epoch: number,
   before: TurnMark,
   verdict: DriftVerdict,
+  state: string | null,
 ): void {
   if ((driftEpoch.get(key) ?? 0) !== epoch) return;
   const row = snapshot.tasks.find((each) => each.ticket.key === key);
   if (row === undefined || row.ticket.approved_at) return;
   if (!stillThere(id)) return;
+  // Drafted again while it read, as the host drops it: the plan it read has gone.
+  if (redraftedSince(before, editing.read(id))) return;
   const overlapped = turnOverlapped(before, editing.read(id), isWorking(id));
   if (overlapped && !isWorking(id)) rereadOwed.add(id);
   editing.landDrift(id, verdict, overlapped, (line) => converse(id, line), () => askingChanged(id));
+  if (state !== null && !overlapped) editing.recordRead(id, state);
 }
 
 /**
@@ -2161,6 +2339,79 @@ export function answerSampleTurn(id: string, text: string): void {
         if (sampleWorking.has(id) && stillThere(id)) endSampleTurn(id);
       }, 400);
     }, 150);
+    return;
+  }
+  // Asking again as it reads the answer to the first group, while the person
+  // is on the second: what a real session does when an answer raises a
+  // question of its own. The new group waits behind the one being answered
+  // rather than replacing it (D-117). The pause is the session reading.
+  if (askingInWaves.delete(id)) {
+    setTimeout(() => {
+      if (!sampleWorking.has(id) || !stillThere(id)) return;
+      const asked = converse(id, {
+        kind: "asked",
+        groups: [
+          {
+            title: "What the reminder is called",
+            parts: [
+              {
+                question: "What does the reminder say?",
+                options: [
+                  { label: "Due today", detail: null, recommended: true },
+                  { label: "Nearly due", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      editing.beginAsking(id, asked.n);
+      askingChanged(id);
+      endSampleTurn(id);
+    }, 600);
+    return;
+  }
+  if (/\bask me in waves\b/i.test(text)) {
+    const asked = converse(id, {
+      kind: "asked",
+      groups: [
+        {
+          title: "Where the reminder lands",
+          parts: [
+            {
+              question: "Where does the reminder show?",
+              options: [
+                { label: "On Home", detail: null, recommended: true },
+                { label: "On the board", detail: null, recommended: false },
+              ],
+            },
+          ],
+        },
+        {
+          title: "When the reminder goes",
+          parts: [
+            {
+              question: "How early does it go?",
+              options: [
+                { label: "A day before", detail: null, recommended: true },
+                { label: "An hour before", detail: null, recommended: false },
+              ],
+            },
+            {
+              question: "Who gets it?",
+              options: [
+                { label: "The owner", detail: null, recommended: false },
+                { label: "Everyone on it", detail: null, recommended: false },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    editing.beginAsking(id, asked.n);
+    askingChanged(id);
+    askingInWaves.add(id);
+    endSampleTurn(id);
     return;
   }
   // Asking with options, as the real session does through ask_options: two
@@ -2405,13 +2656,13 @@ export function answerSampleTurn(id: string, text: string): void {
  * Delete a sample ticket with everything kept beside it, as the host's
  * `discardTicket` deletes its files, and answer with the reason it stays where
  * it does, in the host's words and in the host's order (D-129): a command
- * running in the repository holds every delete, and a ticket whose pull
+ * running for this ticket holds its delete, and a ticket whose pull
  * request is open is the one stage a delete does not reach. The attempts and
  * the bundles they sealed are held beside the ticket here rather than in a
  * store of their own, so they go with it.
  */
 export function discardTicket(repoId: string, key: string): string | null {
-  if (heldRepository(snapshot.jobs, repoId)) return DELETE_WAITS_FOR_COMMANDS;
+  if (heldTicket(snapshot.jobs, repoId, key)) return DELETE_WAITS_FOR_TICKET_COMMAND;
   const row = snapshot.tasks.find((entry) => entry.repoId === repoId && entry.ticket.key === key);
   if (row === undefined) return DELETE_TICKET_GONE;
   if (row.ticket.state === "pr_open") return deletePullRequestOpen(key);
@@ -2434,6 +2685,7 @@ export function discardTicket(repoId: string, key: string): string | null {
   snapshot.titles = titles;
   snapshot.taskModels = taskModels;
   snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+  snapshot.calledOff = (snapshot.calledOff ?? []).filter((item) => !item.startsWith(calledOffPrefix(repoId, key)));
   snapshot.lastOpened = Object.fromEntries(Object.entries(snapshot.lastOpened ?? {}).filter(([item]) => item !== entry));
   // And every planning over it, as the host discards them, with their chats
   // (D-102): a planning over a ticket that is gone has nothing left to open.

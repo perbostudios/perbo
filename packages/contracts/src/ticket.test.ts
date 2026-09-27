@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  DECIDED_DELIVERY_NOTE,
   HAND_OFF_NOTE,
   HandOffEvidenceError,
   IllegalTransitionError,
@@ -8,7 +7,6 @@ import {
   TICKET_SCHEMA_VERSION,
   TICKET_STATES,
   TICKET_STATES_REACHABLE,
-  TICKET_TRANSITIONS,
   TicketSchema,
   attributePullRequest,
   attributionOnRecord,
@@ -22,6 +20,7 @@ import {
   transition,
   type Ticket,
 } from "./ticket.js";
+import { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
 
 const ticket = (overrides: Partial<Ticket> = {}): Ticket =>
   TicketSchema.parse({

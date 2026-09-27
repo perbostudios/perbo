@@ -16,6 +16,7 @@ import {
   costOf,
   costPhrase,
   derivePlannedRisk,
+  gateClosedNote,
   isActive,
   isConfigPath,
   isDependencyPath,
@@ -23,8 +24,6 @@ import {
   isSecurityPath,
   matchesAny,
   onePieceOfWork,
-  sameName,
-  TICKET_NAME_CAP,
   ticketSourceLabel,
   transition,
   type AcceptanceCriterion,
@@ -54,10 +53,12 @@ import {
   contractEditCount,
   draftContract,
   fetchGitHubIssue,
+  keptTitleRefusal,
   readIssueFile,
   readSpecFile,
   readSpecText,
   retitleSpecFile,
+  ticketName,
 } from "@perbo/planning";
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
@@ -584,7 +585,8 @@ function sourceOf(args: AdmissionInput, issue: SourceIssue | null, path: string 
       kind: "file",
       reference: path,
       url: args.sourceUrl,
-      title_at_admission: issue.title,
+      // None for a spec nobody has named, which has no title line (D-118).
+      title_at_admission: issue.title || null,
     };
   }
   if (issue) {
@@ -990,9 +992,8 @@ export interface Resolved {
   /** The requirement ids the spec carries, which a criterion may cite. */
   requirementIds: string[];
   /**
-   * What every other ticket in the store is called: shown to the drafter, and
-   * what the name this ticket takes must differ from. Empty where nothing was
-   * drafted.
+   * What every other ticket in the store is called: what the name this ticket
+   * takes must differ from, and, where it is drafted, shown to the drafter.
    */
   names: string[];
 }
@@ -1103,7 +1104,10 @@ function resolveTyped(input: Admitting): Resolved {
     noGos: [],
     spec: null,
     requirementIds: [],
-    names: [],
+    // Every ticket in the store, as a drafted one is named apart from them (D-127).
+    names: listTickets(storeDir(resolve(input.cwd, args.target.repo), args.target.store)).map(
+      (ticket) => ticket.title,
+    ),
   };
 }
 
@@ -1213,7 +1217,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
       .filter((ticket) => ticket.key !== args.startOver)
       .map((ticket) => ticket.title);
     diagnostics.stderr(
-      `read ${issue.reference}: ${issue.title}\ndrafting the contract with ${model.provider} ` +
+      `read ${issue.reference}${issue.title ? `: ${issue.title}` : ""}\ndrafting the contract with ${model.provider} ` +
         `${model.model_id}; nothing runs until you approve it\n`,
     );
     drafted = await draftContract({
@@ -1482,55 +1486,32 @@ function assertNotAlreadyDrafted(input: Admitting): void {
 }
 
 /**
- * What a ticket is called (D-127).
- *
- * A ticket the drafter named is called that: the fewest words that tell it
- * apart from every other ticket in the store, which the drafter was shown. It
- * read the source and the repository before saying that, so it names what the
- * plan turned out to be rather than what somebody asked for before any of it
- * was known. Where another ticket already carries it, a spec's own title
- * stands in: it is what the work was called while its spec was written.
- * Failing both, or where nothing was drafted, the outcome — the only sentence
- * a typed ticket has to be called by.
- *
- * A drafted name or a spec title another ticket already carries is passed
- * over for the next; the outcome, the last, stands whatever it is. The draft
- * is kept either way: the run that produced it is paid for, and a name is a
- * label a person can change.
- *
- * With `--keep-title` the spec's title is a name a person gave the work, and
- * the ticket takes it as it stands, whatever the drafter proposed and whatever
- * another ticket is called: the person chose it (D-127). The outcome stands in
- * only for a spec with no title.
- *
- * Display only: the branch is named from the outcome, and so is the pull
- * request, never from this (ADR-0023 §4). An edit never renames a ticket.
+ * What this ticket is called, by {@link ticketName} (D-127): the drafted name,
+ * the spec's title, the outcome's first sentence, passed over where another
+ * ticket in the store carries it or it runs past the cap. With `--keep-title`
+ * the spec's title as it stands, which {@link assertKeepableTitle} held to the
+ * cap before a model was asked. An edit never renames a ticket.
  */
-function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean): string {
-  const specTitle = resolved.spec === null ? "" : oneLine(resolved.issue?.title ?? "");
-  if (keepTitle) return specTitle.length > 0 ? specTitle : outcome;
-  // Flattened because it is a model's words shown as a title (ADR-0023 §4).
-  const drafted = oneLine(resolved.drafted?.draft.name ?? "");
-  const named = [drafted, specTitle].find(
-    (name) => name.length > 0 && !resolved.names.some((taken) => sameName(name, taken)),
-  );
-  return named ?? outcome;
+function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean, key: string): string {
+  return ticketName({
+    drafted: resolved.drafted?.draft.name ?? "",
+    // A spec with no title line names nothing: its folder was named from the
+    // person's first turn and the work was never titled (D-118).
+    specTitle: resolved.spec === null ? "" : (resolved.issue?.title ?? ""),
+    outcome,
+    taken: resolved.names,
+    key,
+    keepTitle,
+  });
 }
 
-const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
-
 /**
- * A spec title `--keep-title` can keep: one no longer than a drafted name may
- * be. Refused rather than cut, before a model is asked anything, because the
- * name is the person's and only they can say which words go (D-127).
+ * A spec title `--keep-title` can keep, asked before a model is: one past the
+ * cap is refused rather than cut (D-127).
  */
 function assertKeepableTitle(title: string): void {
-  const kept = oneLine(title);
-  if (kept.length > TICKET_NAME_CAP)
-    throw new UsageError(
-      `the spec's title is ${kept.length} characters, and a ticket's name is at most ` +
-        `${TICKET_NAME_CAP} (D-127): shorten the title, then draft the plan again`,
-    );
+  const refusal = keptTitleRefusal(title);
+  if (refusal !== null) throw new UsageError(refusal);
 }
 
 /**
@@ -1604,7 +1585,7 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
     schema_version: TICKET_SCHEMA_VERSION,
     ticket_id,
     key,
-    title: ticketTitle(resolved, resolved.outcome, args.keepTitle),
+    title: ticketTitle(resolved, resolved.outcome, args.keepTitle, key),
     state: "plan_review",
     priority: args.priority,
     labels: args.labels,
@@ -1991,7 +1972,7 @@ function redraft(
   // spec folder, nodes folder or page that is a link refuses the re-draft
   // with the ticket, its contract and its snapshot as they were.
   assertPagesWritable(repositoryRoot, resolved, contract);
-  const title = ticketTitle(resolved, contract.outcome, args.keepTitle);
+  const title = ticketTitle(resolved, contract.outcome, args.keepTitle, key);
   const spec = args.keepTitle ? resolved.spec : nameSpecAfterTicket(repositoryRoot, resolved.spec, title);
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);
@@ -2701,7 +2682,7 @@ export function statesObserved(result: {
     case "escalated":
     case "remediation_exhausted":
     case "remediation_stalled":
-      path.push({ to: "changes_requested", note: `the gate closed: ${result.outcome}` });
+      path.push({ to: "changes_requested", note: gateClosedNote(result.outcome) });
       break;
     default:
       path.push({

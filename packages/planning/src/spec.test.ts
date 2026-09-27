@@ -89,8 +89,10 @@ describe("parseSpec", () => {
     expect(() => parseSpec(spec.replace("## No-Gos", "## No-Go"))).toThrow(/No-Go/);
   });
 
-  it("refuses a spec with no title", () => {
-    expect(() => parseSpec(spec.replace("# Activation email\n", ""))).toThrow(PlanningError);
+  it("reads a spec with no title line as one nobody has named, and drafts from it (D-118)", () => {
+    const untitled = parseSpec(spec.replace("# Activation email\n", ""));
+    expect(untitled.title).toBe("");
+    expect(untitled.requirements.length).toBeGreaterThan(0);
   });
 
   it("refuses a Requirements section that names no requirement", () => {

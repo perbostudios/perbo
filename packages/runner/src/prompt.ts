@@ -1,4 +1,5 @@
 import {
+  EXECUTOR_ACCOUNT_MAX_CHARS,
   admittedWriteGlobs,
   redactCredentials,
   type AcceptanceCriterion,
@@ -96,44 +97,89 @@ import { allowedPathsSentence, prohibitedPathsSentence } from "./shell/index.js"
  * brief that named only the former name described a refusal the executor
  * could not connect to the call it makes.
  */
-export const EXECUTOR_PROMPT_VERSION = "executor_v13";
+/**
+ * v14 (D-NEW-nothing-shown-is-cut): the account's request states the most the
+ * record holds, so the executor writes it to fit rather than past it.
+ */
+export const EXECUTOR_PROMPT_VERSION = "executor_v14";
 
 /**
  * The brief a resumed attempt gets (SCP-154): `EXECUTOR_PROMPT_VERSION` plus
- * the section below. It carries its own version because the two briefs are
+ * the section below, which states where the prior attempt's work is and how
+ * that attempt ended. It carries its own version because the two briefs are
  * different documents — a record that called them both the same would say the
  * executor was told the same thing when it was not.
  */
-export const RESUMED_EXECUTOR_PROMPT_VERSION = "executor_resumed_v1";
+export const RESUMED_EXECUTOR_PROMPT_VERSION = "executor_resumed_v3";
 
 /**
- * What a resumed attempt is told about the diff already in its worktree.
- *
- * The framing is the whole point. A ceiling cut the previous attempt in the
- * middle of its work: the diff was never sealed against the criteria, never
- * checked and never reviewed, and the model that wrote it did not get to the
- * end of its own reasoning. Handing that over as "here is the work so far"
- * invites the executor to treat an unverified draft as ground truth and to
- * spend its round decorating it. So it arrives as a draft to audit, and the
- * ids come from the runner — no prose from the previous attempt reaches here.
+ * The prior attempt a resumed one is briefed about, every field from the
+ * runner's own records.
  */
-function resumedWorkBlock(resumed: { attempt_id: string; bundle_id: string } | null | undefined): string {
-  if (!resumed) return "";
-  return `
+export interface ResumedWork {
+  attempt_id: string;
+  bundle_id: string;
+  /** The termination reason the prior attempt's bundle recorded, where it recorded one. */
+  termination: string | null;
+  /**
+   * The commit on this branch that holds the prior attempt's work, where the
+   * worktree carries it committed; null where its diff was applied into the
+   * worktree and is uncommitted.
+   */
+  committed_at: string | null;
+}
 
-# The worktree already contains unfinished work
+/** Who or what stopped the prior attempt, in the words the brief states it in. */
+function howItEnded(termination: string | null): string {
+  if (termination === null) return "was stopped part-way";
+  const by =
+    termination === "cancelled"
+      ? " by a person"
+      : termination.endsWith("_exceeded")
+        ? " by a ceiling"
+        : "";
+  return `was stopped part-way${by} (it ended \`${termination}\`)`;
+}
+
+/**
+ * What a resumed attempt is told about the prior attempt's work in its tree.
+ *
+ * The framing is the whole point. The previous attempt ended in the middle of
+ * its work — a ceiling cut it, or a person stopped it: the work was never
+ * checked against the criteria and never reviewed, and the model that wrote it
+ * did not get to the end of its own reasoning. Handing that over as "here is
+ * the work so far" invites the executor to treat an unverified draft as ground
+ * truth and to spend its round decorating it. So it arrives as a draft to
+ * audit, where it actually is — committed on the branch, or applied and
+ * uncommitted — and the ids come from the runner: no prose from the previous
+ * attempt reaches here.
+ */
+function resumedWorkBlock(resumed: ResumedWork | null | undefined): string {
+  if (!resumed) return "";
+  const where =
+    resumed.committed_at === null
+      ? `# The worktree already contains unfinished work
 
 A previous attempt of this same ticket — ${resumed.attempt_id}, recorded in
-${resumed.bundle_id} — was stopped part-way by a ceiling, not by a judgement. Its
-change set has been applied into this worktree and is uncommitted. It was never
-finished, never checked and never reviewed by anyone.
+${resumed.bundle_id} — ${howItEnded(resumed.termination)}, not by a judgement. Its
+change set has been applied into this worktree and is uncommitted, so
+\`git status\` and \`git diff\` show it.`
+      : `# The branch already carries unfinished work
+
+A previous attempt of this same ticket — ${resumed.attempt_id}, recorded in
+${resumed.bundle_id} — ${howItEnded(resumed.termination)}, not by a judgement. Its
+change set is committed on this branch, at ${resumed.committed_at}, so
+\`git status\` shows none of it: \`git log\` and \`git show\` do.`;
+  return `
+
+${where} It was never finished, never checked and never reviewed by anyone.
 
 Treat it as a draft to check, not as work to trust or build on unread. Read it
 first; keep what is right, fix what is wrong, and delete what should not be
 there. None of it is evidence that a criterion is met — the tests it may have
 written prove nothing until you have run them. What is reviewed at the end is
-what the worktree holds, so every line of it is yours to defend as if you had
-written it.`;
+what the branch and the worktree hold, so every line of it is yours to defend as
+if you had written it.`;
 }
 
 /**
@@ -211,8 +257,9 @@ Finish your last message with this heading, and put the account under it:
 
 ${EXECUTOR_ACCOUNT_HEADING}
 
-A few lines: the files you touched and why, the tests you wrote, and what you
-actually ran to verify them. Say what you left undone or were unsure of. The
+A few lines, and at most ${EXECUTOR_ACCOUNT_MAX_CHARS.toLocaleString("en-US")} characters, which is all the record
+holds: the files you touched and why, the tests you wrote, and what you actually
+ran to verify them. Say what you left undone or were unsure of. The
 runner seals it with your change set, and a remediation round on this ticket is
 handed it instead of reading the repository again — so an accurate account is
 worth more than a reassuring one. The reviewer never sees it.`;
@@ -247,8 +294,8 @@ export function executorPrompt(
   contract: PlanContractWithCriteria,
   options: {
     principles?: string | null | undefined;
-    /** Set when a cut attempt's retained diff was applied into this worktree. */
-    resumed?: { attempt_id: string; bundle_id: string } | null | undefined;
+    /** Set when the worktree carries a prior attempt's work, committed or applied. */
+    resumed?: ResumedWork | null | undefined;
   } = {},
 ): string {
   return `You are implementing one approved ticket in a Git worktree. You are the executor.

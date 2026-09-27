@@ -10,13 +10,14 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { AcceptanceCriterion } from "@perbo/contracts";
-import { EditingSessionSchema } from "../../shared/protocol.js";
-import type { ReplyMap, Request } from "../../shared/protocol.js";
+import { EditingSessionSchema, RequestSchema, TYPED_PATH_MAX_CHARS } from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
+import type { Job, ReplyMap, Request } from "../../shared/protocol.js";
 import { editingForm } from "../../shared/contract-editing.js";
 import { bridge } from "../workspace/index.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { Composer } from "./Composer.js";
-import { ContractScreen } from "./ContractScreen.js";
+import { ContractScreen, turnHeld } from "./ContractScreen.js";
 import type { TaskContext } from "./task-context.js";
 
 let client: QueryClient;
@@ -47,6 +48,8 @@ async function contextFor(criteria: AcceptanceCriterion[]): Promise<TaskContext>
   if (!("acceptance_criteria" in detail.contract))
     throw new Error("A criterion contract is required");
   detail.contract.acceptance_criteria = criteria;
+  // A flat plan, whose contract lists its criteria; an epic's shows its graph.
+  delete detail.contract.nodes;
   detail.attempts = [];
   workspace.jobs = [];
   return {
@@ -66,7 +69,7 @@ function captureEdits(context: TaskContext) {
   const original = bridge.request.bind(bridge);
   let session = EditingSessionSchema.parse({
     version: 1, id: crypto.randomUUID(), repoId: context.repoId, key: context.detail.ticket.key,
-    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, lastView: null, specCut: null, named: null, drift: null, change: null, phase: "editing", error: null,
+    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, confirmed: null, read: null, impact: null, named: null, drift: null, change: null, phase: "editing", error: null,
     operation: null, interviewModel: null, form: editingForm(context.workspace.settings, context.detail),
   });
   return vi.spyOn(bridge, "request").mockImplementation(
@@ -146,6 +149,63 @@ describe("what the scope does not cover, where it is approved", () => {
     } finally {
       asked.mockRestore();
     }
+  });
+});
+
+describe("approving while a run is under way", () => {
+  const running = (repoId: string, key: string): Job => ({
+    id: "run-" + key, repoId, key, kind: "run", label: "Run engineering loop",
+    state: "running", startedAt: new Date().toISOString(), endedAt: null, log: "", error: null, resultKey: null, result: null,
+  });
+
+  // Runs of different tickets go on at the same time (D-049, D-101): a
+  // ticket's run starts as soon as its contract is confirmed, whatever
+  // another ticket's run is doing, so nothing here holds or names it.
+  it("starts this ticket's run at once while another ticket's run is under way", async () => {
+    const context = await contextFor([criterion()]);
+    const other = context.workspace.tasks.find((task) => task.ticket.key !== context.detail.ticket.key)!;
+    context.workspace.jobs = [running(other.repoId, other.ticket.key)];
+    const sent: Request[] = [];
+    const original = bridge.request.bind(bridge);
+    vi.spyOn(bridge, "request").mockImplementation(async <T extends Request>(request: T): Promise<ReplyMap[T["kind"]]> => {
+      sent.push(request);
+      if (request.kind === "run") return running(context.repoId, context.detail.ticket.key) as ReplyMap[T["kind"]];
+      return original(request);
+    });
+    mount(<ContractScreen {...context} />);
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByText(/is under way, and this ticket waits for it/)).toBeNull();
+    fireEvent.click(approve);
+    await waitFor(() =>
+      expect(sent.find((request) => request.kind === "run")).toMatchObject({
+        kind: "run",
+        key: context.detail.ticket.key,
+        approve: true,
+      }),
+    );
+  });
+
+  // This ticket's own run under way holds the button, and a button held with
+  // nothing said reads as a contract that cannot be confirmed, so the page
+  // names the run it waits for.
+  it("holds the button and names this ticket's own run while it is under way", async () => {
+    const context = await contextFor([criterion()]);
+    const own = running(context.repoId, context.detail.ticket.key);
+    context.workspace.jobs = [own];
+    mount(<ContractScreen {...context} />);
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(turnHeld(own))).toBeTruthy();
+    expect(turnHeld(own)).toContain("#" + context.detail.ticket.key.replace(/^PRB-/, ""));
+  });
+
+  it("says nothing of a turn once no run is under way", async () => {
+    const context = await contextFor([criterion()]);
+    mount(<ContractScreen {...context} />);
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" })) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByText(/is under way, and this ticket waits for it/)).toBeNull();
   });
 });
 
@@ -276,6 +336,32 @@ describe("contract verification approval", () => {
         }) }),
       }),
     ));
+  });
+
+  it("holds a new allowed path to what a path holds where it is typed, and saves it without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+    const context = await contextFor([criterion()]);
+    const requests = captureEdits(context);
+    mount(
+      <Composer
+        {...context}
+        existing={context.detail}
+        existingRepoId={context.repoId}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "+ add a path" }));
+    const path = screen.getByRole("textbox", { name: "New allowed path" }) as HTMLInputElement;
+    typeInto(path, "p".repeat(TYPED_PATH_MAX_CHARS + 20));
+    expect(path.value).toHaveLength(TYPED_PATH_MAX_CHARS);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compile the contract" }));
+    await waitFor(() =>
+      expect(requests.mock.calls.some(([request]) => request.kind === "editingSave")).toBe(true),
+    );
+    const saved = requests.mock.calls.map(([request]) => request).findLast((request) => request.kind === "editingSave")!;
+    expect(RequestSchema.safeParse(saved).success).toBe(true);
+    expect((saved as Extract<Request, { kind: "editingSave" }>).form.draft.paths).toContain(
+      "p".repeat(TYPED_PATH_MAX_CHARS),
+    );
   });
 
   it("lets a distinct assertion and its evidence kind be reviewed and saved together", async () => {

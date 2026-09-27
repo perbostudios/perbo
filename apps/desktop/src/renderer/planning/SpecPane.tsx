@@ -5,13 +5,13 @@ import type { SpecField } from "@perbo/planning/browser";
 import { specSymbolNames } from "@perbo/planning/browser";
 import { bridge } from "../workspace/index.js";
 import { useContractEditing } from "../contract-editor.js";
-import { changeKey, textMarks } from "./change-marks.js";
+import { changeKey, chatChange, textMarks } from "./change-marks.js";
 import { SpecSection } from "./SpecSection.js";
 import { useTurnSending } from "./InterviewDock.js";
-import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
+import { INTERVIEW_WROTE_THE_SPEC, SPEC_TITLE_MAX_CHARS } from "../../shared/protocol.js";
 import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
-import { confirmRoute, planApproved } from "./panes.js";
+import { confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),
@@ -158,15 +158,12 @@ export function SpecPane({
   // a resend that finds nothing left to send — anything else leaves the next
   // save read against a base the person can no longer see.
   const refused = useRef<SpecView | null>(null);
-  // The title a file's title line gives the field: none while it is still the
-  // cut the host named the folder from (D-118), which is no title, and no
-  // plan has been drafted. The field is then empty, for the person to name
-  // the work or for the Architect's title to fill once it replaces the cut in
-  // the file; once a plan is drafted the title line is the ticket's name
-  // (D-127), whatever its words.
-  const cut = editor.session?.key == null ? editor.session?.specCut : null;
-  const titleIn = (source: SpecView | null | undefined): string =>
-    !source || source.title === cut ? "" : source.title;
+  // The title a file's title line gives the field: none while the spec has no
+  // title line, as the host mints it from the person's first turn (D-118). The
+  // field is then empty, for the person to name the work or for the
+  // Architect's title to fill once it writes one; once a plan is drafted the
+  // title line is the ticket's name (D-127).
+  const titleIn = (source: SpecView | null | undefined): string => source?.title ?? "";
 
   // One save at a time. Two in flight would each read the file without the
   // other's ids and number the same requirements twice; a section left while a
@@ -269,16 +266,16 @@ export function SpecPane({
 
   const sections: SpecSections = { ...(view?.sections ?? EMPTY), ...edited };
   const shownTitle = title ?? titleIn(view);
-  // The last change to the spec, as marks placed in each section's after-text
-  // (D-128). Diffed once per change
+  // The last change to the spec, where the chat made it, as marks placed in
+  // each section's after-text (D-128). Diffed once per change
   // rather than per render or per session read: a keystroke in one section
   // re-renders the others, a re-read hands over a fresh object for the same
   // change, and a diff of a long section is not free. Shown on a section only
   // while its text is the change's after-text — typed into since, the marks
   // would fall on the wrong characters, and the save that follows is a change
   // of its own.
-  const change = editor.session?.change?.spec ?? null;
-  const changed = changeKey(editor.session?.change ?? null);
+  const change = chatChange(editor.session?.change)?.spec ?? null;
+  const changed = changeKey(chatChange(editor.session?.change));
   const marks = useMemo(
     () =>
       change === null
@@ -303,10 +300,11 @@ export function SpecPane({
     // come back refused in its turn rather than be read as if this writer
     // had already seen it.
     // A title the person has not typed, or has typed blank, is the file's,
-    // the cut included: a save of a section leaves the title line as it is
-    // rather than being held back for want of one.
+    // none included: a save of a section leaves the title line as it is, or
+    // absent, rather than being held back for want of one. Only a spec not
+    // yet written waits for a title, which is what names its folder.
     const wanted = { title: title?.trim() ? title : view.title, sections: { ...sections, ...over }, base: refused.current ?? view };
-    if (wanted.title.trim().length === 0) return null;
+    if (wanted.title.trim().length === 0 && view.slug === null) return null;
     if (
       wanted.title === view.title &&
       JSON.stringify(wanted.sections) === JSON.stringify(view.sections)
@@ -319,8 +317,6 @@ export function SpecPane({
   const latest = useRef(pending);
   latest.current = pending;
   const starting = useRef(false);
-  /** Whether the draft in flight is a re-draft this pane asked for. */
-  const redrafting = useRef(false);
   const commit = (over?: Partial<SpecSections>): void => {
     // Both texts are on screen and neither has been chosen: writing now would
     // pick one of them without being asked, which is the whole thing this is
@@ -458,20 +454,10 @@ export function SpecPane({
       starting.current = false;
       inFlight.current = false;
     }
-    // Drafting again lands on the plan, as drafting the first one does.
-    // Planning's own landing fires when the plan changes pane, and a re-draft
-    // that keeps its shape changes none, so this says where it went.
-    if (intent === "startOver") redrafting.current = true;
+    // Where the plan lands once it is drafted, first or again, is planning
+    // mode's to say (D-NEW-basic-and-epic-flows).
     editor.submit(intent);
   };
-
-  useEffect(() => {
-    if (!redrafting.current) return;
-    const settled = editor.session;
-    if (settled?.phase !== "ready" || settled.key === null) return;
-    redrafting.current = false;
-    navigate({ page: "planning", sessionId, pane: settled.nodes > 0 ? "graph" : "criteria" });
-  }, [editor.session, navigate, sessionId]);
 
   // While a command runs the Composer takes the pane, as it does for the
   // contract steps: one thing is happening and it says what. It is the same
@@ -595,7 +581,7 @@ export function SpecPane({
               className="spec-title"
               placeholder="What is this piece of work?"
               value={shownTitle}
-              maxLength={200}
+              maxLength={SPEC_TITLE_MAX_CHARS}
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => commit()}
             />
@@ -647,8 +633,9 @@ export function SpecPane({
                       changes it is held to writing here in the same turn
                       (D-128), so nothing
                       it did needs reporting. A person's own edit is not held to
-                      it, so the way to the contract reads the plan against this
-                      spec first, as every way there does. And it waits for a
+                      it, so the plan is read against this spec on the way to
+                      the contract — an epic's on the way there, a basic
+                      ticket's at its Confirm contract. And it waits for a
                       turn in flight, as the Graph's way onward does: a reading
                       made mid-turn is of half a plan, and the turn's own end
                       is what carries the verdict forward. */}
@@ -661,11 +648,12 @@ export function SpecPane({
                           key,
                           sessionId,
                           approved: planApproved(workspace, editor.repoId, key),
+                          basic: flowFor(workspace, sessionId).shape === "basic",
                         }),
                       )
                     }
                   >
-                    Open the plan
+                    {flowFor(workspace, sessionId).shape === "basic" ? confirmLabel("basic") : "Open the plan"}
                   </Button>
                   <button
                     className="text-button small"

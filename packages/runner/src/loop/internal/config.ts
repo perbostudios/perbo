@@ -19,6 +19,7 @@ import {
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { PinnedCheckSchema } from "../../checks/index.js";
 import { DEFAULT_DELIVERED_CHECKS_BOUND_MS } from "../../delivery.js";
+import { NetworkAllowListSchema } from "../../profile.js";
 
 /**
  * What a run is configured with, and what the write guard refuses.
@@ -111,6 +112,13 @@ export const TicketRunConfigSchema = z.strictObject({
    * bare globs; the desktop's explorer writes each entry with what put it there.
    */
   paths_prohibited: StandingProhibitedSchema.default([]),
+  /**
+   * Hosts this repository adds to the executor's egress allow-list, beside its
+   * provider's own, GitHub and the package registries. Exact host names only:
+   * a run whose list holds anything else is refused before it starts, naming
+   * the entry.
+   */
+  network_allow_list: NetworkAllowListSchema.default([]),
   /**
    * Where this repository keeps its specs (D-103). Its folder is a standing
    * prohibited path for the executor, beside the default `specs/`: a spec is
@@ -212,11 +220,14 @@ export const TicketRunConfigSchema = z.strictObject({
    */
   runs_started: z.number().int().min(1).nullable().default(null),
   /**
-   * SCP-154: the execution bundle of an attempt a ceiling cut, whose retained
-   * `change.diff` this run's first attempt starts from. The diff is applied
-   * into the worktree before the executor is invoked and the attempt is
-   * recorded as a continuation of the cut one. Null — the default — is a run
-   * that starts from the base commit and nothing else.
+   * SCP-154: the execution bundle of an attempt a ceiling cut or a person
+   * stopped, whose retained `change.diff` this run's first attempt starts from.
+   * The diff is applied into the worktree before the executor is invoked and
+   * the attempt is recorded as a continuation of the stopped one; a branch that
+   * already holds the commit that attempt sealed is given nothing, since it
+   * carries the work; a diff that does not apply is dropped, the worktree stays
+   * at the commit it was provisioned on, and the record says so. Null — the
+   * default — is a run that starts from the base commit and nothing else.
    */
   resume_from: z.string().min(1).nullable().default(null),
   /**

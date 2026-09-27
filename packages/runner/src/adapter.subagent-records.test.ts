@@ -187,6 +187,25 @@ describe("which agent a command record names (D-106 criterion 3)", () => {
   );
 
   it(
+    "keeps the whole path of a call the stream never carried (D-NEW-nothing-shown-is-cut)",
+    async () => {
+      const path = `/etc/${"a-directory-with-a-long-name/".repeat(80)}passwd`;
+      const result = await run([
+        { step: "hook", id: "toolu_unseen_long", tool: "Write", input: { file_path: path }, agent: IMPLEMENTER },
+        { step: "text", text: ACCOUNT },
+        { step: "result" },
+      ]);
+      const unseen = result.commands.find(
+        (command) => command.second_reading === "the runner never read this call's tool_use block",
+      );
+      expect(path.length).toBeGreaterThan(2_000);
+      expect(unseen?.detail).toBe(path);
+      expect(unseen?.denial_target).toBe(path);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "judges each agent's relative write from that agent's own directory",
     async () => {
       // The executor moves into `docs`, which the contract does not admit; the

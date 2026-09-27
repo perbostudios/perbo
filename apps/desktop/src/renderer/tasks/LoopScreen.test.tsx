@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
 import { sampleBridge } from "../../sample-host/bridge.js";
-import type { Detail, Job, Snapshot } from "../../shared/protocol.js";
+import { RequestSchema, TYPED_TEXT_MAX_CHARS, type Detail, type Job, type Snapshot } from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
 import { LoopScreen } from "./LoopScreen.js";
 import type { TaskContext } from "./task-context.js";
 
@@ -65,6 +67,11 @@ const requestedChanges = (detail: Detail): void => {
   attempt.reviewDecision = "changes_requested";
   attempt.review!.decision = "changes_requested";
 };
+/** The steps as the page lists them, top first. */
+const listed = (): HTMLElement[] =>
+  [...screen.getByRole("region", { name: "Description of steps" }).children] as HTMLElement[];
+/** What a step says, without its `i` or its time. */
+const said = (step: HTMLElement): string => step.children[1]!.firstChild!.textContent ?? "";
 /** The fuller reason an `i` holds, whether or not it is open. */
 const hint = (dot: HTMLElement): string =>
   document.getElementById(dot.getAttribute("aria-describedby")!)!.textContent ?? "";
@@ -131,6 +138,26 @@ describe("the three answers a question takes", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Save and continue" }));
     });
     expect(decision).toMatchObject({ choice: "approach", answer: "Park it on the dead-letter queue." });
+  });
+
+  it("holds a typed approach to the room the answer leaves where it is typed, and sends it whole without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+    let held = "";
+    const request = await sent(() => {
+      const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+      const box = within(dialog).getByRole("textbox", { name: "Your approach" }) as HTMLTextAreaElement;
+      typeInto(box, "w".repeat(TYPED_TEXT_MAX_CHARS + 50));
+      held = box.value;
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save and continue" }));
+    });
+    // Every answer goes down together as one principle, headed by the task and
+    // each question's title: the box holds what that leaves, and not a
+    // character more.
+    expect(held).toBe("w".repeat(held.length));
+    expect(held.length).toBeLessThan(TYPED_TEXT_MAX_CHARS);
+    expect(request.answer).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    expect(request.answer.endsWith(held)).toBe(true);
+    expect(request.decisions[0]).toMatchObject({ choice: "approach", answer: held });
+    expect(RequestSchema.safeParse(request).success).toBe(true);
   });
 
   it("sends Let it decide as the approach left to the executor", async () => {
@@ -312,6 +339,7 @@ describe("the loop page", () => {
           { at: "2026-09-08T09:39:00.000Z", from: "ready", to: "provisioning", note: "run started" },
           { at: "2026-09-08T09:45:00.000Z", from: "provisioning", to: "executing", note: "1 attempt executed" },
         ];
+        detail.attempts = [];
       }),
     );
     const actions = document.querySelector(".loop-actions")!;
@@ -323,7 +351,11 @@ describe("the loop page", () => {
     expect(children.slice(0, spacer).some((child) => child.tagName === "BUTTON")).toBe(false);
 
     const steps = screen.getByRole("region", { name: "Description of steps" });
-    expect([...steps.children].map((step) => step.textContent)).toEqual(["1 attempt executed", "run started"]);
+    expect(listed().map(said)).toEqual(["1 attempt executed", "run started"]);
+    expect(listed().map((step) => step.querySelector("time")?.dateTime)).toEqual([
+      "2026-09-08T09:45:00.000Z",
+      "2026-09-08T09:39:00.000Z",
+    ]);
     expect(steps.closest(".loop-steps")).toBeTruthy();
     expect(document.querySelector("section.screen--loop")).toBeTruthy();
   });
@@ -339,5 +371,208 @@ describe("the loop page", () => {
     expect(rule(".loop-steps > .step-history")).toMatch(/min-height: 0;/);
     expect(rule(".loop-body > .loop-steps")).toMatch(/flex: 1;/);
     expect(rule(".loop-body")).toMatch(/min-height: 0;/);
+  });
+});
+
+describe("the steps a run goes through", () => {
+  const start = Date.parse("2026-09-08T09:40:00.000Z");
+  const minute = (n: number): string => new Date(start + n * 60_000).toISOString();
+  /** A run's log as the CLI prints it: the runner's stage lines, with the executor's and the reviewer's words among them. */
+  const lines = [
+    "worktree /tmp/perbo/412 on perbo/412-activation-mail at 1234567",
+    "executing",
+    spokenLine("executor", "I will check retry: the dead-letter path first.")!,
+    "Read packages/queue/retry.ts",
+    "sealing the change set",
+    "check Tests: pnpm test",
+    "review round 0",
+    spokenLine("reviewer", "Where should a permanently failed email go?")!,
+  ];
+  const run = (log: string, overrides: Partial<Job> = {}): Job =>
+    failedRun({
+      id: "run-steps",
+      state: "running",
+      startedAt: minute(0),
+      endedAt: null,
+      error: null,
+      log,
+      ...overrides,
+    });
+  /** PRB-412 with no attempt on record and a state change at `moved`. */
+  const fresh = (detail: Detail): void => {
+    detail.attempts = [];
+    detail.ticket.history = [{ at: minute(2.5), from: "ready", to: "provisioning", note: "worktree provisioned and materialized" }];
+  };
+  const STAGES = ["Review round 1", "Running check Tests", "Sealing the change set", "Executing", "Provisioning the worktree"];
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("lists each stage a live run announces as it arrives, newest first with its time, and none of the agents' words", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(start);
+    const view = render(
+      <QueryClientProvider client={client}>
+        <LoopScreen {...context([run("")], fresh)} />
+      </QueryClientProvider>,
+    );
+    lines.forEach((_, index) => {
+      vi.setSystemTime(start + (index + 1) * 60_000);
+      act(() =>
+        view.rerender(
+          <QueryClientProvider client={client}>
+            <LoopScreen {...context([run(lines.slice(0, index + 1).map((each) => `  ${each}\n`).join(""))], fresh)} />
+          </QueryClientProvider>,
+        ),
+      );
+    });
+    const steps = listed();
+    expect(steps.map(said)).toEqual([...STAGES.slice(0, 3), "worktree provisioned and materialized", ...STAGES.slice(3)]);
+    // Each at the moment it arrived; the state change keeps its place by its own.
+    expect(steps.map((step) => step.querySelector("time")?.dateTime)).toEqual([
+      minute(7),
+      minute(6),
+      minute(5),
+      minute(2.5),
+      minute(2),
+      minute(1),
+    ]);
+    expect(steps[0]!.className).toBe("current");
+    expect(steps.slice(1).every((step) => step.className === "complete")).toBe(true);
+    const text = screen.getByRole("region", { name: "Description of steps" }).textContent ?? "";
+    for (const words of ["dead-letter", "permanently failed", "retry.ts", "Running check retry"]) expect(text).not.toContain(words);
+    // The review is still going: what it found is not known yet.
+    expect(within(steps[0]!).queryByRole("button")).toBeNull();
+  });
+
+  it("rebuilds the same stages from the records once the run ended, with the check's result and the review's count behind the i", () => {
+    const ended = run(lines.map((each) => `  ${each}\n`).join(""), { state: "completed", endedAt: minute(9) });
+    mount(
+      context([ended], (detail) => {
+        fresh(detail);
+        const attempt = detail.attempts.length ? detail.attempts[0]! : structuredClone(sample.detail.attempts[0]!);
+        detail.attempts = [
+          {
+            ...attempt,
+            run: 1,
+            round: 0,
+            startedAt: minute(1),
+            checks: [{ name: "Tests", status: "passed", detail: "pnpm test\n\n12 passed" }],
+            // The executor's four minutes, after which the change set is sealed and checked.
+            bundles: [
+              {
+                kind: "execution",
+                subject_id: attempt.id,
+                created_at: minute(6),
+                inputs: { round_kind: "execute" },
+                usage: { wall_clock_ms: 4 * 60_000 },
+              } as never,
+            ],
+            verification: null,
+            review: { ...attempt.review!, created_at: minute(6) },
+          },
+        ];
+      }),
+    );
+    const steps = listed();
+    expect(steps.map(said)).toEqual([...STAGES.slice(0, 3), "worktree provisioned and materialized", ...STAGES.slice(3)]);
+    expect(steps.map((step) => step.querySelector("time")?.dateTime)).toEqual([
+      minute(6),
+      minute(5),
+      minute(5),
+      minute(2.5),
+      minute(1),
+      minute(1),
+    ]);
+    expect(hint(within(steps[0]!).getByRole("button", { name: "What the runner recorded" }))).toBe(
+      "The review left one finding open.",
+    );
+    expect(hint(within(steps[1]!).getByRole("button", { name: "What the runner recorded" }))).toBe(
+      "Result: passed.\n\npnpm test\n\n12 passed",
+    );
+    expect(within(steps[2]!).queryByRole("button")).toBeNull();
+    const text = screen.getByRole("region", { name: "Description of steps" }).textContent ?? "";
+    expect(text).not.toContain("Where should a permanently failed email go?");
+  });
+});
+
+describe("the strip of commands, spend and files", () => {
+  const START = "2026-09-08T09:40:00.000Z";
+  /** The strip's tiles, by their names. */
+  const strip = (): Record<string, string> =>
+    Object.fromEntries(
+      [...document.querySelectorAll(".metric-strip > div")].map((tile) => [
+        tile.querySelector("dt")!.textContent,
+        tile.querySelector("dd")!.textContent,
+      ]),
+    );
+  const tally = (over: Partial<Tally>): string =>
+    "  " + tallyLine({ commands: 0, files: 0, input_tokens: 0, output_tokens: 0, micros: 0, unpriced: 0, partial: 0, ...over }) + "\n";
+  const run = (log: string, ended = false): Job =>
+    failedRun({
+      id: "run-strip",
+      state: ended ? "completed" : "running",
+      startedAt: START,
+      endedAt: ended ? "2026-09-08T09:50:00.000Z" : null,
+      error: null,
+      log,
+    });
+  /** PRB-412 with nothing on record, so the strip starts at zero, and a 12-minute stall window. */
+  const fresh = (detail: Detail): void => {
+    detail.attempts = [];
+    detail.effective.stallMinutes = 12;
+  };
+  const page = (job: Job, change: (detail: Detail) => void = fresh) => (
+    <QueryClientProvider client={client}>
+      <LoopScreen {...context([job], change)} />
+    </QueryClientProvider>
+  );
+
+  it("counts along with a live run's tally, reads none of the agents' words, and ends on the same figures from the records", () => {
+    const view = render(page(run("  executing\n")));
+    expect(strip()).toMatchObject({ Commands: "0", Spent: "$0.00 0 tokens · stops after 12 min idle", "Files touched": "0" });
+
+    let log = "  executing\n" + tally({ commands: 1, files: 1, input_tokens: 1200, output_tokens: 34, unpriced: 1 });
+    act(() => view.rerender(page(run(log))));
+    // Nothing priced yet: the tokens alone.
+    expect(strip()).toMatchObject({ Commands: "1", Spent: "1,234 tokens stops after 12 min idle", "Files touched": "1" });
+
+    log +=
+      "  " + spokenLine("executor", tally({ commands: 99, files: 99, micros: 9_000_000 }).trim())! + "\n" +
+      "  Codex ls src\n" +
+      tally({ commands: 4, files: 2, input_tokens: 4000, output_tokens: 321, micros: 1_500_000 });
+    act(() => view.rerender(page(run(log))));
+    const live = strip();
+    expect(live).toMatchObject({ Commands: "4", Spent: "$1.50 4,321 tokens · stops after 12 min idle", "Files touched": "2" });
+    expect(live["Est. time remaining"]).toBe("Not estimated");
+
+    // The run ended and the records hold its attempt: the tiles read them, and say the same.
+    act(() =>
+      view.rerender(
+        page(run(log, true), (detail) => {
+          fresh(detail);
+          const attempt = structuredClone(sample.detail.attempts[0]!);
+          detail.attempts = [
+            {
+              ...attempt,
+              startedAt: "2026-09-08T09:40:05.000Z",
+              // Five asked for, one refused: the strip counts the four admitted, as the tally did.
+              ceilings: [{ resource: "attempt_commands", used: 5, ceiling: null, hit: false }],
+              admittedCommands: 4,
+              changes: [
+                { path: "src/a.ts", change_kind: "modified", additions: 1, deletions: 0 },
+                { path: "src/b.ts", change_kind: "added", additions: 3, deletions: 0 },
+              ],
+              bundles: [
+                { kind: "execution", subject_id: attempt.id, created_at: "2026-09-08T09:45:00.000Z", inputs: {}, usage: { input_tokens: 3900, output_tokens: 300, cost_micros: 1_200_000, cost_basis: "transport_reported", wall_clock_ms: 1 } },
+                { kind: "review", subject_id: "rev_1", created_at: "2026-09-08T09:46:00.000Z", inputs: {}, usage: { input_tokens: 100, output_tokens: 21, cost_micros: 300_000, cost_basis: "provider_list_estimate", wall_clock_ms: 1 } },
+              ] as never,
+            },
+          ];
+        }),
+      ),
+    );
+    expect(strip()).toEqual(live);
   });
 });

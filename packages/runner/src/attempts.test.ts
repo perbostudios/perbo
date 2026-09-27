@@ -284,6 +284,22 @@ describe("writing the attempts record", () => {
     ).toThrow(AttemptsRecordError);
     expect(readFileSync(path, "utf8")).toBe("{ this is not the record }\n");
   });
+
+  it("names five of what it could not read, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+    const path = join(scratch("perbo-unreadable-many-"), "state", `${RECORD_TICKET}.attempts.json`);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, JSON.stringify({ ticket_id: RECORD_TICKET, attempts: [1, 2, 3, 4, 5, 6, 7] }));
+
+    let said = "";
+    try {
+      appendAttempts({ path, ticket_id: RECORD_TICKET, attempts: [makeAttempt({ attempt_id: "att_run2round0" })] });
+    } catch (error) {
+      said = error instanceof Error ? error.message : String(error);
+    }
+    expect(said).toContain("attempts.4:");
+    expect(said).not.toContain("attempts.5:");
+    expect(said).toMatch(/\n {2}and 2 more$/);
+  });
 });
 
 /**

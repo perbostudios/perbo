@@ -18,15 +18,25 @@ import {
 } from "../shell/dock-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../../shared/shortcuts.js";
 import { withDraft } from "../shell/create.js";
-import { untouchedPlanning } from "../../shared/contract-editing.js";
+import { REREAD_COULD_NOT_START, untouchedPlanning } from "../../shared/contract-editing.js";
+import { PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
+import { handlers } from "../../sample-host/handlers.js";
 import { isLive } from "../../shared/jobs.js";
-import { DELETE_WAITS_FOR_COMMANDS } from "../../shared/discard.js";
-import { job } from "../../sample-host/records.js";
+import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../../shared/discard.js";
+import { job, sampleReadings } from "../../sample-host/records.js";
+import { READING_FAILED } from "./ReadingFailed.js";
+import { confirmRoute } from "./panes.js";
 import { SpecSection } from "./SpecSection.js";
 import { firstSentence } from "./InterviewDock.js";
 import { GraphInspector } from "./GraphInspector.js";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { EVERY_PROBLEM_RESOLVED, INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
+import {
+  EVERY_PROBLEM_RESOLVED,
+  INTERVIEW_WROTE_THE_SPEC,
+  SPEC_TITLE_MAX_CHARS,
+  TYPED_TEXT_MAX_CHARS,
+} from "../../shared/protocol.js";
+import { typeInto } from "../../test-support/typing.js";
 import type { ExportedName, GraphNodeView, Snapshot } from "../../shared/protocol.js";
 import * as planningBrowser from "@perbo/planning/browser";
 
@@ -50,6 +60,9 @@ afterEach(() => {
   client.clear();
   setPlatformForTests(null);
 });
+/** A spec's bytes as the sample keeps them in place of the repository's folder. */
+const storedSpec = (slug: string): string =>
+  (JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>)[slug] ?? "";
 const newClient = (): QueryClient =>
   new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
 function mount() {
@@ -205,16 +218,9 @@ describe("Create in the rail (SCP-334)", () => {
     const started = sessionId();
     const panes = screen.getByRole("group", { name: "Planning panes" });
     expect(within(panes).getByRole("button", { name: "Spec" }).getAttribute("aria-current")).toBe("page");
-    // No plan yet, so no graph to offer: Spec, the files it is written
-    // against, and what it is likely to touch.
-    expect(railNames().slice(0, 6)).toEqual([
-      "Create",
-      "Spec",
-      "Explorer",
-      "Impact",
-      "Home",
-      "Archive",
-    ]);
+    // No plan yet, so nothing measured against one: the Spec and the files
+    // it is written against (D-NEW-basic-and-epic-flows).
+    expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await screen.findByRole("heading", { name: /Hi, / });
     expect(screen.queryByRole("group", { name: "Planning panes" })).toBeNull();
@@ -333,10 +339,24 @@ describe("Create in the rail (SCP-334)", () => {
     ).toContain("spec written, no plan yet");
   });
 
+  it("offers a spec nobody has named as Untitled, which its file never says (D-118)", async () => {
+    const unnamed = planningBrowser.renderSpec(
+      { ...planningBrowser.EMPTY_SPEC_TEXT, outcome: "Dark mode follows the system." },
+      { highWater: 0, existing: [] },
+    ).markdown;
+    expect(unnamed).not.toMatch(/^# |Untitled/m);
+    localStorage.setItem("perbo:preview-specs", JSON.stringify({ "have-a-dark-mode": unnamed }));
+    mount();
+    const picker = await openPicker();
+    expect(
+      within(picker).getByRole("button", { name: /^Untitled/ }).textContent,
+    ).toContain("spec written, no plan yet");
+  });
+
   it("lists a session Send just opened, before the host's refresh lands", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
-    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, admitted: false, outcome: "An older draft", phase: "editing" as const, nodes: 0, drift: null, scope: { paths: [], prohibited: [] }, specSlug: null, title: null, lastPane: null, lastView: null }] };
+    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, admitted: false, outcome: "An older draft", phase: "editing" as const, nodes: 0, drift: null, scope: { paths: [], prohibited: [] }, specSlug: null, title: null, lastPane: null, confirmed: null, read: null, spec: null, impact: null }] };
     const seeded = withDraft(stale, session);
     expect(seeded.drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
     expect(withDraft(seeded, session).drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
@@ -472,6 +492,10 @@ describe("clicking away from a planning nothing was put into (D-129)", () => {
     location.hash = `planning/${opened.id}/graph`;
     mount();
     await screen.findByLabelText("Message the chat");
+    // Held to what a turn carries where it is typed (D-NEW-nothing-shown-is-cut).
+    const box = screen.getByLabelText("Message the chat") as HTMLTextAreaElement;
+    typeInto(box, "m".repeat(TYPED_TEXT_MAX_CHARS + 50));
+    expect(box.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
     fireEvent.change(screen.getByLabelText("Message the chat"), { target: { value: "Can you add a dark mode toggle" } });
     fireEvent.keyDown(screen.getByLabelText("Message the chat"), { key: "Enter" });
     await screen.findByText(/Noted:/);
@@ -496,7 +520,6 @@ describe("clicking away from a planning nothing was put into (D-129)", () => {
     const id = await startPlanning();
     fireEvent.click(pane("Explorer"));
     await screen.findByRole("tree", { name: "Tracked files" });
-    fireEvent.click(pane("Impact"));
     fireEvent.click(pane("Spec"));
     await screen.findByLabelText("Spec title");
     await settle();
@@ -605,9 +628,12 @@ describe("a planning reopens where it was left (D-130)", () => {
     await reopenFromPicker("Split the settings page into tabs");
     await screen.findByRole("tree", { name: "Tracked files" });
     expect(location.hash).toBe(`#planning/${id}/explorer`);
-    // And the contract's way back, which would otherwise be the graph.
+    // And the contract's own address opens it as the planning's contract tab,
+    // whose other tabs go back into the planning on their own panes.
     location.hash = `task/${session.repoId}/${session.key!}/contract`;
-    fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 }));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/contract`), { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
+    fireEvent.click(pane("Explorer"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${id}/explorer`));
   });
 
@@ -638,9 +664,9 @@ describe("a planning reopens where it was left (D-130)", () => {
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
     await reopenFromPicker(outcome);
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     const id = sessionId();
-    await waitFor(async () => expect(await lastPane(id)).toBe("criteria"));
+    await waitFor(async () => expect(await lastPane(id)).toBe("contract"));
     const session = await editingRead(id);
     expect([session.key, session.nodes, session.specSlug]).toEqual([key, 0, null]);
     location.hash = `task/${repoId}/${key}/contract`;
@@ -1950,12 +1976,15 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByText("Drafting the plan from your spec");
     // It lands on the plan, which is the point of having drafted one: the
     // drafter divides this spec into two nodes, so the plan has a graph and
-    // the graph is where the person goes. Work it does not divide lands on the
-    // criteria instead, which is that plan's own pane.
+    // the graph is where the person goes. Work it does not divide lands where
+    // its checks say, with a pop-up saying the task is simple; a divided plan
+    // has its graph, and no pop-up (D-NEW-basic-and-epic-flows).
     await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/), {
       timeout: 5000,
     });
     await screen.findByRole("button", { name: "Confirm the plan" }, { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
 
     // Back in planning, each requirement carries the node its criteria sit in,
     // beside its own id rather than in a table under the section: the id is the
@@ -2111,11 +2140,10 @@ describe("the Graph pane (SCP-316)", () => {
     // ⇧⌘↵, which is fixed and cannot be rebound.
     expect(effectiveShortcuts({}).approve).toBe("Shift+Meta+Enter");
     fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
-    // By way of the plan read against its spec, which the shortcut cannot
-    // skip; a plan just drafted agrees with its spec, so the reading lands on
-    // the contract by itself.
-    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+    // By way of the Problems pane, which the shortcut cannot skip; a plan just
+    // drafted was read by its drafting and nothing has moved since, so it
+    // goes on to the contract by itself.
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
     // Nothing is approved and nothing runs until it is approved there.
     expect((await detail()).ticket.approved_at).toBeNull();
     // Scoped to this plan: the sample workspace carries a stopped run of its
@@ -2128,10 +2156,23 @@ describe("the Graph pane (SCP-316)", () => {
     ).toBe(false);
   });
 
-  it("confirms the plan with the button by the same way", async () => {
+  it("confirms the plan with the button by the same way, reading nothing where nothing moved since its drafting read it", async () => {
     const plan = await openGraph();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
-    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+    const readings = async () =>
+      (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+    expect((await editingRead(plan.id)).read).not.toBeNull();
+    const before = await readings();
+    const visited: string[] = [];
+    const record = (event: HashChangeEvent) => visited.push(new URL(event.newURL).hash);
+    window.addEventListener("hashchange", record);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
+    } finally {
+      window.removeEventListener("hashchange", record);
+    }
+    expect(visited[0]).toBe(`#planning/${plan.id}/drift`);
+    expect(await readings()).toBe(before);
   });
 
   it("makes its footer as tall as the chat's box and the space beneath it, so their tops are level", async () => {
@@ -2321,19 +2362,20 @@ describe("the Graph pane (SCP-316)", () => {
       fireEvent.click(card);
       const inspector = await screen.findByRole("region", { name: "Node node_1" });
       const node = (await graphOf(plan)).nodes.find((each) => each.id === "node_1")!;
-      // The card reads out the title and each criterion and how it is proven;
-      // the paths are the inspector's alone.
+      // The card reads out the title, under it how many criteria it covers
+      // and its paths (D-NEW-basic-and-epic-flows),
+      // and each criterion and how it is proven; the inspector changes them.
       expect(card.textContent).toContain(node.title);
       for (const criterion of node.criteria) {
         expect(card.textContent).toContain(criterion.text);
         expect(card.textContent).toContain(criterion.kind);
       }
       expect(node.paths.length).toBeGreaterThan(0);
-      for (const path of node.paths) {
-        expect(card.textContent).not.toContain(path);
-        expect(inspector.textContent).toContain(path);
-      }
-      // The inspector keeps what changes them.
+      expect(card.querySelector(".node-summary")?.textContent).toBe(
+        `${node.criteria.length} ${node.criteria.length === 1 ? "criterion" : "criteria"} · ${node.paths.join(" · ")}`,
+      );
+      for (const path of node.paths) expect(inspector.textContent).toContain(path);
+      // The inspector reads the criteria and keeps what changes the paths and the order.
       expect(within(inspector).getByLabelText("Criterion ac_1")).toBeTruthy();
       expect(within(inspector).getByLabelText("Add a path or glob")).toBeTruthy();
       expect(within(inspector).getByRole("button", { name: "Remove the edge node_1 to node_2" })).toBeTruthy();
@@ -2680,23 +2722,58 @@ describe("the Graph pane (SCP-316)", () => {
     });
   });
 
-  it("edits a criterion through the one edit path, and undoes the latest edit", async () => {
+  it("edits an epic's criteria by hand in the inspector, through the one edit path, as the person's and marked nowhere (D-100, D-128)", async () => {
     const plan = await openGraph();
-    const before = (await graphOf(plan)).criteria[0]!.text;
+    const marks = (): number => document.querySelectorAll(".change--added, .change--removed").length;
     fireEvent.click(nodeAt(/^Node node_1/));
-    const criterion = await screen.findByLabelText("Criterion ac_1");
-    fireEvent.change(criterion, { target: { value: "A person can choose the colour mode." } });
-    fireEvent.blur(criterion);
+    const inspector = await screen.findByRole("region", { name: "Node node_1" });
+    const first = (await graphOf(plan)).criteria[0]!;
+    // Reworded in its box, written as the box is left.
+    const box = within(inspector).getByRole("textbox", { name: "Criterion ac_1" });
+    expect((box as HTMLTextAreaElement).value).toBe(first.text);
+    fireEvent.change(box, { target: { value: "A person can choose the colour mode." } });
+    fireEvent.blur(box);
+    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toBe("A person can choose the colour mode."));
+    // The person's own edit, recorded as theirs, and marked nowhere: not on the
+    // card, not in the inspector.
+    expect((await graphOf(plan)).history.at(-1)?.author).toBe("you");
+    await waitFor(async () => expect((await editingRead(plan.id)).change?.by).toBe("person"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(marks()).toBe(0);
+    expect(screen.queryByLabelText("Criterion ac_1 as the chat's last change left it")).toBeNull();
+    // How it is proven, chosen by hand too, keeping what it asserts.
+    const kinds = within(inspector).getByRole("group", { name: "How ac_1 is proven" });
+    const other = within(kinds)
+      .getAllByRole("button")
+      .find((button) => button.getAttribute("aria-pressed") === "false")!;
+    fireEvent.click(other);
     await waitFor(async () =>
-      expect((await graphOf(plan)).criteria[0]?.text).toBe("A person can choose the colour mode."),
+      expect((await graphOf(plan)).criteria[0]).toMatchObject({
+        kind: other.textContent,
+        assertion: first.assertion,
+        text: "A person can choose the colour mode.",
+      }),
     );
-    const history = await screen.findByRole("region", { name: "Edits to this plan" });
-    expect(within(history).getAllByRole("listitem")).toHaveLength(1);
-    // The edit is the person's own, and admission counts it (D-072).
-    expect((await graphOf(plan)).editCount).toBeGreaterThan(0);
-    expect((await graphOf(plan)).history[0]?.author).toBe("you");
-    fireEvent.click(within(history).getByRole("button", { name: /^Undo/ }));
-    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toBe(before));
+    expect(marks()).toBe(0);
+  });
+
+  it("rewords by hand the placeholder criterion the Node button adds", async () => {
+    const plan = await openGraph();
+    const placeholder = "New criterion: say what must be true.";
+    fireEvent.click(screen.getByRole("button", { name: "Node" }));
+    await waitFor(async () => expect((await graphOf(plan)).criteria.some((each) => each.text === placeholder)).toBe(true));
+    const added = (await graphOf(plan)).nodes.find((node) => node.criteria.some((each) => each.text === placeholder))!;
+    const id = added.criteria[0]!.id;
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^Node ${added.id}`) }));
+    const inspector = await screen.findByRole("region", { name: `Node ${added.id}` });
+    const box = within(inspector).getByRole("textbox", { name: `Criterion ${id}` });
+    expect((box as HTMLTextAreaElement).value).toBe(placeholder);
+    fireEvent.change(box, { target: { value: "The colour mode is kept across a restart." } });
+    fireEvent.blur(box);
+    await waitFor(async () =>
+      expect((await graphOf(plan)).criteria.find((each) => each.id === id)?.text).toBe("The colour mode is kept across a restart."),
+    );
+    expect((await graphOf(plan)).criteria.some((each) => each.text === placeholder)).toBe(false);
   });
 
   it("edits the text of a criterion proven by hand, keeping who proves it and why", async () => {
@@ -2730,8 +2807,188 @@ describe("the Graph pane (SCP-316)", () => {
         text: "The colour mode is chosen by eye.",
         kind: "manual",
         assertion: "Open Settings and switch modes",
+        manual: { reviewer: "the designer", reason: "a colour is judged by eye" },
       }),
     );
+  });
+
+  it("reads a criterion edited by hand in the inspector against the spec afresh at Confirm the plan (D-128)", async () => {
+    // A hand edit moves the plan's promise, so the verdict drafting wrote no
+    // longer holds: the reading on the way to the contract judges the edited
+    // words rather than printing the draft's agreeing verdict back.
+    const plan = await openGraph();
+    const drifts = async () =>
+      (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key);
+    fireEvent.click(nodeAt(/^Node node_1/));
+    const inspector = await screen.findByRole("region", { name: "Node node_1" });
+    const box = within(inspector).getByRole("textbox", { name: "Criterion ac_1" });
+    fireEvent.change(box, { target: { value: "A person can choose the colour mode, after a restart." } });
+    fireEvent.blur(box);
+    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toMatch(/after a restart/));
+    const before = (await drifts()).length;
+    fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+    await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+    const read = (await drifts()).slice(before);
+    expect(read).toHaveLength(1);
+    expect(read[0]!.result).toMatchObject({ cached: false, findings: [{ heading: "Criterion 1 and R1" }] });
+    expect(JSON.stringify(read[0]!.result)).toContain("after a restart");
+    // The problem holds the way on: no way past it, and not on to the contract.
+    expect(screen.queryByRole("button", { name: "Go on to the contract anyway" })).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+  });
+
+  /**
+   * Every try of a reading made to fail, up to `times`, as a reading with no
+   * credential fails, and the host's wait between tries made instant.
+   */
+  function readingsDoNotRun(times = Infinity) {
+    const paused: number[] = [];
+    let tries = 0;
+    const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(async (ms) => {
+      paused.push(ms);
+    });
+    const attempt = vi.spyOn(sampleReadings, "attempt").mockImplementation(() => {
+      tries += 1;
+      if (tries <= times) throw new Error("No credential for Claude. Run `claude login`, then try again.");
+    });
+    return {
+      paused,
+      tries: () => tries,
+      restore: () => {
+        pause.mockRestore();
+        attempt.mockRestore();
+      },
+    };
+  }
+  /** An epic's plan open on its Graph with a criterion reworded by hand, so Confirm the plan reads it. */
+  async function handEdited() {
+    const plan = await openGraph();
+    fireEvent.click(nodeAt(/^Node node_1/));
+    const inspector = await screen.findByRole("region", { name: "Node node_1" });
+    const box = within(inspector).getByRole("textbox", { name: "Criterion ac_1" });
+    fireEvent.change(box, { target: { value: "A person can choose the colour mode, after a restart." } });
+    fireEvent.blur(box);
+    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toMatch(/after a restart/));
+    return plan;
+  }
+
+  it("says in a pop-up that the plan could not be checked where every try of Confirm the plan's reading fails, and puts the person back on the Graph with nothing confirmed", async () => {
+    const plan = await handEdited();
+    const failing = readingsDoNotRun();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      // Tried four times, 2, 4 and 8 seconds apart, before it was said.
+      expect(failing.tries()).toBe(4);
+      expect(failing.paused).toEqual([2_000, 4_000, 8_000]);
+      expect(within(popup).getByText(`${READING_FAILED}: No credential for Claude.`)).toBeTruthy();
+      expect(popup.textContent).toContain("No credential for Claude. Run `claude login`, then try again.");
+      // One way off it, and none on to the contract.
+      expect(within(popup).getByRole("button", { name: "Got it" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Go on to the contract anyway" })).toBeNull();
+      fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+      // Back where Confirm the plan was pressed, with it offered again, and
+      // nothing confirmed: the contract was never reached.
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+      await screen.findByRole("heading", { name: "Execution graph" });
+      expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull();
+      const again = screen.getByRole("button", { name: "Confirm the plan" });
+      expect(again.hasAttribute("disabled")).toBe(false);
+      const { read } = await sampleBridge.request({ kind: "editingRead", id: plan.id });
+      // Pressed again, the plan is read again.
+      failing.restore();
+      fireEvent.click(again);
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 8000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      expect((await sampleBridge.request({ kind: "editingRead", id: plan.id })).read).not.toBe(read);
+    } finally {
+      failing.restore();
+    }
+  });
+
+  it("puts a person who confirmed from the Explorer back on the Explorer where the reading does not run", async () => {
+    const plan = await handEdited();
+    location.hash = `planning/${plan.id}/explorer`;
+    await waitFor(async () =>
+      expect((await sampleBridge.request({ kind: "drafts" }))?.find((draft) => draft.id === plan.id)?.lastPane).toBe("explorer"),
+    );
+    const failing = readingsDoNotRun();
+    try {
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }, { timeout: 5000 }));
+      const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+      fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
+    } finally {
+      failing.restore();
+    }
+  });
+
+  it("stays on the Problems page where a reading that found problems lands ahead of the record it wrote", async () => {
+    // The reading's job settles a round trip ahead of the session record it
+    // wrote, which the pane reads over the bridge: a verdict with findings,
+    // over a record that does not show them yet, is not the way on.
+    const plan = await handEdited();
+    const stale = await sampleBridge.request({ kind: "editingRead", id: plan.id });
+    const original = bridge.request.bind(bridge);
+    const held = vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
+      request.kind === "editingRead" && request.id === plan.id
+        ? Promise.resolve(stale)
+        : original(request)) as typeof bridge.request);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await waitFor(async () => {
+        const read = (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key);
+        expect(read.at(-1)?.state).toBe("completed");
+        expect((read.at(-1)?.result as { findings: unknown[] }).findings.length).toBeGreaterThan(0);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+    } finally {
+      held.mockRestore();
+    }
+  });
+
+  it("goes on as it would have where Confirm the plan's reading fails once and then runs", async () => {
+    const plan = await handEdited();
+    const failing = readingsDoNotRun(1);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 8000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      expect(failing.tries()).toBe(2);
+      expect(failing.paused).toEqual([2_000]);
+      expect(screen.queryByRole("dialog", { name: "The plan could not be checked" })).toBeNull();
+    } finally {
+      failing.restore();
+    }
+  });
+
+  it("undoes the latest edit of the plan from its history", async () => {
+    const plan = await openGraph();
+    const before = (await graphOf(plan)).criteria[0]!;
+    await sampleBridge.request({
+      kind: "graphEdit",
+      repoId: plan.repoId,
+      key: plan.key,
+      edit: {
+        op: "set_criterion",
+        id: before.id,
+        text: "A person can choose the colour mode.",
+        expected_verification: { kind: before.kind, assertion: before.assertion },
+      },
+    });
+    await waitFor(async () =>
+      expect((await graphOf(plan)).criteria[0]?.text).toBe("A person can choose the colour mode."),
+    );
+    const history = await screen.findByRole("region", { name: "Edits to this plan" });
+    await waitFor(() => expect(within(history).getAllByRole("listitem")).toHaveLength(1));
+    expect((await graphOf(plan)).history[0]?.author).toBe("you");
+    fireEvent.click(within(history).getByRole("button", { name: /^Undo/ }));
+    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toBe(before.text));
   });
 
   it("draws and removes an edge, which is approach and not contract", async () => {
@@ -2848,57 +3105,64 @@ describe("the Graph pane (SCP-316)", () => {
     await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
     await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
     expect((await graphOf(plan)).criteria.length).toBeGreaterThan(0);
-    location.hash = `planning/${plan.id}/criteria`;
+    location.hash = `planning/${plan.id}/explorer`;
     mount();
-    // Work with nothing to divide has no graph to curate, so its plan is the
-    // criteria it will be judged against, and that is the pane the rail
-    // offers. The Graph is not among them.
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    // Work with nothing to divide has no graph to curate, and its plan is the
+    // criteria its contract shows: the rail offers no Graph and no pane of
+    // the criteria's own (D-NEW-basic-and-epic-flows).
+    await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
     const panes = screen.getByRole("group", { name: "Planning panes" });
-    await waitFor(() => expect(within(panes).getByRole("button", { name: "Plan" })).toBeTruthy());
-    expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull();
+    await waitFor(() => expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull());
+    // Impact joins them only where the check the planning runs as it opens
+    // finds paths outside the scope.
+    expect(railNames().slice(0, 3)).toEqual(["Create", "Spec", "Explorer"]);
+    expect(railNames()).not.toContain("Graph");
 
     const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
     // And the way onward is the same: the contract is where what freezes is
     // stated, whether or not the work was divided, and approving happens
     // there and nowhere else.
-    const next = await screen.findByRole("button", { name: "Next" });
+    const next = await screen.findByRole("button", { name: "Confirm contract" });
     await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
+    const readings = async () =>
+      (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+    const before = await readings();
     fireEvent.click(next);
-    // By way of the plan read against its spec: nothing here moved a
-    // promise, so the reading it was drafted with holds and lands on the
-    // contract by itself.
-    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+    // Straight to the contract: a basic ticket's plan is read against its
+    // spec at the contract's own confirm, not on the way there
+    // (D-NEW-basic-and-epic-flows).
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
+    expect(await readings()).toBe(before);
     expect((await detail()).ticket.approved_at).toBeNull();
   });
 
-  it("reopens from the picker on the contract it was left at, whose way back is the Graph it was confirmed from, not the reading on the way (D-130)", async () => {
+  it("reopens from the picker on the contract it was left at, and on the Graph once the person went back to it by its tab (D-130)", async () => {
     const plan = await openGraph();
     await waitFor(async () => expect(await lastPane(plan.id)).toBe("graph"));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
     );
     fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
-    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+    // Through the Problems pane, which reads nothing where the plan is as its
+    // drafting read it, and so on to the contract at once.
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBe("contract"));
-    expect(await lastPane(plan.id)).toBe("graph");
+    // The reading on the way is never where it was left: the contract is.
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await screen.findByRole("heading", { name: /Hi, / });
     const picker = await openPicker();
     const { title } = (await sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key })).ticket;
     fireEvent.click(within(picker).getByRole("button", { name: (name) => name.startsWith(title) }));
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    expect(location.hash).toMatch(/^#task\//);
-    fireEvent.click(screen.getByRole("button", { name: "Back to planning" }));
+    expect(location.hash).toBe(`#planning/${plan.id}/contract`);
+    fireEvent.click(pane("Graph"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
     await screen.findByRole("heading", { name: "Execution graph" });
     // Back on the Graph, that is where it was left: the ticket's own page
     // sends the person there again, not to the contract.
-    await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBeNull());
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("graph"));
     location.hash = ["task", plan.repoId, plan.key].join("/");
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
     await screen.findByRole("heading", { name: "Execution graph" });
@@ -2929,10 +3193,14 @@ describe("the Graph pane (SCP-316)", () => {
     /** The Problems pane's footer, left to right: the note, then the way back, then the way on. */
     const footerOrder = (): (string | null)[] =>
       [...document.querySelector('[data-screen="drift"] .pane-confirm')!.children].map((each) => each.textContent);
-    const QUIET_WAY_ON = ["Going on leaves the problems open.", "Back to the plan", "Go on to the contract anyway"];
+    /** The footer while a problem is open or waited on: the way back, and no way past. */
+    const WAY_BACK = ["Back to the plan"];
     /** That planning open on the Problems pane, with the first problem in front of the person. */
     async function problems(): Promise<{ id: string; repoId: string; key: string }> {
       const plan = await parted();
+      // Confirmed, as a Confirm the plan press confirms: the one arrival at
+      // the Problems pane that reads.
+      confirmRoute({ repoId: plan.repoId, key: plan.key, sessionId: plan.id, approved: false, basic: false });
       location.hash = `planning/${plan.id}/drift`;
       mount();
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
@@ -2965,36 +3233,47 @@ describe("the Graph pane (SCP-316)", () => {
       return plan;
     }
 
-    it("goes Back to planning from the contract to the plan, not to the reading, after a resolved round (D-130)", async () => {
+    it("reads nothing on a later arrival at Problems where a confirm's route ended elsewhere (D-NEW-basic-and-epic-flows)", async () => {
+      const plan = await parted();
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      const before = await readings();
+      // A confirm on its way to Problems, whose route ends on the Graph instead.
+      confirmRoute({ repoId: plan.repoId, key: plan.key, sessionId: plan.id, approved: false, basic: false });
+      location.hash = `planning/${plan.id}/graph`;
+      mount();
+      await screen.findByRole("heading", { name: "Execution graph" });
+      // Arrived at later, as by the rail: the last reading's problems, and no reading.
+      location.hash = `planning/${plan.id}/drift`;
+      await waitFor(() => expect(document.querySelector('[data-screen="drift"]')).not.toBeNull(), { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await readings()).toBe(before);
+    });
+
+    it("moves the person back to the Graph once every problem is resolved, the tab gone, and confirms from there without reading again (D-130)", async () => {
       const plan = await confirmedIntoProblems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
+      // Resolved: back where Confirm the plan is, with Problems out of the rail.
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 8000 });
+      await screen.findByRole("heading", { name: "Execution graph" });
+      await waitFor(() => expect(railPanes()).not.toContain("Problems"));
+      expect(screen.queryByRole("heading", { name: "Every problem is resolved" })).toBeNull();
+      // The reading that resolved them is of the plan as it stands, so the
+      // confirm reads nothing again and goes on to the contract.
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
+      const before = await readings();
       fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
-      expect(await lastPane(plan.id)).toBe("graph");
-      fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 }));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
+      expect(await readings()).toBe(before);
+      await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
+      fireEvent.click(pane("Graph"));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
       await screen.findByRole("heading", { name: "Execution graph" });
-    });
-
-    it("goes Back to planning from the contract to the pane the plan was confirmed from, where that is not the plan's own (D-130)", async () => {
-      const plan = await problems();
-      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
-      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      location.hash = `planning/${plan.id}/explorer`;
-      await screen.findByRole("tree", { name: "Tracked files" });
-      await waitFor(async () => expect(await lastPane(plan.id)).toBe("explorer"));
-      const onward = screen.getByRole("button", { name: "Confirm the plan" });
-      await waitFor(() => expect(onward.hasAttribute("disabled")).toBe(false));
-      fireEvent.click(onward);
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
-      // The plan's own pane is the Graph, so landing there would be the
-      // fallback and not where the planning was left.
-      fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 }));
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
-      await screen.findByRole("tree", { name: "Tracked files" });
     });
 
     it("reopens on the Problems page while problems are open, by that rule and not by a record of the page (D-130)", async () => {
@@ -3016,7 +3295,7 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
     });
 
-    it("lands on the Problems pane from Confirm, which joins the rail after Impact, and puts one problem at a time", async () => {
+    it("lands on the Problems pane from Confirm, which joins the rail as its lowest tab, and puts one problem at a time", async () => {
       const plan = await parted();
       location.hash = `planning/${plan.id}/graph`;
       mount();
@@ -3028,7 +3307,7 @@ describe("the Graph pane (SCP-316)", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
       // The reading is said to be under way while it is.
-      await screen.findByRole("heading", { name: "Checking the plan against the spec" });
+      await screen.findByRole("heading", { name: "Checking for drift" });
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
       // One problem, and only one, however many the reading found: the second
       // appears when the first is resolved.
@@ -3036,9 +3315,9 @@ describe("the Graph pane (SCP-316)", () => {
       expect(screen.queryByRole("group", { name: "Criterion 2 and R2" })).toBeNull();
       expect(screen.getByText("Problem 1 of 2")).toBeTruthy();
       expect(screen.getByText("1 more after this")).toBeTruthy();
-      // Now in the rail, after Impact, and current.
+      // Now in the rail, its lowest tab, and current.
       await waitFor(() => expect(railPanes()).toContain("Problems"));
-      expect(railPanes().indexOf("Problems")).toBe(railPanes().indexOf("Impact") + 1);
+      expect(railPanes().at(-1)).toBe("Problems");
       expect(pane("Problems").getAttribute("aria-current")).toBe("page");
       // And no chat beside it: the card is the chat's own card.
       expect(screen.queryByRole("complementary", { name: /^(Interview|Chat)$/ })).toBeNull();
@@ -3114,7 +3393,7 @@ describe("the Graph pane (SCP-316)", () => {
       });
     });
 
-    it("sends the answer as the person's turn, says it is being resolved, puts the next, and offers the contract after the last", async () => {
+    it("sends the answer as the person's turn, says it is being resolved, puts the next, and moves the person back to the Graph after the last", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       // While the interview applies it and the plan is read again, the pane
@@ -3138,18 +3417,19 @@ describe("the Graph pane (SCP-316)", () => {
         resolved: false,
       });
       answerFirst(screen.getByRole("group", { name: "Criterion 2 and R2" }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
+      // None open: the tab goes, and the person is back where they confirm.
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 8000 });
       expect(cards()).toHaveLength(0);
       expect((await editingRead(plan.id)).drift).toEqual({
         open: [],
         resolved: true,
       });
-      // Out of the rail with none open, though the record stands, and the way on is offered.
       expect(railPanes()).not.toContain("Problems");
-      // "The plan", since this is still planning: the contract is where it leads.
-      expect(screen.queryByRole("button", { name: "Confirm the contract" })).toBeNull();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
       fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/));
     });
 
     it("puts the same problem in the chat on the Graph pane, and answering it there advances it", async () => {
@@ -3179,21 +3459,30 @@ describe("the Graph pane (SCP-316)", () => {
       );
       expect(within(next).getByText("Problem 1 of 1")).toBeTruthy();
       expect(within(dock).queryByRole("group", { name: "Criterion 1 and R1" })).toBeNull();
-      // And the pane shows the same one, after the reading it asks for on
-      // arrival — the dock's card is gone with the dock by then.
+      // And the pane shows the same one, with no reading of its own: the
+      // reading after the answer is of the plan as it stands — the dock's
+      // card is gone with the dock by then.
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      await waitFor(async () => expect((await editingRead(plan.id)).drift?.open).toHaveLength(1));
+      const before = await readings();
       location.hash = `planning/${plan.id}/drift`;
-      await screen.findByRole("heading", { name: "Checking the plan against the spec" });
-      expect(screen.queryByRole("complementary", { name: /^(Interview|Chat)$/ })).toBeNull();
+      // The dock's card carries the same name until the Problems page is up,
+      // so the pane's card is looked for once the dock has gone with the Graph.
+      await waitFor(() => expect(screen.queryByRole("complementary", { name: /^(Interview|Chat)$/ })).toBeNull(), {
+        timeout: 5000,
+      });
       await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 });
+      expect(screen.queryByRole("complementary", { name: /^(Interview|Chat)$/ })).toBeNull();
       expect(cards()).toHaveLength(1);
+      expect(await readings()).toBe(before);
     });
 
     it("says in the chat that every problem is resolved, and leaves confirming to the pane beside it", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      location.hash = `planning/${plan.id}/graph`;
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 8000 });
       await screen.findByRole("heading", { name: "Execution graph" });
       const dock = screen.getByRole("complementary", { name: "Chat" });
       const note = await within(dock).findByText(/^Every problem is resolved/);
@@ -3206,7 +3495,7 @@ describe("the Graph pane (SCP-316)", () => {
       expect(onward).toHaveLength(1);
       await waitFor(() => expect(onward[0]!.hasAttribute("disabled")).toBe(false));
       fireEvent.click(onward[0]!);
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/));
     });
 
     it("lands on the problems from the picker and from the ticket's own link while they are open", async () => {
@@ -3225,34 +3514,154 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
     });
 
-    it("goes on to the contract anyway with the problems open, and is not asked again at the same state", async () => {
+    it("refuses Confirm the plan while a problem is open, with no way past it on the page (D-128)", async () => {
       const plan = await problems();
       expect(railPanes()).toContain("Problems");
-      fireEvent.click(screen.getByRole("button", { name: "Go on to the contract anyway" }));
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
-      // On the contract page itself — not only its address — before turning
-      // back, as a person is: the way back through the reading starts there.
-      await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-      // The problems are forgotten with it, and the ticket's own page opens
-      // on the contract it was left at rather than on them.
-      expect((await editingRead(plan.id)).drift).toBeNull();
-      await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBe("contract"));
-      location.hash = `task/${plan.repoId}/${plan.key}`;
-      await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-      expect(location.hash).toBe(`#task/${plan.repoId}/${plan.key}`);
-      // And the pane comes out of the rail.
-      location.hash = `planning/${plan.id}/graph`;
+      // No way past an open problem, on the page or off it.
+      expect(screen.queryByRole("button", { name: "Go on to the contract anyway" })).toBeNull();
+      expect(screen.queryByText("Going on leaves the problems open.")).toBeNull();
+      expect(footerOrder()).toEqual(WAY_BACK);
+      fireEvent.click(screen.getByRole("button", { name: "Back to the plan" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
       await screen.findByRole("heading", { name: "Execution graph" });
-      expect(railPanes()).not.toContain("Problems");
-      // A pane recorded is the last place again: the ticket's page sends the
-      // person into the planning, on that pane.
-      await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBeNull());
-      location.hash = `task/${plan.repoId}/${plan.key}`;
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
-      // Back through the reading lands on the contract without a card.
-      location.hash = `planning/${plan.id}/drift`;
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
-      expect(screen.queryByRole("group", { name: "Criterion 1 and R1" })).toBeNull();
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      const before = await readings();
+      // Confirmed with nothing changed since the reading that found them: not
+      // read again, and held on the problems rather than going on.
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+      expect(await readings()).toBe(before);
+      expect((await editingRead(plan.id)).drift?.open).toHaveLength(2);
+    });
+
+    it("refuses Confirm the plan while a problem is open and no question stands, where the re-read after a turn could not start and nothing moved (D-128)", async () => {
+      const plan = await confirmedIntoProblems();
+      expect((await editingRead(plan.id)).asking).not.toBeNull();
+      // The re-read owed once the turn ends cannot be started.
+      const refused = vi.spyOn(handlers, "driftCheck").mockRejectedValue(new Error("The reviewer could not be reached."));
+      try {
+        fireEvent.click(screen.getByRole("button", { name: "Back to the plan" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+        await screen.findByRole("heading", { name: "Execution graph" });
+        const { read } = await editingRead(plan.id);
+        const before = (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift").length;
+        // A turn in the chat rather than on the card: it takes the card down,
+        // and changes neither the spec nor the plan.
+        await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "Carry on." });
+        await waitFor(
+          async () => {
+            const now = await editingRead(plan.id);
+            expect(now.conversation.some((entry) => entry.line.kind === "note" && entry.line.text.startsWith(REREAD_COULD_NOT_START))).toBe(true);
+            expect((await sampleBridge.request({ kind: "snapshot" })).working ?? []).not.toContain(plan.id);
+          },
+          { timeout: 5000 },
+        );
+        const now = await editingRead(plan.id);
+        expect(now.asking).toBeNull();
+        expect(now.drift?.open).toHaveLength(2);
+        expect(now.read).toBe(read);
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+        );
+        // At the state the last reading was of, with no question standing:
+        // held on the problems, and not read again.
+        fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+        await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+        expect((await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift")).toHaveLength(before);
+      } finally {
+        refused.mockRestore();
+      }
+    });
+
+    /** Whether the loop was asked to start on this plan, or started: approving is either. */
+    const started = async (plan: { repoId: string; key: string }, sent: { mock: { calls: [{ kind: string }][] } }) => ({
+      asked: sent.mock.calls.some(([request]) => request.kind === "run"),
+      runs: (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "run" && job.key === plan.key).length,
+      approved: (await sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key })).ticket.approved_at,
+    });
+    /** That planning's contract, reached by the ticket's own contract address, with its approval ready to press. */
+    async function contractByAddress(plan: { id: string; repoId: string; key: string }): Promise<HTMLButtonElement> {
+      location.hash = `task/${plan.repoId}/${plan.key}/contract`;
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
+      const approve = (await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 })) as HTMLButtonElement;
+      await waitFor(() => expect(approve.disabled).toBe(false));
+      return approve;
+    }
+
+    it("refuses to approve an epic while a problem is open, reached by its contract's own address, starting nothing (D-NEW-basic-and-epic-flows)", async () => {
+      const plan = await problems();
+      const approve = await contractByAddress(plan);
+      const sent = vi.spyOn(bridge, "request");
+      try {
+        fireEvent.click(approve);
+        await screen.findByText(PROBLEMS_HOLD);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(location.hash).toBe(`#planning/${plan.id}/contract`);
+        expect(await started(plan, sent)).toEqual({ asked: false, runs: 0, approved: null });
+      } finally {
+        sent.mockRestore();
+      }
+    });
+
+    it("refuses the approve binding on an epic's contract while a problem is open, starting nothing (D-NEW-basic-and-epic-flows)", async () => {
+      const plan = await problems();
+      await contractByAddress(plan);
+      const sent = vi.spyOn(bridge, "request");
+      try {
+        // ⇧⌘↵ as a Mac reads it.
+        fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
+        await screen.findByText(PROBLEMS_HOLD);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(location.hash).toBe(`#planning/${plan.id}/contract`);
+        expect(await started(plan, sent)).toEqual({ asked: false, runs: 0, approved: null });
+      } finally {
+        sent.mockRestore();
+      }
+    });
+
+    it("reads an epic's plan that moved since the last reading before approving it, by way of the Problems pane (D-NEW-basic-and-epic-flows)", async () => {
+      const plan = await planned();
+      // Drafted, and recorded as read at the state it was drafted at.
+      await waitFor(async () => expect((await editingRead(plan.id)).read).not.toBeNull());
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      const before = await readings();
+      // A criterion reworded by hand, so the plan has moved since that reading.
+      await sampleBridge.request({
+        kind: "graphEdit",
+        repoId: plan.repoId,
+        key: plan.key,
+        edit: {
+          op: "set_criterion",
+          id: "ac_2",
+          text: "Text meets WCAG AAA contrast against its background.",
+          expected_verification: { kind: "test", assertion: "AAA contrast" },
+        },
+      });
+      await waitFor(async () =>
+        expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/AAA/),
+      );
+      mount();
+      const approve = await contractByAddress(plan);
+      const sent = vi.spyOn(bridge, "request");
+      try {
+        fireEvent.click(approve);
+        // Read as at Confirm the plan: on the Problems pane, which puts what it found.
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`), { timeout: 5000 });
+        await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 });
+        expect(await readings()).toBe(before + 1);
+        expect(sent.mock.calls.some(([request]) => request.kind === "driftCheck")).toBe(true);
+        expect(await started(plan, sent)).toEqual({ asked: false, runs: 0, approved: null });
+      } finally {
+        sent.mockRestore();
+      }
     });
 
     it("passes straight through for a plan that was not drafted from its spec", async () => {
@@ -3298,7 +3707,7 @@ describe("the Graph pane (SCP-316)", () => {
       const before = (await sampleBridge.request({ kind: "snapshot" })).jobs.length;
       location.hash = `planning/${opened.id}/drift`;
       mount();
-      await waitFor(() => expect(location.hash).toBe(`#task/${repoId}/${key}/contract`), {
+      await waitFor(() => expect(location.hash).toBe(`#planning/${opened.id}/contract`), {
         timeout: 5000,
       });
       // Nothing was asked of the reading on the way.
@@ -3325,22 +3734,30 @@ describe("the Graph pane (SCP-316)", () => {
           ).toBe(false),
         { timeout: 5000 },
       );
-      // And the way it opens is the reading, as every way from the plan to the contract is.
-      fireEvent.click(screen.getByRole("button", { name: "Open the plan" }));
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      // And the way it opens is through the Problems pane, as every way from
+      // the plan to the contract is.
+      const visited: string[] = [];
+      const record = (event: HashChangeEvent) => visited.push(new URL(event.newURL).hash);
+      window.addEventListener("hashchange", record);
+      try {
+        fireEvent.click(screen.getByRole("button", { name: "Open the plan" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
+      } finally {
+        window.removeEventListener("hashchange", record);
+      }
+      expect(visited[0]).toBe(`#planning/${plan.id}/drift`);
     });
 
-    it("reads again on every arrival, and a hand rewording after a resolved round re-opens the problems", async () => {
+    it("reads again where the plan moved since the last reading, and a hand rewording after a resolved round re-opens the problems", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      // With the round resolved the ticket belongs to its plan again: Home
-      // lands it on the graph, and though the record stands the rail no
-      // longer offers the Problems pane. The resolved page is not where the
-      // planning was left, since the reading is never remembered
-      // (D-130).
-      expect(await lastPane(plan.id)).toBeNull();
+      // With the round resolved the ticket belongs to its plan again: the
+      // person is moved back to the Graph, Home lands it there, and though
+      // the record stands the rail no longer offers the Problems pane. The
+      // Problems pane is never where the planning was left (D-130).
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 8000 });
+      expect(await lastPane(plan.id)).not.toBe("drift");
       location.hash = `task/${plan.repoId}/${plan.key}`;
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
       await screen.findByRole("heading", { name: "Execution graph" });
@@ -3372,8 +3789,8 @@ describe("the Graph pane (SCP-316)", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-      // Read again rather than shown as resolved: the wait, then the problem.
-      await screen.findByRole("heading", { name: "Checking the plan against the spec" });
+      // Read again rather than gone through: the wait, then the problem.
+      await screen.findByRole("heading", { name: "Checking for drift" });
       expect(screen.queryByRole("heading", { name: "Every problem is resolved" })).toBeNull();
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
       expect(screen.getByText("Problem 1 of 1")).toBeTruthy();
@@ -3495,14 +3912,14 @@ describe("the Graph pane (SCP-316)", () => {
           { timeout: 8000, interval: 5 },
         );
         expect(sendable).toBe(false);
-        // And the same from the last problem to the resolved state.
+        // And the same from the last problem until the person is moved back.
         answerFirst(screen.getByRole("group", { name: "Criterion 2 and R2" }));
         await screen.findByRole("heading", { name: "Resolving the problem" });
         await waitFor(
           () => {
-            if (screen.queryByRole("heading", { name: "Every problem is resolved" }) !== null) return;
+            if (location.hash.endsWith("/graph")) return;
             if (screen.queryAllByRole("radio").length > 0) sendable = true;
-            throw new Error("the resolved state is not shown yet");
+            throw new Error("the person is not moved back yet");
           },
           { timeout: 8000, interval: 5 },
         );
@@ -3549,15 +3966,18 @@ describe("the Graph pane (SCP-316)", () => {
         expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/WCAG AA /),
       );
       expect((await editingRead(plan.id)).asking).not.toBeNull();
-      // Arriving again reads the plan against the spec, and the reading
+      // Confirming again reads the plan against the spec, and the reading
       // finds nothing: the card comes down with the problems, so the chat
       // offers the way on rather than a card over a problem that is gone —
       // and the arrival goes on to the contract, since nothing was resolved
       // in front of the person to stop for.
       location.hash = `planning/${plan.id}/graph`;
       await screen.findByRole("heading", { name: "Execution graph" });
-      location.hash = `planning/${plan.id}/drift`;
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
       await waitFor(async () =>
         expect((await editingRead(plan.id)).asking).toBeNull(),
       );
@@ -3568,23 +3988,83 @@ describe("the Graph pane (SCP-316)", () => {
       expect(within(dock).queryByRole("group", { name: "Criterion 1 and R1" })).toBeNull();
     });
 
-    it("keeps the way back and the quiet way on while it waits", async () => {
+    it("keeps the way back, and no way past, while it reads and while it waits", async () => {
       const plan = await problems();
-      // Arriving again with a problem open: the reading first, and the
-      // footer with it.
+      // Confirmed again with a problem open and the plan moved since: the
+      // reading first, and the footer with it.
       location.hash = `planning/${plan.id}/graph`;
       await screen.findByRole("heading", { name: "Execution graph" });
-      location.hash = `planning/${plan.id}/drift`;
-      await screen.findByRole("heading", { name: "Checking the plan against the spec" });
-      expect(footerOrder()).toEqual(QUIET_WAY_ON);
+      await sampleBridge.request({
+        kind: "graphEdit",
+        repoId: plan.repoId,
+        key: plan.key,
+        edit: {
+          op: "set_criterion",
+          id: "ac_2",
+          text: "Text meets WCAG AAA contrast against every background.",
+          expected_verification: { kind: "test", assertion: "every background" },
+        },
+      });
+      await waitFor(async () =>
+        expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/every background/),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await screen.findByRole("heading", { name: "Checking for drift" });
+      expect(footerOrder()).toEqual(WAY_BACK);
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
-      expect(footerOrder()).toEqual(QUIET_WAY_ON);
+      expect(footerOrder()).toEqual(WAY_BACK);
       // And while the answer is being resolved.
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       await screen.findByRole("heading", { name: "Resolving the problem" });
-      expect(footerOrder()).toEqual(QUIET_WAY_ON);
+      expect(footerOrder()).toEqual(WAY_BACK);
       fireEvent.click(screen.getByRole("button", { name: "Back to the plan" }));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+    });
+
+    it("reads nothing on arriving at the Problems tab by the rail or by reopening the planning after a hand edit, and puts the last reading's problems", async () => {
+      const plan = await problems();
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      await sampleBridge.request({
+        kind: "graphEdit",
+        repoId: plan.repoId,
+        key: plan.key,
+        edit: {
+          op: "set_criterion",
+          id: "ac_2",
+          text: "Text meets WCAG AAA contrast against every background.",
+          expected_verification: { kind: "test", assertion: "every background" },
+        },
+      });
+      await waitFor(async () =>
+        expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_2")?.text).toMatch(/every background/),
+      );
+      const readings = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      const before = await readings();
+      // By the rail: the last reading's problems, and no reading started.
+      fireEvent.click(within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name: "Problems" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(screen.queryByRole("heading", { name: "Checking for drift" })).toBeNull();
+      expect(await readings()).toBe(before);
+      // By reopening the planning, which lands on its problems while any is open.
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      location.hash = `planning/${plan.id}`;
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await readings()).toBe(before);
+      // Confirm the plan is what reads it.
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }, { timeout: 5000 }));
+      await waitFor(async () => expect(await readings()).toBe(before + 1));
     });
 
     it("shows a question the interview asks of its own, and answers it from the same page", async () => {
@@ -3619,24 +4099,53 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
     });
 
-    it("shows a reading the host started that failed, with the way on and the way back", async () => {
+    it("says in a pop-up that a reading the host started did not run, with no way past the problems still open, and goes back to the plan", async () => {
       const plan = await problems();
-      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
-      // The spec goes unreadable under the reading the host starts once the
-      // interview has applied the answer: the reading fails, and the page
-      // says so rather than waiting on it.
-      const slug = (await editingRead(plan.id)).specSlug!;
-      const specs = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
-      delete specs[slug];
-      localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
-      await screen.findByText(`specs/${slug}/spec.md could not be read.`, {}, { timeout: 5000 });
-      expect(footerOrder()).toEqual([
-        "The contract is still where approving happens.",
-        "Back to the plan",
-        "Go on to the contract anyway",
-      ]);
-      expect(screen.queryByRole("heading", { name: "Resolving the problem" })).toBeNull();
-      expect(screen.queryByRole("group", { name: /Criterion \d and R\d/ })).toBeNull();
+      // The host's wait between tries, made instant.
+      const paused: number[] = [];
+      const pause = vi.spyOn(sampleReadings, "pause").mockImplementation(async (ms) => {
+        paused.push(ms);
+      });
+      try {
+        answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+        // The spec goes unreadable under the reading the host starts once the
+        // interview has applied the answer: every try of the reading fails,
+        // and the page says so rather than waiting on it.
+        const slug = (await editingRead(plan.id)).specSlug!;
+        const specs = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
+        delete specs[slug];
+        localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
+        const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 5000 });
+        expect(within(popup).getByText(`${READING_FAILED}: specs/${slug}/spec.md could not be read.`)).toBeTruthy();
+        expect(paused).toEqual([2_000, 4_000, 8_000]);
+        expect((await editingRead(plan.id)).drift?.open.length).toBeGreaterThan(0);
+        expect(footerOrder()).toEqual(WAY_BACK);
+        expect(screen.queryByRole("heading", { name: "Resolving the problem" })).toBeNull();
+        expect(screen.queryByRole("group", { name: /Criterion \d and R\d/ })).toBeNull();
+        fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+      } finally {
+        pause.mockRestore();
+      }
+    });
+
+    it("says in a pop-up why the reading after an answer could not start, with why behind the chat note's i", async () => {
+      const plan = await problems();
+      const refused = vi.spyOn(handlers, "driftCheck").mockRejectedValue(new Error("The reviewer could not be reached. Try again later."));
+      try {
+        answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+        const popup = await screen.findByRole("dialog", { name: "The plan could not be checked" }, { timeout: 8000 });
+        expect(within(popup).getByText(`${READING_FAILED}: The reviewer could not be reached.`)).toBeTruthy();
+        expect(popup.textContent).toContain("The reviewer could not be reached. Try again later.");
+        const note = (await editingRead(plan.id)).conversation.find(
+          (entry) => entry.line.kind === "note" && entry.line.text.startsWith(REREAD_COULD_NOT_START),
+        )!.line;
+        expect(note).toEqual({ kind: "note", text: `${REREAD_COULD_NOT_START}.`, output: "The reviewer could not be reached. Try again later." });
+        fireEvent.click(within(popup).getByRole("button", { name: "Got it" }));
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
+      } finally {
+        refused.mockRestore();
+      }
     });
 
     it("goes back to the plan's own pane", async () => {
@@ -3648,120 +4157,49 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
     });
 
-    it("puts a question from the interview ahead of the resolved state, and offers Confirm the plan only once it is answered and the plan re-read", async () => {
+    it("reads nothing after a chat turn once every problem is resolved, and reads the plan the turn moved at Confirm the plan (D-128)", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      expect(screen.getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
-      // The interview asks a question of its own. It is the thing to answer:
-      // the resolved state and the way on go behind it, and no count stands
-      // in the corner, since it is not a problem.
-      const landed = async (): Promise<number> =>
-        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
-          (job) => job.kind === "drift" && job.key === plan.key && !isLive(job),
-        ).length;
-      const readings = await landed();
-      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
-      await screen.findByRole("heading", { name: "A question from the Architect" }, { timeout: 5000 });
-      expect(screen.getByRole("group", { name: "How the queue is split" })).toBeTruthy();
-      expect(screen.queryByRole("heading", { name: "Every problem is resolved" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      expect(screen.queryByText(/^Problem \d of \d$/)).toBeNull();
-      // The turn ends with the question standing, and the plan is read again
-      // once it does — a wait the pane shows over everything — and the
-      // question is the thing to answer again once that reading has landed,
-      // with the way on still withheld.
-      await waitFor(async () => expect(await landed()).toBeGreaterThan(readings), { timeout: 5000 });
-      const asked = await screen.findByRole("group", { name: "How the queue is split" }, { timeout: 5000 });
-      expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      // Answered here, which is a turn: the plan is read again once it is
-      // over, and only then is the resolved state back with its way on.
-      // The question has two parts, and each is answered on the card — this
-      // one in the person's own words, in the box inside that answer, and the
-      // other by picking. A part said in their own words answers it as much
-      // as a picked one does, so the group's answer is complete and the
-      // interview's second group follows it here.
-      fireEvent.click(within(asked).getAllByRole("radio", { name: /Something else/ })[0]!);
-      fireEvent.change(await within(asked).findByLabelText("Your own words for 1a"), {
-        target: {
-          value:
-            "Change R1 in the spec to say: The person can choose Light, Dark or System without a restart.",
-        },
-      });
-      fireEvent.click(within(asked).getByRole("radio", { name: /A unit test per node/ }));
-      sendGroup(asked);
-      await screen.findByRole("heading", { name: "Resolving the problem" });
-      expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      // Down as the person's turn, lettered as the parts were read, with the
-      // part they said themselves under its own letter.
-      const session = await editingRead(plan.id);
-      expect(
-        session.conversation.some(
-          (line) =>
-            line.line.kind === "turn" &&
-            line.line.text ===
-              "a) Change R1 in the spec to say: The person can choose Light, Dark or System without a restart.\n" +
-                "b) A unit test per node",
-        ),
-      ).toBe(true);
-      const second = await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
-      expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      fireEvent.click(within(second).getByRole("radio", { name: /Delete it/ }));
-      sendGroup(second);
-      await screen.findByRole("heading", { name: "Resolving the problem" });
-      expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      // The interview moved the plan while it answered, so the reading after
-      // the last group finds a problem — which is the point of reading again
-      // after every turn. The way on is still withheld until that is closed.
-      const problem = await screen.findByRole(
-        "group",
-        { name: "Criterion 1 and R1" },
-        { timeout: 5000 },
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 8000 });
+      await screen.findByRole("heading", { name: "Execution graph" });
+      const readings = async (): Promise<number> =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+      await waitFor(async () => expect((await sampleBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false));
+      const before = await readings();
+      const criterion = (await graphOf(plan)).criteria.find((each) => each.id === "ac_1")!.text;
+      // A turn that edits the plan, with nothing open: no reading after it.
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "tighten the first criterion" });
+      await waitFor(async () =>
+        expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_1")?.text).toBe(`${criterion}, within 60 seconds`),
       );
-      expect(screen.queryByRole("group", { name: "Question 2" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      answerFirst(problem);
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      expect(screen.getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
-      expect(screen.queryByRole("group", { name: "How the queue is split" })).toBeNull();
+      await waitFor(async () => expect((await sampleBridge.request({ kind: "snapshot" })).working).not.toContain(plan.id), {
+        timeout: 5000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      expect(await readings()).toBe(before);
+      expect((await editingRead(plan.id)).drift).toEqual({ open: [], resolved: true });
+      // Confirm the plan: the turn moved a criterion's words, so the plan is
+      // read, and what it finds holds the way on.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled")).toBe(false),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+      await screen.findByRole("heading", { name: "Checking for drift" });
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      expect(await readings()).toBe(before + 1);
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
     });
 
-    it("holds the wait on an answer to the interview's question through a reading that started under it, before it was applied", async () => {
+    it("holds the wait on the last problem's answer through a reading that started under it, before it was applied", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
-      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      const landed = async (): Promise<number> =>
-        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
-          (job) => job.kind === "drift" && job.key === plan.key && !isLive(job),
-        ).length;
-      /** Every reading owed so far has landed and no turn is in flight. */
-      const settled = async (readings: number): Promise<void> =>
-        waitFor(
-          async () => {
-            const workspace = await sampleBridge.request({ kind: "snapshot" });
-            expect(workspace.working).not.toContain(plan.id);
-            expect(workspace.jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false);
-            expect(await landed()).toBeGreaterThan(readings);
-          },
-          { timeout: 5000 },
-        );
-      // The interview asks two groups of its own over the resolved state, and
-      // the first is answered from the chat with words that move nothing, so
-      // the record stays resolved and the second is the one to answer here.
-      let readings = await landed();
-      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
-      await settled(readings);
-      readings = await landed();
-      await sampleBridge.request({
-        kind: "interviewTurn",
-        id: plan.id,
-        text: "a) Split at the read, and refuse it\nb) A unit test per node",
+      const last = await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 });
+      await waitFor(async () => {
+        const workspace = await sampleBridge.request({ kind: "snapshot" });
+        expect(workspace.working).not.toContain(plan.id);
+        expect(workspace.jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false);
       });
-      await settled(readings);
-      const second = await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
-      expect((await editingRead(plan.id)).drift).toEqual({ open: [], resolved: true });
       // A reading is started the moment the answer is on the record, before
       // the interview has applied it: it reads the plan the answer has not
       // moved yet, and lands ahead of the reading the answer is owed.
@@ -3769,18 +4207,20 @@ describe("the Graph pane (SCP-316)", () => {
       let answeredAt: string | null = null;
       // The `at` of the last line the answer led to, as the lines arrive.
       let appliedAt: string | null = null;
-      let shownAt: number | null = null;
+      let movedAt: number | null = null;
+      let taken = false;
+      let shownAgain = false;
       let staleLandedAt: number | null = null;
       let landedAt: number | null = null;
       const look = (): void => {
-        if (
-          shownAt === null &&
-          [...document.querySelectorAll("button")].some((button) => button.textContent === "Confirm the plan")
-        )
-          shownAt = performance.now();
+        if (movedAt === null && location.hash.endsWith("/graph")) movedAt = performance.now();
+        // Once the answered card is down, it is never up again.
+        const up = location.hash.endsWith("/drift") && screen.queryByRole("group", { name: "Criterion 2 and R2" }) !== null;
+        if (!up) taken = true;
+        else if (taken) shownAgain = true;
       };
       // Watched from the moment the answer is sent, rather than sampled: a
-      // flash between two polls is exactly what would let the person confirm.
+      // flash between two polls is exactly what would let the person on.
       const watcher = new MutationObserver(look);
       watcher.observe(document.body, { childList: true, subtree: true, attributes: true });
       const unsubscribe = sampleBridge.subscribe((change) => {
@@ -3788,7 +4228,7 @@ describe("the Graph pane (SCP-316)", () => {
           const { line, at } = change.entry;
           if (answeredAt === null && line.kind === "turn") {
             answeredAt = at;
-            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id }));
+            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id, state: null }));
           } else if (
             answeredAt !== null &&
             !(line.kind === "asked" && line.drift !== undefined) &&
@@ -3799,7 +4239,6 @@ describe("the Graph pane (SCP-316)", () => {
         const job = "job" in change ? change.job : undefined;
         if (
           answeredAt === null ||
-          appliedAt === null ||
           job === undefined ||
           job.kind !== "drift" ||
           job.key !== plan.key ||
@@ -3807,17 +4246,14 @@ describe("the Graph pane (SCP-316)", () => {
           job.startedAt < answeredAt
         )
           return;
-        if (job.startedAt < appliedAt) staleLandedAt ??= performance.now();
+        if (appliedAt === null || job.startedAt < appliedAt) staleLandedAt ??= performance.now();
         else landedAt ??= performance.now();
       });
       try {
         armed = true;
-        fireEvent.click(within(second).getByRole("radio", { name: /Delete it/ }));
-        sendGroup(second);
-        // The interview moved the plan as it applied the answer, and the
-        // reading the answer owes finds the problem that made.
+        answerFirst(last);
         await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 8000 });
-        await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
       } finally {
         watcher.disconnect();
         unsubscribe();
@@ -3826,43 +4262,22 @@ describe("the Graph pane (SCP-316)", () => {
       // ahead of the one the answer owes.
       expect(staleLandedAt, "no reading started under the answer").not.toBeNull();
       expect(staleLandedAt! < landedAt!).toBe(true);
-      expect(shownAt, "the way on was drawn on a reading that never saw the answer").toBeNull();
+      // Moved back only on the answer's own reading, and the answered card
+      // never put up again meanwhile.
+      expect(movedAt).not.toBeNull();
+      expect(movedAt! >= landedAt!).toBe(true);
+      expect(shownAgain, "the answered problem was put up to be answered again").toBe(false);
     });
 
-    it("holds the wait on an answer while the Architect applies it, through a reading that landed ahead of its first reply", async () => {
+    it("holds the wait on the last problem's answer while the Architect applies it, through a reading that landed ahead of its first reply", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
-      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      const landed = async (): Promise<number> =>
-        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
-          (job) => job.kind === "drift" && job.key === plan.key && !isLive(job),
-        ).length;
-      const settled = async (readings: number): Promise<void> =>
-        waitFor(
-          async () => {
-            const workspace = await sampleBridge.request({ kind: "snapshot" });
-            expect(workspace.working).not.toContain(plan.id);
-            expect(workspace.jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false);
-            expect(await landed()).toBeGreaterThan(readings);
-          },
-          { timeout: 5000 },
-        );
-      // The interview's own two groups over the resolved state, the first
-      // answered from the chat with words that move nothing, so the second is
-      // the one to answer here with the record still resolved.
-      let readings = await landed();
-      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
-      await settled(readings);
-      readings = await landed();
-      await sampleBridge.request({
-        kind: "interviewTurn",
-        id: plan.id,
-        text: "a) Split at the read, and refuse it\nb) A unit test per node",
+      const last = await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 });
+      await waitFor(async () => {
+        const workspace = await sampleBridge.request({ kind: "snapshot" });
+        expect(workspace.working).not.toContain(plan.id);
+        expect(workspace.jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false);
       });
-      await settled(readings);
-      const second = await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
-      expect((await editingRead(plan.id)).drift).toEqual({ open: [], resolved: true });
       // A reading is started the moment the answer is on the record, and the
       // Architect's first reply is held back until that reading has landed:
       // the reading never saw the answer, and it lands while the answer's
@@ -3885,15 +4300,16 @@ describe("the Graph pane (SCP-316)", () => {
       let answeredAt: string | null = null;
       let appliedAt: string | null = null;
       let repliedAt: number | null = null;
-      let shownAt: number | null = null;
+      let movedAt: number | null = null;
+      let taken = false;
+      let shownAgain = false;
       let staleLandedAt: number | null = null;
       let landedAt: number | null = null;
       const look = (): void => {
-        if (
-          shownAt === null &&
-          [...document.querySelectorAll("button")].some((button) => button.textContent === "Confirm the plan")
-        )
-          shownAt = performance.now();
+        if (movedAt === null && location.hash.endsWith("/graph")) movedAt = performance.now();
+        const up = location.hash.endsWith("/drift") && screen.queryByRole("group", { name: "Criterion 2 and R2" }) !== null;
+        if (!up) taken = true;
+        else if (taken) shownAgain = true;
       };
       const watcher = new MutationObserver(look);
       watcher.observe(document.body, { childList: true, subtree: true, attributes: true });
@@ -3902,7 +4318,7 @@ describe("the Graph pane (SCP-316)", () => {
           const { line, at } = change.entry;
           if (answeredAt === null && line.kind === "turn") {
             answeredAt = at;
-            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id }));
+            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id, state: null }));
           } else if (
             answeredAt !== null &&
             !(line.kind === "asked" && line.drift !== undefined) &&
@@ -3927,10 +4343,9 @@ describe("the Graph pane (SCP-316)", () => {
       });
       try {
         armed = true;
-        fireEvent.click(within(second).getByRole("radio", { name: /Delete it/ }));
-        sendGroup(second);
+        answerFirst(last);
         await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 8000 });
-        await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
       } finally {
         watcher.disconnect();
         unsubscribe();
@@ -3943,7 +4358,10 @@ describe("the Graph pane (SCP-316)", () => {
       expect(repliedAt).not.toBeNull();
       expect(staleLandedAt! < repliedAt!).toBe(true);
       expect(repliedAt! < landedAt!).toBe(true);
-      expect(shownAt, "Confirm the plan was drawn while the Architect applied the answer").toBeNull();
+      // Moved back only on the answer's own reading, and the answered card
+      // never put up again while the Architect applied it.
+      expect(movedAt! >= landedAt!).toBe(true);
+      expect(shownAgain, "the answered problem was put up to be answered again").toBe(false);
     });
 
     describe("confirming once the problems are resolved", () => {
@@ -3992,24 +4410,19 @@ describe("the Graph pane (SCP-316)", () => {
             .getAllByRole("button", { name: "Confirm the plan" })
             .find((button) => button.closest('[role="complementary"]') === null)!,
         );
-        await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+        await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
         watch.disconnect();
         expect(stops).toEqual([]);
       });
 
-      it("puts Confirm the plan in the Problems page's footer, to the right of Back to the plan", async () => {
+      it("moves a person on the Problems page back to the Graph once the problems are resolved in the chat, with no way on of its own", async () => {
         const plan = await problems();
         await resolveAll(plan);
-        await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-        const footer = document.querySelector('[data-screen="drift"] .pane-confirm') as HTMLElement;
-        expect(within(footer).getAllByRole("button").map((button) => button.textContent)).toEqual([
-          "Back to the plan",
-          "Confirm the plan",
-        ]);
-        // One way on, and it is the footer's.
+        await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
+        await screen.findByRole("heading", { name: "Execution graph" });
+        await waitFor(() => expect(railPanes()).not.toContain("Problems"));
+        // One way on, and it is the Graph's.
         expect(screen.getAllByRole("button", { name: "Confirm the plan" })).toHaveLength(1);
-        fireEvent.click(within(footer).getByRole("button", { name: "Confirm the plan" }));
-        await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
       });
 
       it("stops on the Problems page for the Architect's own question though every problem is resolved", async () => {
@@ -4017,8 +4430,8 @@ describe("the Graph pane (SCP-316)", () => {
         location.hash = `planning/${plan.id}/graph`;
         await screen.findByRole("heading", { name: "Execution graph" });
         await resolveAll(plan);
-        // The interview asks a question of its own, and its turn ends, and
-        // the reading after it lands, with the question standing.
+        // The interview asks a question of its own, and its turn ends with
+        // the question standing, and nothing read after it.
         await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
         const dock = screen.getByRole("complementary", { name: "Chat" });
         await within(dock).findByRole("group", { name: "How the queue is split" }, { timeout: 5000 });
@@ -4026,8 +4439,7 @@ describe("the Graph pane (SCP-316)", () => {
         expect((await editingRead(plan.id)).drift).toEqual({ open: [], resolved: true });
         expect((await editingRead(plan.id)).asking).not.toBeNull();
         // Arriving on the Problems page stops there for the question rather
-        // than passing through to the contract, once the arrival's reading has
-        // landed as much as before.
+        // than passing through to the contract.
         location.hash = `planning/${plan.id}/drift`;
         await screen.findByRole("heading", { name: "A question from the Architect" }, { timeout: 5000 });
         await waitFor(() => quiet(plan), { timeout: 5000 });
@@ -4050,7 +4462,7 @@ describe("the Graph pane (SCP-316)", () => {
         // reads the plan the answer has not reached yet — and the page itself,
         // which adopts it and says the problem is being resolved.
         expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(plan.id);
-        const reading = await sampleBridge.request({ kind: "driftCheck", id: plan.id });
+        const reading = await sampleBridge.request({ kind: "driftCheck", id: plan.id, state: null });
         location.hash = `planning/${plan.id}/drift`;
         await screen.findByRole("heading", { name: "Resolving the problem" });
         await waitFor(
@@ -4123,13 +4535,12 @@ describe("the Graph pane (SCP-316)", () => {
       expect(removed(card)).toEqual(["."]);
       // And in the inspector, under the box that edits the criterion.
       fireEvent.click(card);
-      const line = await screen.findByLabelText("Criterion ac_1 as the last change left it");
+      const line = await screen.findByLabelText("Criterion ac_1 as the chat's last change left it");
       expect(added(line).join("|")).toContain("within 60 seconds");
       expect(removed(line)).toEqual(["."]);
       // A change by hand to another criterion is the last change now: the
-      // first one's marks are plain text again, and only the new ones show.
-      // This one adds words and takes none away, so nothing at all reads
-      // struck through once it is the last change.
+      // first one's marks are plain text again, and the person's own change is
+      // marked nowhere, so nothing on the pane reads marked at all.
       const second = (await graphOf(plan)).criteria[1]!;
       await sampleBridge.request({
         kind: "graphEdit",
@@ -4142,12 +4553,12 @@ describe("the Graph pane (SCP-316)", () => {
           expected_verification: { kind: second.kind, assertion: second.assertion },
         },
       });
-      await waitFor(() => expect(added().join("|")).toContain("By hand"), { timeout: 5000 });
-      expect(added().join("|")).not.toContain("within 60 seconds");
-      expect(removed()).toEqual([]);
+      await waitFor(async () => expect((await session(plan)).change?.by).toBe("person"), { timeout: 5000 });
       expect((await session(plan)).change?.plan?.after.criteria.find((each) => each.id === second.id)?.text).toContain(
         "By hand",
       );
+      await waitFor(() => expect(added()).toEqual([]), { timeout: 5000 });
+      expect(removed()).toEqual([]);
     });
 
     it("marks what the interview wrote in the spec as it reads, and not while the section is being edited", async () => {
@@ -4185,83 +4596,6 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(() => expect(section.querySelector("textarea")).not.toBeNull());
       expect(added(section)).toEqual([]);
       expect(removed(section)).toEqual([]);
-    });
-
-    it("marks what Next changed on the Plan pane, with a criterion it took away struck through at the end", async () => {
-      const plan = await planned();
-      const edit = async (edit: GraphEdit) =>
-        sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
-      await edit({ op: "delete_node", id: "node_2", move_criteria_to: "node_1", delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(1));
-      await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
-      const count = (await graphOf(plan)).criteria.length;
-      expect(count).toBeGreaterThan(1);
-      location.hash = `planning/${plan.id}/criteria`;
-      mount();
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      fireEvent.click(await screen.findByRole("button", { name: "Edit criterion 1" }));
-      fireEvent.change(screen.getByLabelText("Criterion 1"), {
-        target: { value: "A person can choose the colour mode." },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      fireEvent.click(screen.getByRole("button", { name: `Delete criterion ${count}` }));
-      const next = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
-      await waitFor(() => expect(next.disabled).toBe(false));
-      fireEvent.click(next);
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-      await waitFor(async () => expect((await session(plan)).change?.plan ?? null).not.toBeNull(), {
-        timeout: 5000,
-      });
-      // Back on the plan: the rewording marked on its row, and the criterion
-      // that went struck through after the last row.
-      location.hash = `planning/${plan.id}/criteria`;
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      await waitFor(() => expect(added(document.querySelector(".criteria-editor")!).join("|")).toContain("colour mode"), {
-        timeout: 5000,
-      });
-      const struck = screen.getByLabelText("A criterion removed by the last change");
-      expect(removed(struck).join("|")).toContain("The rail follows the mode.");
-      // Editing a row takes every mark away while the list is moving.
-      fireEvent.click(screen.getByRole("button", { name: "Edit criterion 2" }));
-      expect(added()).toEqual([]);
-      expect(screen.queryByLabelText("A criterion removed by the last change")).toBeNull();
-    });
-
-    it("marks a criterion deleted from the middle of the plan as the one that went, and the ones after it as themselves", async () => {
-      // Next numbers the criteria afresh, so the third takes the second's
-      // id: by id the survivor would read as a rewording of the one deleted,
-      // and the last as gone. By words, the survivors carry no mark and the
-      // deleted one is struck through at the end.
-      const plan = await planned();
-      const edit = async (edit: GraphEdit) =>
-        sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
-      await edit({ op: "delete_node", id: "node_2", move_criteria_to: "node_1", delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(1));
-      await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
-      const texts = (await graphOf(plan)).criteria.map((each) => each.text);
-      expect(texts.length).toBeGreaterThan(2);
-      location.hash = `planning/${plan.id}/criteria`;
-      mount();
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      fireEvent.click(screen.getByRole("button", { name: "Delete criterion 2" }));
-      const next = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
-      await waitFor(() => expect(next.disabled).toBe(false));
-      fireEvent.click(next);
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-      await waitFor(async () => expect((await session(plan)).change?.plan ?? null).not.toBeNull(), {
-        timeout: 5000,
-      });
-      location.hash = `planning/${plan.id}/criteria`;
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      const struck = await screen.findByLabelText("A criterion removed by the last change", {}, { timeout: 5000 });
-      expect(removed(struck)).toEqual([texts[1]]);
-      // The struck one is the only mark on the pane: nothing green, and
-      // nothing else struck, on any survivor's row.
-      expect(added()).toEqual([]);
-      expect(removed()).toEqual([texts[1]]);
-      expect(screen.getAllByLabelText("A criterion removed by the last change")).toHaveLength(1);
     });
 
     it("marks the work of a turn queued behind another with it, as one change", async () => {
@@ -4316,14 +4650,6 @@ describe("the Graph pane (SCP-316)", () => {
     );
     await screen.findByRole("button", { name: /^Node node_1/ });
     const planning = location.hash;
-    // Runs go one at a time, and the sample keeps one live for a while.
-    const settled = async () =>
-      expect(
-        (await sampleBridge.request({ kind: "snapshot" })).jobs.some(
-          (job) => job.kind === "run" && ["running", "stopping"].includes(job.state),
-        ),
-      ).toBe(false);
-    await waitFor(settled, { timeout: 6000 });
     // Confirm on the graph, approve on the contract: one approval, on the
     // page that says what freezes.
     fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
@@ -4417,16 +4743,17 @@ describe("the Graph pane (SCP-316)", () => {
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
   });
 
-  it("keeps a planning deleted from the picker while a command runs, and says why in the host's words", async () => {
+  it("keeps a planning deleted from the picker while a command runs for its ticket, and says why in the host's words", async () => {
     // A planning that drafted its ticket takes the ticket with it, and a
-    // command running in the repository may be writing what that removes: the
+    // command running for that ticket may be writing what that removes: the
     // host refuses before anything goes, and the picker says so rather than
-    // letting the row come back with no reason.
+    // letting the row come back with no reason. Another ticket's command holds
+    // nothing of this one (D-129).
     const plan = await planned();
     expect((await editingRead(plan.id)).admitted).toBe(true);
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
-    const running = job("run", plan.repoId, "PRB-404", () => undefined, 60_000);
+    const running = job("run", plan.repoId, plan.key, () => undefined, 60_000);
     try {
       const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((each) => each.repoId === plan.repoId && each.ticket.key === plan.key)!;
@@ -4439,7 +4766,7 @@ describe("the Graph pane (SCP-316)", () => {
       fireEvent.click(await within(picker).findByRole("button", { name: "Delete planning: " + title }));
       const asking = await screen.findByRole("dialog", { name: "Delete planning" });
       fireEvent.click(within(asking).getAllByRole("button", { name: "Delete planning" })[0]!);
-      await screen.findByText(DELETE_WAITS_FOR_COMMANDS);
+      await screen.findByText(DELETE_WAITS_FOR_TICKET_COMMAND);
       expect((await editingRead(plan.id)).phase).not.toBe("discarded");
       await waitFor(() => expect(bin()).not.toBeNull());
     } finally {
@@ -4886,7 +5213,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     location.hash = `planning/${plan.id}/spec`;
     mount();
     await screen.findByLabelText("Spec title");
-    for (const name of ["Spec", "Explorer", "Impact"]) {
+    for (const name of ["Spec", "Explorer", "Spec"]) {
       fireEvent.click(pane(name));
       // The dock is beside the pane, not inside it, so it survives the switch.
       await waitFor(() => expect(dock()).toBeTruthy());
@@ -5448,6 +5775,52 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(labels.at(-1)).toContain("Architect's call");
   });
 
+  it("keeps the group being answered, picks and words, when the Architect asks again, and puts the new group after it", async () => {
+    // The Architect reads the answer to the first group and asks again while
+    // the person is on the second: the new group waits behind the one they
+    // are answering rather than replacing it (D-117).
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me in waves" } });
+    fireEvent.keyDown(composer(), { key: "Enter" });
+    const first = await within(dock()).findByRole("group", { name: "Where the reminder lands" }, { timeout: 5000 });
+    fireEvent.click(within(first).getByRole("radio", { name: /On Home/ }));
+    sendGroup(first);
+
+    // On the second group: one part picked, the other said in their own words.
+    const second = await within(dock()).findByRole("group", { name: "When the reminder goes" }, { timeout: 5000 });
+    fireEvent.click(within(second).getByRole("radio", { name: /A day before/ }));
+    fireEvent.click(within(second).getAllByRole("radio", { name: /Something else/ })[1]!);
+    fireEvent.change(within(second).getByLabelText("Your own words for 2b"), { target: { value: "Whoever set it" } });
+
+    // The new group arrives: it is in the conversation and on the record, and
+    // the card in front of the person is the one they were answering, as they
+    // left it.
+    await within(dock()).findByText(/Asked one question, about What the reminder is called/, {}, { timeout: 5000 });
+    expect((await editingRead(plan.id)).askingNext).toHaveLength(1);
+    const standing = within(dock()).getByRole("group", { name: "When the reminder goes" });
+    expect(standing).toBe(second);
+    expect((within(standing).getByRole("radio", { name: /A day before/ }) as HTMLInputElement).checked).toBe(true);
+    expect((within(standing).getByLabelText("Your own words for 2b") as HTMLTextAreaElement).value).toBe("Whoever set it");
+    expect(within(dock()).queryByRole("group", { name: "What the reminder is called" })).toBeNull();
+
+    // Sent, and the group that waited is put.
+    sendGroup(standing);
+    await waitFor(async () =>
+      expect((await editingRead(plan.id)).conversation.map((entry) => entry.line)).toContainEqual({
+        kind: "turn",
+        text: "a) A day before\nb) Whoever set it",
+      }),
+    );
+    const third = await within(dock()).findByRole("group", { name: "What the reminder is called" }, { timeout: 5000 });
+    fireEvent.click(within(third).getByRole("radio", { name: /Due today/ }));
+    sendGroup(third);
+    await waitFor(async () => expect((await editingRead(plan.id)).asking).toBeNull(), { timeout: 5000 });
+    expect(within(dock()).queryByRole("group", { name: "What the reminder is called" })).toBeNull();
+  });
+
   it("takes the questions away once the person says something of their own on a lone part", async () => {
     // A turn that is not the group's answer ends the asking: the session
     // answers what was said instead, and a card left standing would answer a
@@ -5645,7 +6018,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
      * and the cut that named it. A folder of its own, apart from the dark mode
      * toggle other cases name, since the plan these draft stays on the board.
      */
-    async function namedByFirstMessage(): Promise<{ id: string; repoId: string; cut: string }> {
+    async function namedByFirstMessage(): Promise<{ id: string; repoId: string }> {
       const opened = await openFresh();
       location.hash = `planning/${opened.id}/spec`;
       mount();
@@ -5658,7 +6031,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         return named!;
       });
       await screen.findByText(`specs/${slug}/spec.md`, {}, { timeout: 5000 });
-      return { id: opened.id, repoId: opened.repoId, cut: (await editingRead(opened.id)).specCut! };
+      return { id: opened.id, repoId: opened.repoId };
     }
     /** Writes the spec through the chat, then drafts the plan from it with the pane's press. */
     async function generate(id: string): Promise<string> {
@@ -5669,26 +6042,28 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         screen.getByRole("button", { name: "Generate plan" }) as HTMLButtonElement;
       await waitFor(() => expect(press().disabled).toBe(false), { timeout: 5000 });
       fireEvent.click(press());
-      await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|criteria)$/), {
-        timeout: 5000,
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|impact|drift|contract)$/), {
+        timeout: 8000,
       });
       return (await editingRead(id)).key!;
     }
 
-    it("leaves the field empty while the file's title is only the cut, and a section saved meanwhile keeps it", async () => {
-      const { id, cut } = await namedByFirstMessage();
-      // The file carries the cut, which names the folder and is no title.
-      expect(cut.length).toBeGreaterThan(0);
-      expect((await read(id)).title).toBe(cut);
+    it("leaves the field empty while the file has no title line, and a section saved meanwhile keeps none", async () => {
+      const { id } = await namedByFirstMessage();
+      // The cut names the folder and is no title: the file has no title line.
+      expect((await read(id)).title).toBe("");
       expect(field().value).toBe("");
-      // A section saved with the field empty is saved, and the title line is
-      // left as it was.
+      // A section saved with the field empty is saved, and the file still has
+      // no title line.
       fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      // The section reads until it is opened for writing.
+    fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
+    const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "Dark mode follows the system." } });
       fireEvent.blur(outcome);
       await waitFor(async () => expect((await read(id)).sections.outcome).toBe("Dark mode follows the system."));
-      expect((await read(id)).title).toBe(cut);
+      expect((await read(id)).title).toBe("");
+      expect(storedSpec((await editingRead(id)).specSlug!)).not.toMatch(/^# |Untitled/m);
       expect(field().value).toBe("");
     });
 
@@ -5698,13 +6073,15 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       fireEvent.change(field(), { target: { value: "  " } });
       fireEvent.blur(field());
       fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      // The section reads until it is opened for writing.
+    fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
+    const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "Text is as large as the person asks." } });
       fireEvent.blur(outcome);
       await waitFor(async () =>
         expect((await read(id)).sections.outcome).toBe("Text is as large as the person asks."),
       );
-      expect((await read(id)).title).toBe((await editingRead(id)).specCut);
+      expect((await read(id)).title).toBe("");
       expect(field().value.trim()).toBe("");
     });
 
@@ -6156,8 +6533,14 @@ describe("the interview docked in planning mode (SCP-313)", () => {
  * host runs.
  */
 describe("the Impact pane (SCP-320)", () => {
+  /**
+   * A pane by its address. Impact is in the rail only once there is a plan
+   * (D-NEW-basic-and-epic-flows), and what
+   * the pane does is the same either way, so these cases reach it directly.
+   */
   const openPane = async (name: string): Promise<void> => {
-    fireEvent.click(pane(name));
+    location.hash = `planning/${sessionId()}/${name.toLowerCase()}`;
+    await waitFor(() => expect(location.hash).toMatch(new RegExp(`/${name.toLowerCase()}$`)));
   };
   /** Planning in one repository, with `paths` as the draft's declared scope. */
   const planningOver = async (repository: RegExp, paths: string[]): Promise<void> => {
@@ -6223,11 +6606,11 @@ describe("the Impact pane (SCP-320)", () => {
         { timeout: 5000 },
       );
       // A plan landing takes the person to it, which is the whole point of
-      // that landing; this pane is what the test is about, so it comes back —
-      // through the rail, the way a person would.
-      await waitFor(() => expect(location.hash).toMatch(/\/(graph|criteria)$/), { timeout: 5000 });
+      // that landing — a flat one checked first, its impact among the checks
+      // — and this pane is what the test is about, so it comes back to it.
+      await waitFor(() => expect(location.hash).toMatch(/\/(graph|impact|contract)$/), { timeout: 5000 });
       void planned;
-      fireEvent.click(pane("Impact"));
+      await openPane("Impact");
       // No button was pressed, and the answer arrives.
       await waitFor(() => expect(runs()).toBeGreaterThan(0), { timeout: 5000 });
       await waitFor(() => expect(screen.queryByText("not checked yet")).toBeNull());
@@ -6277,29 +6660,90 @@ describe("the Impact pane (SCP-320)", () => {
     });
     await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
 
+    // A flat plan lands where its checks say, with a pop-up there; this pane
+    // is what the test is about.
+    await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await openPane(pane);
-    // Read before the click: confirming leaves planning, and the session is
-    // read off the route this is standing on.
-    const key = (await session()).key!;
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    const id = sessionId();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm contract" }));
     // The contract, and not an approval taken on a pane that never said what
     // it was freezing.
-    await waitFor(() => expect(location.hash).toContain(`${key}/contract`));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/contract`), { timeout: 5000 });
   });
 
-  it("sits last in the rail's planning panes, and asks for nothing until it is asked", async () => {
+  it("checks a basic plan whose impact was never checked as its planning opens, where it opened, and not again", async () => {
+    // A plan this planning did not watch land — drafted again from a stopped
+    // run, or with no impact on its record — has its check made on opening, so
+    // its Impact tab is there where the check finds paths outside the scope.
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
-    // No plan has been drafted here, so there is no graph to offer and Impact
-    // is last of the three that are.
-    expect(railNames().slice(0, 6)).toEqual([
-      "Create",
-      "Spec",
-      "Explorer",
-      "Impact",
-      "Home",
-      "Archive",
-    ]);
-    expect(screen.getByRole("button", { name: "Impact" }).getAttribute("aria-current")).toBe("page");
+    const opened = await session();
+    await sampleBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId: opened.repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: NOTHING_YET,
+    });
+    cleanup();
+    const withSpec = await session();
+    await sampleBridge.request({
+      kind: "editingSubmit",
+      id: withSpec.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
+    expect((await session()).nodes).toBe(0);
+    // Opened once, and then its check forgotten, as a planning kept from
+    // before impact was recorded holds none.
+    location.hash = `planning/${withSpec.id}/explorer`;
+    mount();
+    await waitFor(async () => expect((await session()).impact).not.toBeNull(), { timeout: 5000 });
+    cleanup();
+    const held = JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]") as { id: string; impact: number | null }[];
+    localStorage.setItem(
+      "perbo:preview-editing",
+      JSON.stringify(held.map((record) => (record.id === withSpec.id ? { ...record, impact: null } : record))),
+    );
+    expect((await session()).impact).toBeNull();
+    const asked = vi.spyOn(sampleBridge, "request");
+    const runs = (): number => asked.mock.calls.filter(([request]) => request.kind === "impactRead").length;
+    try {
+      // Opened on its Explorer again: the first opening watched the draft land.
+      location.hash = `planning/${withSpec.id}/explorer`;
+      mount();
+      await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
+      await waitFor(async () => expect((await session()).impact).not.toBeNull(), { timeout: 5000 });
+      expect(runs()).toBe(1);
+      // Where it opened, with no pop-up: a person who came to read the plan.
+      expect(location.hash).toBe(`#planning/${withSpec.id}/explorer`);
+      expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
+      if (((await session()).impact ?? 0) > 0) await waitFor(() => expect(railNames()).toContain("Impact"));
+      // Opened again, it has its check and makes none.
+      cleanup();
+      mount();
+      await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(runs()).toBe(1);
+    } finally {
+      asked.mockRestore();
+    }
+  });
+
+  it("is not in the rail before there is a plan, and asks for nothing until it is asked", async () => {
+    await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+    // No plan has been drafted here, so there is nothing to measure impact
+    // against, and the rail does not offer it (D-NEW-basic-and-epic-flows).
+    expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     // Opening the pane reads nothing: the answer is a parse of the whole tree.
     expect(document.querySelector(".pane-head .sub")!.textContent).toContain("not checked yet");
     expect(document.querySelector(".impact-row")).toBeNull();
@@ -6629,6 +7073,50 @@ describe("the name of a ticket drafted again from its spec (D-127)", () => {
     expect(after.tasks.some((task) => task.ticket.key === "PRB-415")).toBe(false);
     expect(drafted.ticket.title).toBe(stopped.ticket.title);
   });
+
+  it("is refused where the person's title for the spec runs past the cap, in the host's words once the stopped ticket is gone", async () => {
+    vi.resetModules();
+    const { sampleBridge: sample } = await import("../../sample-host/bridge.js");
+    const { editing } = await import("../../sample-host/records.js");
+    const before = await sample.request({ kind: "snapshot" });
+    const stopped = before.tasks.find((task) => task.ticket.key === "PRB-415")!;
+    const title = "Retire the legacy CSV importer and every path it reads and every path it reads";
+    expect(title.length).toBeGreaterThan(60);
+    localStorage.setItem(
+      "perbo:preview-specs",
+      JSON.stringify({
+        "retire-the-legacy-csv-importer": [
+          `# ${title}`,
+          "",
+          "## Outcome",
+          "",
+          "Every import goes through the current parser, and the legacy path is gone.",
+          "",
+          "## Requirements",
+          "",
+          "- An upload of either dialect is read by the current parser.",
+          "",
+        ].join("\n"),
+      }),
+    );
+    // A planning over it that records the person giving the spec that title.
+    const planning = await sample.request({ kind: "editingOpen", target: { kind: "fresh", repoId: stopped.repoId } });
+    const records = JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]") as { id: string }[];
+    localStorage.setItem(
+      "perbo:preview-editing",
+      JSON.stringify(records.map((each) => (each.id === planning.id ? { ...each, key: "PRB-415" } : each))),
+    );
+    editing.personTitled(planning.id, title);
+    await expect(sample.request({ kind: "replan", repoId: stopped.repoId, key: "PRB-415" })).rejects.toThrow(
+      `PRB-415 was deleted and its plan could not be drafted again: the spec's title is ${title.length} characters, ` +
+        "and a ticket's name is at most 60 (D-127): shorten the title, then draft the plan again. " +
+        "Its spec is in Create's picker; draft the plan from there.",
+    );
+    const after = await sample.request({ kind: "snapshot" });
+    expect(after.tasks.map((task) => task.ticket.key)).toEqual(
+      before.tasks.map((task) => task.ticket.key).filter((key) => key !== "PRB-415"),
+    );
+  });
 });
 
 describe("a planning deleted from the picker is gone at the click and stays gone", () => {
@@ -6804,7 +7292,7 @@ describe("the first writing of a spec is not a change (D-128)", () => {
   const marks = (root: ParentNode = document): string[] =>
     [...root.querySelectorAll(".change--added, .change--removed, ins, del")].map((mark) => mark.textContent ?? "");
 
-  it("marks nothing the interview wrote into an empty spec, and marks a hand edit of it after", async () => {
+  it("marks nothing the interview wrote into an empty spec, nor a hand edit of it after (D-128)", async () => {
     // A fresh planning, named, with every section of its spec still empty.
     const opened = await openFresh();
     const { id, repoId } = opened;
@@ -6833,7 +7321,8 @@ describe("the first writing of a spec is not a change (D-128)", () => {
     // The spec as the interview first wrote it reads plain: nothing green, nothing struck.
     expect(marks()).toEqual([]);
 
-    // A hand edit of those words is a change, and the words it changed are marked.
+    // A hand edit of those words is a change, recorded as the person's own,
+    // and marked nowhere: they made it where they read it.
     fireEvent.mouseDown(reading, { clientX: 0, clientY: 0 });
     const box = (await waitFor(() => {
       const shown = screen.getByLabelText("Spec Outcome");
@@ -6845,7 +7334,10 @@ describe("the first writing of a spec is not a change (D-128)", () => {
     });
     fireEvent.blur(box);
     await waitFor(async () => expect((await editingRead(id)).change?.spec?.after.outcome).toContain("weeks"));
-    await waitFor(() => expect(marks(screen.getByLabelText("Spec Outcome"))).toEqual(["days", "weeks"]));
+    expect((await editingRead(id)).change?.by).toBe("person");
+    await waitFor(() => expect(screen.getByLabelText("Spec Outcome").textContent).toContain("weeks"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(marks(screen.getByLabelText("Spec Outcome"))).toEqual([]);
   });
 });
 
@@ -7227,9 +7719,9 @@ describe("the one piece of work a page is about: its name, its row in the picker
       key = (await editingRead(opened.id)).key;
       expect(key).not.toBeNull();
     }, { timeout: 5000 });
-    location.hash = `planning/${opened.id}/criteria`;
+    location.hash = `planning/${opened.id}/spec`;
     mount();
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    await screen.findByLabelText("Spec title", {}, { timeout: 5000 });
     await waitFor(() => expect(barName()).toBe(title));
     return { id: opened.id, repoId, key: key! };
   }
@@ -7248,10 +7740,17 @@ describe("the one piece of work a page is about: its name, its row in the picker
     fireEvent.change(chat, { target: { value: "Can you add a dark mode toggle" } });
     fireEvent.keyDown(chat, { key: "Enter" });
     await screen.findByText(/Noted:/);
-    // The first turn named the spec's folder and wrote its cut on the title
-    // line, which is no name for the work.
-    expect(await editingRead(id)).toMatchObject({ specSlug: "dark-mode-toggle", specCut: "Dark mode toggle" });
+    // The first turn named the spec's folder from its cut, which is no name
+    // for the work: the title line says Untitled, and the cut's words never
+    // show as the title, in the file, the pane, the bar or the picker.
+    expect(await editingRead(id)).toMatchObject({ specSlug: "dark-mode-toggle", named: null });
+    const spec = await sampleBridge.request({ kind: "specRead", id });
+    expect(spec.title).toBe("");
+    expect(storedSpec("dark-mode-toggle")).not.toMatch(/^# |Untitled/m);
+    expect(JSON.stringify(spec)).not.toContain("Dark mode toggle");
+    expect((screen.getByLabelText("Spec title") as HTMLInputElement).value).toBe("");
     await waitFor(() => expect(barName()).toBe("Untitled"));
+    expect(document.body.textContent).not.toContain("Dark mode toggle");
     const row = (picker: HTMLElement): string =>
       within(picker)
         .getAllByRole("button")
@@ -7379,25 +7878,31 @@ describe("the one piece of work a page is about: its name, its row in the picker
     expect(document.querySelector(".titlebar-name")).toBeNull();
   });
 
-  it("keeps the planning's panes in the rail on its contract until it is approved, each going back to planning on its own pane (D-130)", async () => {
+  it("opens a plan's contract as the planning's contract tab until it is approved, its other tabs going back into the planning (D-130, D-NEW-basic-and-epic-flows)", async () => {
     const plan = await ticketPlanning("A billing page in tabs");
     location.hash = `task/${plan.repoId}/${plan.key}/contract`;
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBe("contract"));
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
     const group = screen.getByRole("group", { name: "Planning panes" });
-    expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
-      "Spec",
-      "Plan",
-      "Explorer",
-      "Impact",
-    ]);
-    // None is where the person is: they are on the contract.
-    expect(group.querySelector("[aria-current]")).toBeNull();
+    // Its impact never checked, the plan is checked as the planning opens, and
+    // what the sample's check finds outside the scope puts Impact in the rail.
+    await waitFor(() =>
+      expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+        "Spec",
+        "Explorer",
+        "Impact",
+        "Confirm contract",
+      ]),
+    );
+    expect(within(group).getByRole("button", { name: "Confirm contract" }).getAttribute("aria-current")).toBe("page");
     fireEvent.click(pane("Explorer"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
     await screen.findByRole("tree", { name: "Tracked files" });
-    // Kept as Back to planning keeps it: the pane reached, and no longer the contract.
-    await waitFor(async () => expect(await editingRead(plan.id)).toMatchObject({ lastView: null, lastPane: "explorer" }));
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("explorer"));
+    // Nothing changed since, so the contract is still a tab to go back to.
+    fireEvent.click(pane("Confirm contract"));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
     // An approved ticket's contract, with a session over it that holds its
     // divided plan as a planning does: the approval alone keeps the panes
     // out of the rail.
@@ -7407,5 +7912,44 @@ describe("the one piece of work a page is about: its name, its row in the picker
     await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
     await waitFor(() => expect(client.getQueryData<Snapshot>(["workspace"])?.drafts?.some((draft) => draft.id === opened.id)).toBe(true));
     expect(screen.queryByRole("group", { name: "Planning panes" })).toBeNull();
+  });
+});
+
+describe("what a person types while planning is held where they type it (D-NEW-nothing-shown-is-cut)", () => {
+  it("holds the question's answer to what a turn carries, and sends it without a refusal", async () => {
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Create" }));
+    const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    fireEvent.click(within(picker).getByRole("button", { name: /example\/webstore/ }));
+    const question = (await screen.findByRole("textbox", { name: ASK })) as HTMLTextAreaElement;
+    typeInto(question, "Add a dark mode toggle. " + "word ".repeat(TYPED_TEXT_MAX_CHARS / 5));
+    expect(question.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    fireEvent.keyDown(question, { key: "Enter" });
+    // The sample host parses every request against the protocol, so a turn
+    // it refused would never open the planning.
+    await screen.findByLabelText("Spec title");
+    expect(location.hash).toMatch(/^#planning\//);
+  });
+
+  it("holds the spec's title and each section to what the spec holds, and saves them without a refusal", async () => {
+    const id = await startPlanning();
+    const title = screen.getByLabelText("Spec title") as HTMLInputElement;
+    typeInto(title, "Every export carries its month " + "t".repeat(SPEC_TITLE_MAX_CHARS));
+    expect(title.value).toHaveLength(SPEC_TITLE_MAX_CHARS);
+    fireEvent.blur(title);
+    await waitFor(async () => {
+      const specs = (await sampleBridge.request({ kind: "snapshot" })).specs ?? [];
+      expect(specs.map((spec) => spec.title)).toContain(title.value);
+    }, { timeout: 5000 });
+    // The section reads until it is opened for writing.
+    fireEvent.mouseDown(screen.getByLabelText("Spec Outcome"));
+    const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+    typeInto(outcome, "o".repeat(TYPED_TEXT_MAX_CHARS + 50));
+    expect(outcome.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
+    fireEvent.blur(outcome);
+    await waitFor(async () => {
+      const spec = await sampleBridge.request({ kind: "specRead", id });
+      expect(spec.sections.outcome).toBe("o".repeat(TYPED_TEXT_MAX_CHARS));
+    }, { timeout: 5000 });
   });
 });

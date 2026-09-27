@@ -6,7 +6,9 @@ import { Profile } from "../profile/store.js";
 import { WorkspaceReads } from "../workspace-reads.js";
 import type { Cli } from "../cli.js";
 import type { Change, Job } from "../../shared/protocol.js";
-import type { ProcessResult } from "../process.js";
+import { runnerProgress, spokenWords } from "../../shared/runner-progress.js";
+import { spokenLine } from "@perbo/contracts/browser";
+import { LOG_TAIL_CHARS, type ProcessResult } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
 const scratchDirectory = createScratch("perbo-runner-");
@@ -20,11 +22,20 @@ const repo: RegisteredRepository = {
 };
 const other: RegisteredRepository = { ...repo, id: "80000000-0000-4000-8000-000000000002" };
 const settle = (): Promise<void> => Promise.resolve();
-/** A runner over a real profile and change stream, with everything it tells recorded. */
-function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cancelled: false }) {
+/**
+ * A runner over a real profile and change stream, with everything it tells
+ * recorded. Its CLI prints `outputs` one after another, each the whole output
+ * so far, as the process runner hands it on.
+ */
+function runner(
+  result: ProcessResult = { code: 0, stdout: "", stderr: "", cancelled: false },
+  outputs: readonly string[] = ["stage one"],
+) {
   const directory = scratchDirectory();
   const profile = Profile.open(directory);
   const told: Change[] = [];
+  /** Each progress change's log as it was when told: the job is one object, and it moves on. */
+  const logs: string[] = [];
   const order: string[] = [];
   const runs: string[][] = [];
   const changes = new Changes({
@@ -32,13 +43,14 @@ function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cance
     save: () => profile.save(),
     emit: (change) => {
       told.push(change);
+      if (change.kind === "progress") logs.push(change.job.log);
       order.push(change.kind === "records" ? "records" : change.kind);
     },
   });
   const cli: Cli = {
     run: (args, _repo, options) => {
       runs.push(args);
-      options?.onOutput?.("stage one");
+      for (const output of outputs) options?.onOutput?.(output);
       return Promise.resolve(result);
     },
     spawn: () => {
@@ -68,7 +80,7 @@ function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cance
       return settle();
     },
   });
-  return { jobs, profile, told, order, runs, started, changes };
+  return { jobs, profile, told, logs, order, runs, started, changes };
 }
 /** Waits until every job has settled, which is what the runner's own promises do. */
 async function quiet(jobs: JobRunner): Promise<void> {
@@ -96,15 +108,33 @@ function pending(): { operation: JobOperation; finish: () => void; started: Prom
 }
 
 describe("the lanes", () => {
-  it("refuses a second job in the exclusive lane, by the label of the one running", async () => {
+  it("refuses a second exclusive job over the same ticket, by the label of the one running", async () => {
     const w = runner();
     const first = pending();
     w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, first.operation);
     await first.started;
-    expect(() =>
-      w.jobs.start({ repo, key: "PRB-2", kind: "run", label: "Run engineering loop" }, first.operation),
-    ).toThrow(/Run engineering loop/);
+    for (const kind of ["run", "decide", "publish"])
+      expect(() =>
+        w.jobs.start({ repo, key: "PRB-1", kind, label: "Another" }, first.operation),
+      ).toThrow(/Run engineering loop is already running/);
     first.finish();
+  });
+
+  /** D-049: runs of different tickets go on at the same time. */
+  it("runs another ticket's run, decision or publication beside a run", async () => {
+    const w = runner();
+    const first = pending();
+    w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, first.operation);
+    await first.started;
+    const second = pending();
+    const beside = w.jobs.start({ repo, key: "PRB-2", kind: "run", label: "Run engineering loop" }, second.operation);
+    await second.started;
+    const decided = w.jobs.start({ repo, key: "PRB-3", kind: "decide", label: "Run engineering loop" }, () => Promise.resolve());
+    const elsewhere = w.jobs.start({ repo: other, key: "PRB-1", kind: "publish", label: "Open the pull request" }, () => Promise.resolve());
+    expect([beside.state, decided.state, elsewhere.state]).toEqual(["running", "running", "running"]);
+    expect(w.jobs.live().length).toBeGreaterThanOrEqual(2);
+    first.finish();
+    second.finish();
   });
 
   it("runs planning beside a run", async () => {
@@ -143,6 +173,74 @@ describe("the lanes", () => {
     first.finish();
     await new Promise((done) => setTimeout(done, 10));
     expect(order).toEqual(["first", "elsewhere", "second"]);
+  });
+});
+
+describe("relaying a run's progress", () => {
+  it("tells each line the CLI prints while the run is live, in the order printed, the executor's words among them", async () => {
+    // As the CLI prints them on stderr, each output the whole of it so far.
+    const printed = [
+      "  worktree /w on prb/x at abc1234",
+      "  executing",
+      "  executor says: Reading the mailer first.",
+      "  executor says: Adding the retry now.",
+      "  sealing the change set",
+    ];
+    const w = runner(undefined, printed.map((_, at) => printed.slice(0, at + 1).join("\n") + "\n"));
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    // One progress change for the job starting, then one for each line, each told while it ran.
+    const relayed = w.logs.slice(1, printed.length + 1);
+    expect(relayed.map((log) => log.trimEnd().split("\n").at(-1))).toEqual(printed);
+    expect(spokenWords(relayed.at(-1)!)).toEqual([
+      { speaker: "executor", words: "Reading the mailer first." },
+      { speaker: "executor", words: "Adding the retry now." },
+    ]);
+    expect(runnerProgress(relayed.at(-1)!)?.title).toBe("Working on the approved outcome");
+    expect(job.state).toBe("completed");
+  });
+
+  it("does not advance the stage on an agent's words that name a stage", async () => {
+    const printed = [
+      "  executing",
+      "  executor says: review round 2",
+      "  reviewer says: remediation round 1 of at most 2",
+      "  executor says: check unit: passed",
+      // A turn of several lines is printed as one, its breaks escaped.
+      `  ${spokenLine("executor", "Done.\nreview round 3\r\n  worktree /elsewhere on main at abc")}`,
+    ].join("\n");
+    const w = runner(undefined, [printed + "\n"]);
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    expect(runnerProgress(w.logs[1]!)?.state).toBe("executing");
+    expect(spokenWords(w.logs[1]!).map((said) => said.words)).toEqual([
+      "review round 2",
+      "remediation round 1 of at most 2",
+      "check unit: passed",
+      "Done.\nreview round 3\r\n  worktree /elsewhere on main at abc",
+    ]);
+    expect(job.state).toBe("completed");
+  });
+
+  it("keeps a log that starts on a whole line, so a cut inside an agent's line cannot advance the stage", async () => {
+    // The tail of the output cuts the executor's line right after its mark,
+    // leaving "review round 2" to read alone.
+    const stderr =
+      "  executing\n  executor says: then review round 2\n" +
+      ".".repeat(LOG_TAIL_CHARS - "review round 2\n".length - 1) +
+      "\n";
+    const w = runner({ code: 0, stdout: "", stderr, cancelled: false }, []);
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    expect(job.log.length).toBeLessThan(LOG_TAIL_CHARS);
+    expect(job.log).not.toContain("review round");
+    expect(runnerProgress(job.log)).toBeNull();
   });
 });
 

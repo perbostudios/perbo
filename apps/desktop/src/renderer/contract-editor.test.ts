@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type PropsWithChildren } from "react";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
-import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, keepsPersonsTitle, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
+import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, keepsPersonsTitle, sameProblems, titleChanged, untouchedPlanning } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
@@ -376,6 +376,44 @@ describe("the interview's conversation on an editing session", () => {
     expect(ended.revision).toBe(session.revision);
   });
 
+  it("puts the session's own question behind a problem in front of the person, and a later reading's problem over the one before", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    const id = session.id;
+    const at = "2026-01-01T00:00:00.000Z";
+    const say = (line: Parameters<typeof f.editing.converse>[1]) => f.editing.converse(id, line, at);
+    const finding = (heading: string) => ({
+      heading,
+      difference: `${heading} says something else.`,
+      options: [
+        { label: "Change the plan", detail: null, recommended: true },
+        { label: "Change the spec", detail: null, recommended: false },
+      ],
+    });
+    const verdict = (findings: ReturnType<typeof finding>[]) =>
+      ({ findings, dismissed: false }) as unknown as Parameters<typeof f.editing.landDrift>[1];
+    f.editing.landDrift(id, verdict([finding("Criterion 1 and R1")]), false, say, () => undefined);
+    const problem = f.editing.read(id).asking!.entry;
+    // The session asks while the problem is in front of the person: it waits.
+    const asked = say({
+      kind: "asked",
+      groups: [{ title: "Where it lands", parts: [{ question: "Where?", options: [{ label: "Home", detail: null, recommended: false }, { label: "Board", detail: null, recommended: false }] }] }],
+    });
+    f.editing.beginAsking(id, asked.n);
+    expect(f.editing.read(id).asking).toEqual({ entry: problem, answered: 0 });
+    expect(f.editing.read(id).askingNext).toEqual([asked.n]);
+    // A later reading finds another problem: it replaces the one it read
+    // before, and the question still waits behind it.
+    f.editing.landDrift(id, verdict([finding("Criterion 2 and R2")]), false, say, () => undefined);
+    const next = f.editing.read(id).asking!.entry;
+    expect(next).toBeGreaterThan(asked.n);
+    expect(f.editing.read(id).askingNext).toEqual([asked.n]);
+    // Closed by hand: the problem's card comes down and the question is put.
+    f.editing.landDrift(id, verdict([]), false, say, () => undefined);
+    expect(f.editing.read(id).asking).toEqual({ entry: asked.n, answered: 0 });
+    expect(f.editing.read(id).askingNext).toEqual([]);
+  });
+
   it("records the interview's own session id, which is what continues it", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "new", repoId });
@@ -602,8 +640,7 @@ describe("a planning that holds nothing (D-129)", () => {
       revision: 0,
       resumeNew: false,
       lastPane: null,
-      lastView: null,
-      specCut: null,
+      confirmed: null, read: null, impact: null,
       named: null,
       drift: null,
       change: null,
@@ -702,11 +739,36 @@ describe("who named the spec (D-127)", () => {
     expect(keepsPersonsTitle(f.editing.read(session.id), "Night mode")).toBe(true);
   });
 
-  it("does not take the cut for the Architect's title (D-118)", async () => {
+  it("folds a title of any length to one line and keeps it whole, for admission to rename or refuse (D-127)", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "fresh", repoId });
-    f.editing.recordSpec(session.id, "dark-mode", "Dark mode");
-    f.editing.architectTitled(session.id, "Dark mode");
+    const words = Array.from({ length: 100 }, (_, n) => `word${n}`);
+    const title = words.join(" \n ");
+    const folded = words.join(" ");
+    expect(folded.length).toBeGreaterThan(500);
+    // The Architect's: recorded whole, and not the person's, so the plan is
+    // drafted without --keep-title and the drafter's name replaces it.
+    f.editing.architectTitled(session.id, title);
+    const architect = EditingSessionSchema.parse(f.records().find((record) => record.id === session.id));
+    expect(architect.named).toEqual({ by: "architect", title: folded });
+    expect(keepsPersonsTitle(architect, title)).toBe(false);
+    // The person's: recorded whole and kept, so the plan is drafted with
+    // --keep-title, which refuses a name past the cap rather than cutting it
+    // (admit.from-spec.test.ts, "refuses a title longer than a ticket's name may be").
+    f.editing.personTitled(session.id, title);
+    expect(f.editing.read(session.id).named).toEqual({ by: "person", title: folded });
+    expect(keepsPersonsTitle(f.editing.read(session.id), title)).toBe(true);
+    expect(keepsPersonsTitle(f.editing.read(session.id), `${folded.slice(0, 500)} changed`)).toBe(false);
+    // A save that changes a long title past any column is a change.
+    expect(titleChanged({ title: `${folded} a`, base: { title: `${folded} b` } })).toBe(true);
+  });
+
+  it("does not take a spec left with no title line for the Architect's title (D-118)", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.recordSpec(session.id, "dark-mode");
+    f.editing.architectTitled(session.id, "");
+    f.editing.architectTitled(session.id, "  ");
     expect(f.editing.read(session.id).named).toBeNull();
   });
 });
@@ -746,19 +808,41 @@ describe("the pane a planning was left at (D-130)", () => {
     expect(f.persist.mock.calls.length).toBe(discarded);
   });
 
-  it("records the contract as the last place, which a pane reached after clears, and writes nothing twice", async () => {
+  it("keeps what the impact check found and the state last read until a fresh draft replaces the plan they were of, and not through a compile (D-NEW-basic-and-epic-flows)", async () => {
+    const f = await fixture();
+    const opened = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
+    f.editing.recordSpec(opened.id, "a-spec");
+    f.editing.recordImpact(opened.id, 3);
+    f.editing.recordRead(opened.id, "state-read");
+    expect(f.editing.read(opened.id).impact).toBe(3);
+    expect(f.editing.read(opened.id).read).toBe("state-read");
+    const compiled = f.editing.read(opened.id);
+    await f.editing.submit(opened.id, compiled.revision, crypto.randomUUID(), "compile");
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(opened.id).impact).toBe(3);
+    expect(f.editing.read(opened.id).read).toBe("state-read");
+    const ready = await f.editing.open({ kind: "session", id: opened.id });
+    await f.editing.submit(opened.id, ready.revision, crypto.randomUUID(), "startOver");
+    await f.editing.settled({ ...f.jobs[1]!, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(opened.id).impact).toBeNull();
+    expect(f.editing.read(opened.id).read).toBeNull();
+  });
+
+  it("records the contract as the last pane with the state it was reached at, writes nothing twice, and records it again at a new state", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "fresh", repoId });
-    expect(session.lastView).toBeNull();
+    expect(session.confirmed).toBeNull();
     f.editing.visit(session.id, "graph");
-    const atContract = f.editing.visitContract(session.id);
-    expect(atContract).toMatchObject({ lastView: "contract", lastPane: "graph", revision: session.revision });
+    const atContract = f.editing.visitContract(session.id, "state-1");
+    expect(atContract).toMatchObject({ lastPane: "contract", confirmed: "state-1", revision: session.revision });
     const writes = f.persist.mock.calls.length;
-    f.editing.visitContract(session.id);
+    f.editing.visitContract(session.id, "state-1");
     expect(f.persist.mock.calls.length).toBe(writes);
-    // The same pane it was left from is still a move back to it.
-    expect(f.editing.visit(session.id, "graph")).toMatchObject({ lastView: null, lastPane: "graph" });
+    // Reached again once something moved: the new state is the one that holds.
+    expect(f.editing.visitContract(session.id, "state-2").confirmed).toBe("state-2");
+    // A pane reached after is the last place, and the state stays for the tab.
+    expect(f.editing.visit(session.id, "graph")).toMatchObject({ lastPane: "graph", confirmed: "state-2" });
     f.editing.discard(session.id);
-    expect(f.editing.visitContract(session.id).lastView).toBeNull();
+    expect(f.editing.visitContract(session.id, "state-3").confirmed).toBe("state-2");
   });
 });

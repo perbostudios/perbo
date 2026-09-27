@@ -29,8 +29,13 @@ export const LimitedResourceSchema = z.enum(LIMITED_RESOURCES);
 export type LimitedResource = (typeof LIMITED_RESOURCES)[number];
 
 /**
- * The six resources a run is bounded by only where a repository says so
- * (D-096).
+ * The resources nothing bounds unless a repository names them: how many runs
+ * this machine takes at once (D-049), and the six a run is bounded by only
+ * where a repository says so (D-096).
+ *
+ * Runs of different tickets proceed side by side, as many as are started; a
+ * person who wants fewer on their machine names the number. One ticket
+ * takes one run at a time, which the ticket's run lock holds rather than this.
  *
  * An iteration is one assistant event on the executor's stream — a message,
  * not a tool call — and a command is one tool call; both were proxies for
@@ -44,6 +49,7 @@ export type LimitedResource = (typeof LIMITED_RESOURCES)[number];
  * number behind it.
  */
 export const UNSET_UNLESS_CONFIGURED = [
+  "concurrent_local_attempts",
   "attempt_commands",
   "attempt_iterations",
   "round_iterations",
@@ -94,12 +100,11 @@ export const KillSwitchesSchema = z.strictObject({
 export type KillSwitches = z.infer<typeof KillSwitchesSchema>;
 
 /**
- * The five resources every run is bounded by, and what each number is for.
+ * The four resources every run is bounded by, and what each number is for.
  *
- * `concurrent_local_attempts` defaults to 1 and `local_workspace_bytes` to
- * 20 GiB because the execution substrate is a laptop (D-049). A ceiling that
- * assumes a cloud runner is not a ceiling. Neither is a run ceiling: they bound
- * the machine an attempt runs on rather than the work it does.
+ * `local_workspace_bytes` is 20 GiB because the execution substrate is a
+ * laptop (D-049). It is not a run ceiling: it bounds the disk an attempt fills
+ * rather than the work it does.
  *
  * `attempt_stall_ms` — 20 min. The one thing that stops an attempt nobody asked
  * to stop (D-096). It is measured from the last tool activity the runner saw on
@@ -132,10 +137,13 @@ export type KillSwitches = z.infer<typeof KillSwitchesSchema>;
  * stall detector, the round count and — where the executor bills per token —
  * the two cost caps, and by nothing else. A table that names one of the absent
  * five gets exactly that ceiling.
+ *
+ * `concurrent_local_attempts` is absent too (D-049): runs of different tickets
+ * go on at the same time, and a table that names a number holds this machine
+ * to it.
  */
 export const DEFAULT_LIMITS: Readonly<Record<DefaultedResource, number>> &
   Readonly<Partial<Record<UnsetUnlessConfigured | "ticket_cost_micros", number>>> = {
-  concurrent_local_attempts: 1,
   local_workspace_bytes: 20 * 1024 * 1024 * 1024,
   attempt_stall_ms: 20 * 60 * 1000,
   remediation_rounds: 6,

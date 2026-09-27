@@ -37,6 +37,7 @@ const state = ProfileStateSchema.parse({
   lastOpened: { "repo:PRB-1": "2026-09-24T10:00:00.000Z" },
   titles: { "repo:PRB-1": "Renamed" },
   archived: ["repo:PRB-1"],
+  calledOff: ["repo:PRB-2:https://github.com/example/webstore/pull/2"],
 });
 
 describe("Changes", () => {
@@ -83,6 +84,7 @@ describe("Changes", () => {
       kind: "preferences",
       titles: { "repo:PRB-1": "Renamed" },
       archived: ["repo:PRB-1"],
+      calledOff: ["repo:PRB-2:https://github.com/example/webstore/pull/2"],
     });
     // When a page opened is told on its own, so an older preferences change cannot undo a newer opening.
     expect(w.told[0]).not.toHaveProperty("lastOpened");

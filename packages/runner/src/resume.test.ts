@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LimitsTableSchema,
@@ -12,24 +12,27 @@ import type { AgentResult } from "./adapter.js";
 import { BundleStore } from "./bundle.js";
 import { EgressLog } from "./egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "./loop/index.js";
+import { EXECUTOR_PROMPT_VERSION, RESUMED_EXECUTOR_PROMPT_VERSION } from "./prompt.js";
 import { resolveResumeSource, sameCommit } from "./resume.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "./transport.js";
 import { makeContract, makeReview } from "./test-support/records.js";
-import { runnerRepository } from "./test-support/repository.js";
+import { git, runnerRepository } from "./test-support/repository.js";
 import { scratchDirectories } from "@perbo/test-support";
 import type { Repository } from "@perbo/test-support";
 
 const scratch = scratchDirectories("perbo-runner-");
 
 /**
- * Resuming an attempt a ceiling cut (SCP-154).
+ * Resuming an attempt a ceiling cut or a person stopped (SCP-154).
  *
- * The first attempt in each of these is driven by a **real executor process** —
- * a script that writes a file and reports a charge past `attempt_cost_micros` —
+ * A ceiling-cut first attempt is driven by a **real executor process** — a
+ * script that writes a file and reports a charge past `attempt_cost_micros` —
  * so what stops it is the runner's own ceiling and what is retained is the
- * bundle the loop actually wrote. The second attempt's executor is a double,
- * because the question it answers is what the worktree and the brief contain
- * at the moment it is called.
+ * bundle the loop actually wrote. A stopped one is a double that writes its
+ * files and answers `cancelled`, which is what the adapter records when the
+ * person stops the run. The second attempt's executor is a double, because the
+ * question it answers is what the worktree and the brief contain at the moment
+ * it is called.
  */
 
 /** Nothing to install and nothing to copy: the fixture repository runs as it is. */
@@ -139,26 +142,57 @@ function cuttingExecutor(dir: string): string {
   return binary;
 }
 
+/** A binary file the cancelled attempt writes: git reads the NUL byte as binary. */
+const BINARY_FILE = "src/logo.bin";
+const BINARY_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0xff, 0xfe, 0x00, 0x0a, 0x1a]);
+
+/** A second text file, for a diff that can apply in part. */
+const SECOND_FILE = "src/second.ts";
+const SECOND_BODY = "export const second = 'also from the cancelled attempt';\n";
+
+/** A file's bytes, or null where it is not there. */
+const bytesAt = (worktree: string, path: string): Buffer | null =>
+  existsSync(join(worktree, path)) ? readFileSync(join(worktree, path)) : null;
+
 /**
  * The double the resumed attempt gets: it records what it was handed and stops.
  *
  * `terminations` answers the first invocations in order and every one after
  * them completes, so a caller that needs a transport failure before the work
- * lands can ask for one without a second double.
+ * lands can ask for one without a second double. `write` is what each
+ * invocation leaves in its worktree before it answers, as an executor would.
  */
-function watchingExecutor(terminations: ReadonlyArray<AgentResult["termination"]> = []) {
-  const seen: Array<{ worktree: string; prompt: string; carried: string | null }> = [];
+function watchingExecutor(
+  terminations: ReadonlyArray<AgentResult["termination"]> = [],
+  write: ReadonlyArray<readonly [string, string | Buffer]> = [],
+) {
+  const seen: Array<{
+    worktree: string;
+    prompt: string;
+    carried: string | null;
+    binary: Buffer | null;
+    second: string | null;
+    head: string;
+    status: string;
+  }> = [];
   const run = async (request: {
     worktree: string;
     prompt: string;
     profile: { network_allow_list: readonly string[] };
   }): Promise<AgentResult> => {
-    const path = join(request.worktree, CARRIED_FILE);
     seen.push({
       worktree: request.worktree,
       prompt: request.prompt,
-      carried: existsSync(path) ? readFileSync(path, "utf8") : null,
+      carried: bytesAt(request.worktree, CARRIED_FILE)?.toString("utf8") ?? null,
+      binary: bytesAt(request.worktree, BINARY_FILE),
+      second: bytesAt(request.worktree, SECOND_FILE)?.toString("utf8") ?? null,
+      head: git(request.worktree, "rev-parse", "HEAD").trim(),
+      status: git(request.worktree, "status", "--porcelain", "--untracked-files=no"),
     });
+    for (const [path, body] of write) {
+      mkdirSync(dirname(join(request.worktree, path)), { recursive: true });
+      writeFileSync(join(request.worktree, path), body);
+    }
     return {
       invocation: {
         adapter: "double",
@@ -278,6 +312,51 @@ async function runCutByCostCeiling(): Promise<{
   };
 }
 
+/**
+ * One run of the ticket whose attempt writes `files` and is then stopped by the
+ * person, as quitting the desktop mid-run stops it: sealed, recorded
+ * `cancelled`, and its work retained in `change.diff`.
+ */
+async function runCancelled(files: ReadonlyArray<readonly [string, string | Buffer]>): Promise<{
+  repo: Repository;
+  contract: PlanContract;
+  store: string;
+  branch: string;
+  attempt_id: string;
+  bundle_id: string;
+  diff: string;
+}> {
+  const repo = runnerRepository(scratch);
+  const contract = makeContract();
+  contract.base.base_commit = repo.head;
+  const store = scratch("perbo-resume-store-");
+  const executor = watchingExecutor([{ reason: "cancelled", detail: "Stopped by the user" }], files);
+
+  const first = await runTicket({
+    config: makeConfig({ repositoryRoot: repo.dir, store, agentBinary: "true" }),
+    contract,
+    hooks: { agent: executor.run as never },
+  });
+  expect(first.rounds[0]?.attempt.termination.reason).toBe("cancelled");
+
+  const [bundle] = executionBundles(store) as Array<{
+    bundle_id: string;
+    subject_id: string;
+    artifacts: Array<{ name: string; sha256: string }>;
+  }>;
+  const diffRef = bundle?.artifacts.find((artifact) => artifact.name === "change.diff");
+  expect(diffRef).toBeDefined();
+  return {
+    repo,
+    contract,
+    store,
+    branch: first.workspace.branch,
+    attempt_id: bundle!.subject_id,
+    bundle_id: bundle!.bundle_id,
+    diff: readFileSync(join(store, "bundles", "objects", diffRef!.sha256), "utf8"),
+  };
+}
+
 describe("a resume starts the next attempt from the cut attempt's retained diff", () => {
   it("has the diff's file in the worktree before the executor is called, and frames it as unverified", async () => {
     const cut = await runCutByCostCeiling();
@@ -313,7 +392,13 @@ describe("a resume starts the next attempt from the cut attempt's retained diff"
     expect(prompt).toContain("previous attempt of this same ticket");
     expect(prompt).toContain(cut.attempt_id);
     expect(prompt).toContain(cut.bundle_id);
-    expect(prompt).toContain("stopped part-way by a ceiling");
+    expect(prompt).toContain(
+      "was stopped part-way by a ceiling (it ended `cost_ceiling_exceeded`), not by a judgement",
+    );
+    // The branch is gone, so the work is in front of it applied, not committed.
+    expect(prompt).toContain("has been applied into this worktree and is uncommitted");
+    expect(prompt).not.toContain("committed on this branch");
+    expect(executor.seen[0]?.status).not.toBe("");
     expect(prompt).toContain("never checked and never reviewed by anyone");
     expect(prompt).toContain("Treat it as a draft to check, not as work to trust");
 
@@ -342,6 +427,9 @@ describe("a resume starts the next attempt from the cut attempt's retained diff"
     expect(resumed!.bundle_id).not.toBe(cut.bundle_id);
     expect(resumed!.inputs.resumed_from_bundle).toBe(cut.bundle_id);
     expect(resumed!.inputs.resumed_from_attempt).toBe(cut.attempt_id);
+    expect(resumed!.inputs.resumed_diff).toBe("applied");
+    expect(resumed!.inputs.resumed_diff_at).toBeNull();
+    expect(attempt.resumed_from?.note).toContain("was applied");
 
     // ac_1: the carried work is in the resumed attempt's own sealed change set,
     // not only in its worktree — the branch this run leaves behind holds it.
@@ -356,12 +444,61 @@ describe("a resume starts the next attempt from the cut attempt's retained diff"
     expect(second.rounds[0]?.attempt.head_commit).not.toBeNull();
   }, CUT_RUN_TIMEOUT_MS);
 
-  it("is a clean no-op where the branch already carries the same work", async () => {
+  it("leaves a branch that already holds the sealed commit as it is, and briefs the work as committed", async () => {
     const cut = await runCutByCostCeiling();
-    // The branch is left alone this time, so the worktree the resume applies
-    // into already holds the cut attempt's commit. `git apply --3way` resolves
-    // an already-applied diff rather than failing on it, so the resume is
-    // recorded and the executor still runs.
+    // The branch is left alone this time, as Continue after a stop leaves it,
+    // so the worktree the resume provisions already holds the cut attempt's
+    // commit. The diff is not applied again, and the executor is told the work
+    // is committed, because `git status` shows none of it.
+    const sealed = cut.repo.git("rev-parse", `refs/heads/${cut.branch}`).trim();
+    const executor = watchingExecutor();
+    const said: string[] = [];
+    const second = await runTicket({
+      config: makeConfig({
+        repositoryRoot: cut.repo.dir,
+        store: cut.store,
+        agentBinary: "true",
+        resumeFrom: cut.bundle_id,
+      }),
+      contract: cut.contract,
+      onProgress: (message) => said.push(message),
+      hooks: {
+        agent: executor.run as never,
+        review: approvingReview as never,
+      },
+    });
+
+    expect(executor.seen[0]?.carried).toBe(CARRIED_BODY);
+    expect(executor.seen[0]?.head).toBe(sealed);
+    expect(executor.seen[0]?.status).toBe("");
+    const prompt = executor.seen[0]?.prompt ?? "";
+    expect(prompt).toContain(`change set is committed on this branch, at ${sealed}`);
+    expect(prompt).toContain("stopped part-way by a ceiling (it ended `cost_ceiling_exceeded`)");
+    expect(prompt).not.toContain("uncommitted");
+
+    const note = second.rounds[0]?.attempt.resumed_from?.note ?? "";
+    expect(second.rounds[0]?.attempt.resumed_from?.bundle_id).toBe(cut.bundle_id);
+    expect(note).toContain(`the branch already holds ${sealed}`);
+    expect(note).toContain("was not applied again");
+    expect(said.some((line) => line.includes(`the branch already holds ${sealed}`))).toBe(true);
+  }, CUT_RUN_TIMEOUT_MS);
+
+  it("keeps undone what a commit after the sealed one removed, rather than applying the diff over it", async () => {
+    const cut = await runCancelled([
+      [CARRIED_FILE, CARRIED_BODY],
+      [SECOND_FILE, SECOND_BODY],
+    ]);
+    // On the attempt branch after the stop, a person deliberately removes one
+    // of the two files. The branch still holds the sealed commit, so the diff
+    // — which adds that file — has nothing to give it; applied, `--3way` would
+    // put the file back and exit 0.
+    const sealed = cut.repo.git("rev-parse", `refs/heads/${cut.branch}`).trim();
+    cut.repo.git("checkout", "-q", cut.branch);
+    cut.repo.git("rm", "-q", "--", SECOND_FILE);
+    cut.repo.git("commit", "-qm", "a person removes the second file");
+    const removed = cut.repo.git("rev-parse", "HEAD").trim();
+    cut.repo.git("checkout", "-q", "main");
+
     const executor = watchingExecutor();
     const second = await runTicket({
       config: makeConfig({
@@ -371,14 +508,62 @@ describe("a resume starts the next attempt from the cut attempt's retained diff"
         resumeFrom: cut.bundle_id,
       }),
       contract: cut.contract,
-      hooks: {
-        agent: executor.run as never,
-        review: approvingReview as never,
-      },
+      hooks: { agent: executor.run as never, review: approvingReview as never },
     });
 
+    expect(executor.seen).toHaveLength(1);
+    const seen = executor.seen[0]!;
+    expect(seen.head).toBe(removed);
+    expect(seen.status).toBe("");
+    expect(seen.second).toBeNull();
+    expect(seen.carried).toBe(CARRIED_BODY);
+    // Briefed truthfully: the cancelled attempt's work is committed, at the
+    // commit its seal made, and a person stopped it.
+    expect(seen.prompt).toContain(`change set is committed on this branch, at ${sealed}`);
+    expect(seen.prompt).toContain("stopped part-way by a person (it ended `cancelled`)");
+    expect(seen.prompt).not.toContain("uncommitted");
+
+    const attempt = second.rounds[0]!.attempt;
+    expect(attempt.resumed_from?.note).toContain(`the branch already holds ${sealed}`);
+    const bundle = (
+      executionBundles(cut.store) as Array<{
+        subject_id: string;
+        inputs: Record<string, unknown>;
+        versions: { prompt: string };
+      }>
+    ).find((one) => one.subject_id === attempt.attempt_id);
+    expect(bundle?.inputs.resumed_diff).toBe("held");
+    expect(bundle?.inputs.resumed_diff_at).toBe(sealed);
+    expect(bundle?.versions.prompt).toBe(RESUMED_EXECUTOR_PROMPT_VERSION);
+  }, CUT_RUN_TIMEOUT_MS);
+
+  it("carries a cancelled attempt's binary file through its retained diff", async () => {
+    const cut = await runCancelled([
+      [CARRIED_FILE, CARRIED_BODY],
+      [BINARY_FILE, BINARY_BYTES],
+    ]);
+    // The retained diff holds the file's bytes, not git's "Binary files …
+    // differ", which no `git apply` can apply.
+    expect(cut.diff).toContain("GIT binary patch");
+    // The branch is gone, so the retained diff is the only copy of the work.
+    cut.repo.git("branch", "-D", "--", cut.branch);
+
+    const executor = watchingExecutor();
+    const second = await runTicket({
+      config: makeConfig({
+        repositoryRoot: cut.repo.dir,
+        store: cut.store,
+        agentBinary: "true",
+        resumeFrom: cut.bundle_id,
+      }),
+      contract: cut.contract,
+      hooks: { agent: executor.run as never, review: approvingReview as never },
+    });
+
+    expect(executor.seen).toHaveLength(1);
+    expect(executor.seen[0]?.binary).toEqual(BINARY_BYTES);
     expect(executor.seen[0]?.carried).toBe(CARRIED_BODY);
-    expect(second.rounds[0]?.attempt.resumed_from?.bundle_id).toBe(cut.bundle_id);
+    expect(second.rounds[0]?.attempt.resumed_from?.note).toContain("was applied");
   }, CUT_RUN_TIMEOUT_MS);
 });
 
@@ -429,8 +614,16 @@ describe("a resumed round 0 whose model transport gives up", () => {
     expect(executor.seen[1]?.worktree).toBe(executor.seen[0]?.worktree);
     expect(executor.seen[0]?.carried).toBe(CARRIED_BODY);
     expect(executor.seen[1]?.carried).toBe(CARRIED_BODY);
-    // And it is briefed as a resume, because it is one.
+    // And it is briefed as a resume, because it is one: the first attempt got
+    // the work applied and uncommitted, and the retry gets it committed, by the
+    // first attempt's own seal, at the commit it starts from.
+    expect(executor.seen[0]?.prompt).toContain("applied into this worktree and is uncommitted");
+    expect(executor.seen[1]?.status).toBe("");
+    expect(executor.seen[1]?.head).not.toBe(executor.seen[0]?.head);
     expect(executor.seen[1]?.prompt).toContain(cut.bundle_id);
+    expect(executor.seen[1]?.prompt).toContain(
+      `change set is committed on this branch, at ${executor.seen[1]?.head}`,
+    );
     expect(executor.seen[1]?.prompt).toContain("Treat it as a draft to check, not as work to trust");
 
     const superseded = second.rounds[0]!.superseded_attempts;
@@ -485,37 +678,94 @@ describe("a resume refuses rather than applying a diff to the wrong tree", () =>
     // bundle is still the only execution bundle in the store.
     expect(executionBundles(cut.store)).toHaveLength(1);
   }, CUT_RUN_TIMEOUT_MS);
+});
 
-  it("refuses a diff that no longer applies, naming the file", async () => {
-    const cut = await runCutByCostCeiling();
+/**
+ * A retained diff that no longer applies to the ticket's sealed commit — a
+ * changed branch, a corrupt artifact, a record whose binary files git cannot
+ * apply — is dropped rather than ending the run, which would leave the ticket
+ * nothing to continue with.
+ */
+describe("a resume whose retained diff does not apply", () => {
+  it("drops the diff whole, runs the executor from the commit the branch holds, and says so", async () => {
+    const cut = await runCancelled([
+      [CARRIED_FILE, CARRIED_BODY],
+      [SECOND_FILE, SECOND_BODY],
+    ]);
 
-    // The same file, changed by hand on the attempt branch after the ceiling
-    // ended the attempt. The retained diff still says that file is added with
-    // the bytes the cut attempt wrote, and the two cannot both be true: this is
-    // the conflict `git apply --3way` refuses rather than guesses at.
-    cut.repo.git("checkout", "-q", cut.branch);
-    writeFileSync(
-      join(cut.repo.dir, CARRIED_FILE),
-      "export const carried = 'a person changed this by hand';\n",
-    );
+    // After the stop, a person resets the attempt branch to a commit of their
+    // own on the base, which writes one of the files the cancelled attempt
+    // added by hand. The branch no longer holds the sealed commit, so the diff
+    // is applied, and `git apply --3way` adds the second file cleanly and
+    // leaves the first in conflict — an application in part, which is no tree
+    // to hand an executor.
+    const HAND_BODY = "export const carried = 'a person changed this by hand';\n";
+    cut.repo.git("checkout", "-q", "--detach", cut.repo.head);
+    mkdirSync(join(cut.repo.dir, "src"), { recursive: true });
+    writeFileSync(join(cut.repo.dir, CARRIED_FILE), HAND_BODY);
     cut.repo.git("add", "-A");
-    cut.repo.git("commit", "-qm", "hand edit on the attempt branch");
+    cut.repo.git("commit", "-qm", "a person's own commit on the base");
+    const personsCommit = cut.repo.git("rev-parse", "HEAD").trim();
+    cut.repo.git("branch", "-f", "--", cut.branch, personsCommit);
     cut.repo.git("checkout", "-q", "main");
 
-    const executor = watchingExecutor();
-    await expect(
-      runTicket({
-        config: makeConfig({
-          repositoryRoot: cut.repo.dir,
-          store: cut.store,
-          agentBinary: "true",
-          resumeFrom: cut.bundle_id,
-        }),
-        contract: cut.contract,
-        hooks: { agent: executor.run as never },
+    // The first attempt meets a transport failure, so the round's further
+    // attempt — which does not apply the diff again — is run too.
+    const executor = watchingExecutor([
+      { reason: "transport_unavailable", detail: "API Error (529 Overloaded)" },
+    ]);
+    const said: string[] = [];
+    const second = await runTicket({
+      config: makeConfig({
+        repositoryRoot: cut.repo.dir,
+        store: cut.store,
+        agentBinary: "true",
+        resumeFrom: cut.bundle_id,
       }),
-    ).rejects.toThrow(/change\.diff/);
-    expect(executor.seen).toHaveLength(0);
+      contract: cut.contract,
+      sleep: async () => undefined,
+      onProgress: (message) => said.push(message),
+      hooks: { agent: executor.run as never, review: approvingReview as never },
+    });
+
+    // The executor ran, on the person's commit and a clean tree: nothing of the
+    // diff is left, the half that applied included.
+    expect(executor.seen).toHaveLength(2);
+    for (const seen of executor.seen) {
+      expect(seen.head).toBe(personsCommit);
+      expect(seen.status).toBe("");
+      expect(seen.carried).toBe(HAND_BODY);
+      expect(seen.second).toBeNull();
+      // Briefed as a fresh executor: nothing of the diff is in front of it.
+      expect(seen.prompt).not.toContain("unfinished work");
+    }
+
+    // The run's log says what happened and what git said.
+    const dropped = said.find((line) => line.includes("was dropped"));
+    expect(dropped).toContain(cut.bundle_id);
+    expect(dropped).toContain(`the executor started from ${personsCommit}`);
+    expect(dropped).toContain("git apply said:");
+
+    // Both attempts' records say it, and the bundle records the commit.
+    const attempt = second.rounds[0]!.attempt;
+    const superseded = second.rounds[0]!.superseded_attempts;
+    expect(superseded).toHaveLength(1);
+    for (const recorded of [superseded[0]!, attempt]) {
+      expect(recorded.resumed_from?.bundle_id).toBe(cut.bundle_id);
+      expect(recorded.resumed_from?.note).toContain("unverified prior work was dropped");
+      expect(recorded.resumed_from?.note).toContain(`the executor started from ${personsCommit}`);
+    }
+    expect(superseded[0]?.continues_attempt_id).toBe(cut.attempt_id);
+    const bundle = (
+      executionBundles(cut.store) as Array<{
+        subject_id: string;
+        inputs: Record<string, unknown>;
+        versions: { prompt: string };
+      }>
+    ).find((one) => one.subject_id === attempt.attempt_id);
+    expect(bundle?.inputs.resumed_diff).toBe("dropped");
+    expect(bundle?.inputs.resumed_diff_at).toBe(personsCommit);
+    expect(bundle?.versions.prompt).toBe(EXECUTOR_PROMPT_VERSION);
   }, CUT_RUN_TIMEOUT_MS);
 });
 

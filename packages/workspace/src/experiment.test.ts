@@ -105,4 +105,17 @@ describe("the materialization measurement", () => {
       ),
     ).rejects.toThrow(/workspace packages/);
   }, 120_000);
+
+  it("says git's whole refusal of a clone (D-NEW-nothing-shown-is-cut)", async () => {
+    const missing = join(scratchRoot, ...Array.from({ length: 12 }, (_, n) => `a-directory-that-is-not-there-${n}`));
+    await expect(
+      runExperiment(
+        ExperimentConfigSchema.parse({
+          scratch: mkdtempSync(join(scratchRoot, "run-")),
+          repositories: [{ name: "missing", repository_id: "repo_missing", source: missing, clone: "local" }],
+        }),
+      ),
+    ).rejects.toThrow(new RegExp(`${missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*does not exist`));
+    expect(missing.length).toBeGreaterThan(400);
+  }, 120_000);
 });

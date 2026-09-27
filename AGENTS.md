@@ -43,6 +43,7 @@ Running the corpus spends money: it needs a reviewer credential, and `--run` is 
 
 - Diagrams: edit the `.dot`, then regenerate its `.svg` and `.png` with Graphviz. `validate_diagrams.py` compares label text, so it survives a Graphviz version change but still catches a stale rendering.
 - Authored corpus fixtures: [`packages/evaluation/AGENTS.md`](packages/evaluation/AGENTS.md) says how they are edited and regenerated.
+- The desktop's recorded run (`apps/desktop/src/renderer/tasks/fixtures/recorded-run.json`): never edited by hand; after `pnpm -r build`, `node scripts/capture-recorded-run.mjs` captures it again from the CLI, and `--check` fails where the committed fixture is not what the CLI now captures.
 
 ## Before you finish
 

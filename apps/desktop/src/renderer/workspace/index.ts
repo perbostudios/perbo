@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isLive } from "../../shared/jobs.js";
 import { useEffect } from "react";
 import type { DesktopBridge, Request } from "../../shared/protocol.js";
@@ -56,18 +56,16 @@ export function useDetail(repoId: string, key: string) {
     staleTime: 2000,
   });
 }
-export function useOutput(
-  repoId: string,
-  key: string,
-  attemptId: string | undefined,
-) {
+/** Each attempt's retained output, one read per attempt, in the order the ids are given. */
+export function useOutputs(repoId: string, key: string, attemptIds: readonly string[]) {
   const refresh = useRefresh();
-  return useQuery({
-    queryKey: ["output", repoId, key, attemptId],
-    queryFn: () => refresh.output(repoId, key, attemptId),
-    networkMode: "always",
-    enabled: Boolean(attemptId),
-    staleTime: 30_000,
+  return useQueries({
+    queries: attemptIds.map((attemptId) => ({
+      queryKey: ["output", repoId, key, attemptId],
+      queryFn: () => refresh.output(repoId, key, attemptId),
+      networkMode: "always" as const,
+      staleTime: 30_000,
+    })),
   });
 }
 /** What a card or row can say about a ticket's work; read on demand, never for the whole listing. */

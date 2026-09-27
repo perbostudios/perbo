@@ -249,7 +249,7 @@ export function transportExhaustion(transcript: readonly string[]): TransportFai
     signals.push({
       kind: "report",
       reported,
-      evidence: from.trim().slice(0, 500),
+      evidence: from.trim(),
       announced_another_try: announcesAnotherTry(from),
     });
     return true;
@@ -525,7 +525,7 @@ export function resetInText(text: string, now: Date): ProviderReset | null {
       until: new Date(until),
       zone,
       zone_source: named ? "stated" : "machine",
-      quoted: (RESET_SENTENCE.exec(text)?.[0] ?? text).trim().slice(0, 300),
+      quoted: (RESET_SENTENCE.exec(text)?.[0] ?? text).trim(),
     };
   }
 }

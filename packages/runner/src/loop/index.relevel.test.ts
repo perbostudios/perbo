@@ -268,6 +268,28 @@ describe("a re-level run", () => {
     expect(gh.pushes).toHaveLength(1);
   }, RUN_TIMEOUT_MS);
 
+  it("names five of the paths the base brought in, then how many more (D-NEW-nothing-shown-is-cut)", async () => {
+    const repo = runnerRepository(scratch);
+    const { contract, config } = await firstRun(repo);
+    for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+      mkdirSync(join(repo.dir, "src"), { recursive: true });
+      writeFileSync(join(repo.dir, "src", `moved-${n}.ts`), `export const moved = ${n};\n`);
+    }
+    git(repo.dir, "add", "-A");
+    git(repo.dir, "commit", "-qm", "main moves: seven files in scope");
+    const gh = github();
+    const printed: string[] = [];
+    await runTicket({
+      config: TicketRunConfigSchema.parse({ ...config, relevel: true }),
+      contract,
+      onProgress: (line) => printed.push(line),
+      hooks: { agent: neverAgent.run as never, review: approving().review, ...gh.hooks },
+    });
+    const line = printed.find((each) => each.includes("path(s) inside the contract's scope"));
+    expect(line).toContain("the base brought in 7 path(s)");
+    expect(line).toContain("src/moved-5.ts and 2 more); reviewing the merged change set afresh");
+  }, RUN_TIMEOUT_MS);
+
   it("tells the fresh review whether the base verified only where its verify measures it", async () => {
     const told: Record<string, Array<boolean | undefined>> = { measured: [], unmeasured: [] };
     for (const [name, verify] of [

@@ -34,8 +34,11 @@ export interface RunnableResult {
 
 const strip = (text: string) => text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
 
-/** The reason, not the last line — pnpm's tail is often a Node deprecation warning. */
-function installFailure(stderr: string, stdout: string): string {
+/**
+ * The reason, not the last line — pnpm's tail is often a Node deprecation
+ * warning — and the two lines that say it whole (D-NEW-nothing-shown-is-cut).
+ */
+export function installFailure(stderr: string, stdout: string): string {
   const lines = strip(`${stderr}\n${stdout}`)
     .split("\n")
     .map((line) => line.trim())
@@ -49,8 +52,7 @@ function installFailure(stderr: string, stdout: string): string {
   const detail = lines[lines.indexOf(named ?? "") + 1];
   return [named ?? lines[lines.length - 1] ?? "install failed", detail]
     .filter(Boolean)
-    .join(" — ")
-    .slice(0, 220);
+    .join(" — ");
 }
 
 /**

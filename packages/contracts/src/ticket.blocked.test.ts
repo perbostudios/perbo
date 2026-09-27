@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   IllegalTransitionError,
   TICKET_STATES_REACHABLE,
-  TICKET_TRANSITIONS,
   TicketSchema,
   isActive,
   transition,
@@ -10,6 +9,7 @@ import {
   withWaits,
   type Ticket,
 } from "./ticket.js";
+import { TICKET_TRANSITIONS } from "./ticket-transitions.js";
 
 /**
  * `blocked` is reachable now: the queue derives it from `depends_on` and from

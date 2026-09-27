@@ -413,6 +413,25 @@ describe("ac_1 — the refusals that are not one of the six", () => {
     expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
+  it("quotes gh's whole refusal, every line of it (D-NEW-nothing-shown-is-cut)", async () => {
+    const { repo } = publishedTicket("refused-long", { merge: "loop" });
+    const lines = [
+      "X Pull request #202 is not mergeable: the merge commit cannot be cleanly created.",
+      "To have the pull request merged after all the requirements have been met, add the `--auto` flag.",
+      "To use administrator privileges to immediately merge the pull request, add the `--admin` flag.",
+      "Run the following to resolve the merge conflicts locally:",
+      "  gh pr checkout 202 && git fetch origin main && git merge origin/main",
+      "GraphQL: Base branch was modified. Review and try the merge again. (mergePullRequest)",
+    ];
+    const gh = fakeGh("refused-long", { mergeFails: `${lines.join("\n")}\n` });
+    const streams = recordStreams();
+
+    await withGh(gh.bin, () => syncMerge(repo, streams));
+
+    const said = streams.err();
+    expect(lines.join("; ").length).toBeGreaterThan(400);
+    for (const line of lines) expect(said).toContain(line.trim());
+  }, MERGE_TEST_TIMEOUT_MS);
 });
 
 describe("ac_2 — the merge, the trailer, and what is written back", () => {

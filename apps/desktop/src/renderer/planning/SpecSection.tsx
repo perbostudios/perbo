@@ -11,7 +11,7 @@ import {
 import { caretPoint } from "./caret.js";
 import type { TextMarks } from "./change-marks.js";
 import { SpecReading } from "./SpecReading.js";
-import type { ExportedName } from "../../shared/protocol.js";
+import { TYPED_TEXT_MAX_CHARS, type ExportedName } from "../../shared/protocol.js";
 
 /**
  * One section of the spec, with the `@Symbol` completion and marking over it
@@ -265,7 +265,7 @@ export function SpecSection({
             spellCheck={false}
             rows={1}
             value={value}
-            maxLength={12_000}
+            maxLength={TYPED_TEXT_MAX_CHARS}
             placeholder={placeholder}
             onChange={(event) => {
               onChange(event.target.value);

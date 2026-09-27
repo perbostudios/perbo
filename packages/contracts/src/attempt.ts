@@ -319,10 +319,14 @@ export const EnvironmentRecordSchema = z.strictObject({
 /**
  * Where a resumed attempt's starting tree came from (SCP-154).
  *
- * An attempt a ceiling cut leaves its work in the retained `change.diff` of its
- * execution bundle. `perbo run --resume-from <bundle_id>` applies those bytes
- * into the new attempt's worktree before the executor is invoked, and this is
- * the record of it: which bundle, whose attempt, and the exact bytes by hash.
+ * An attempt a ceiling cut or a person stopped leaves its work in the retained
+ * `change.diff` of its execution bundle, as well as in the commit its seal made.
+ * `perbo run --resume-from <bundle_id>` applies those bytes into the new
+ * attempt's worktree before the executor is invoked, leaves them unapplied
+ * where the branch already holds that commit, or drops them whole where they no
+ * longer apply, and this is the record of it: which bundle, whose attempt, the
+ * exact bytes by hash, and in `note` whether they were applied, held or
+ * dropped.
  * The predecessor is named on `continues_attempt_id` as well, because a resume
  * is a continuation in the same sense a remediation round is.
  */
@@ -339,7 +343,8 @@ export const ResumedFromSchema = z.strictObject({
 export type ResumedFrom = z.infer<typeof ResumedFromSchema>;
 
 /**
- * A wait the loop sat out inside an attempt (SCP-193).
+ * A wait the loop sat out after an attempt (SCP-193): before the attempt that
+ * followed it, or before the review of its change set was taken once more.
  *
  * A provider that answers `429 … You've hit your session limit · resets 4:30am
  * (Europe/London)` has told the run when it can work again. Recording the wait
@@ -435,6 +440,16 @@ export const EXECUTOR_ACCOUNT_MAX_CHARS = 4_000;
 
 export const EXECUTION_ATTEMPT_SCHEMA_VERSION = 1;
 
+/**
+ * A finding the executor declared it knows no established practice for
+ * (D-065): its key and the reason it gave, read from the model's own redacted
+ * words. It stays open for a person.
+ */
+const AttemptDeclineSchema = z.strictObject({
+  finding_key: z.string().regex(/^[0-9a-f]{64}$/),
+  reason: z.string(),
+});
+
 export const ExecutionAttemptSchema = z.strictObject({
   schema_version: z.literal(EXECUTION_ATTEMPT_SCHEMA_VERSION),
   attempt_id: AttemptIdSchema,
@@ -442,7 +457,7 @@ export const ExecutionAttemptSchema = z.strictObject({
   root_attempt_id: AttemptIdSchema,
   /**
    * Set on a remediation attempt: the attempt whose findings it answers — and
-   * on a resumed attempt: the cut attempt whose retained diff it starts from.
+   * on a resumed attempt: the stopped attempt whose work it starts from.
    */
   continues_attempt_id: AttemptIdSchema.nullable(),
   remediation_round: z.number().int().min(0),
@@ -523,7 +538,7 @@ export const ExecutionAttemptSchema = z.strictObject({
    */
   brief_reinjections: z.array(BriefReinjectionSchema).default([]),
   /**
-   * The cut attempt's execution bundle this attempt was resumed from, or null
+   * The stopped attempt's execution bundle this attempt was resumed from, or null
    * where the attempt started from the base commit alone. Defaulted, so a
    * record written before resuming existed parses.
    */
@@ -597,13 +612,23 @@ export const ExecutionAttemptSchema = z.strictObject({
    */
   provisioning_verify: VerifiedCommitSchema.nullable().default(null),
   /**
-   * SCP-193: the wait the loop sat out before the attempt that followed this
-   * one, or null where nothing parked the run. Written when the wait starts
+   * SCP-193: the wait the loop sat out after this attempt — before the attempt
+   * that followed it, or before its review was taken once more — or null where
+   * nothing parked the run. Written when the wait starts
    * rather than when it ends, so a process killed mid-wait leaves the record
    * that lets the next `perbo run` honour the remainder. Defaulted, so a
    * record written before parking existed parses.
    */
   wait: AttemptWaitSchema.nullable().default(null),
+  /**
+   * The findings this attempt declined (D-065), recorded at the seal: empty
+   * where it declined none, which is every round that was handed no finding.
+   * The pull request a retained branch is published with lists them as the run
+   * that made them would have (D-NEW-publish-a-retained-branch-later). Absent
+   * where the record does not say what the attempt declined, which is not the
+   * same fact as declining nothing.
+   */
+  declines: z.array(AttemptDeclineSchema).optional(),
 });
 export type ExecutionAttempt = z.infer<typeof ExecutionAttemptSchema>;
 

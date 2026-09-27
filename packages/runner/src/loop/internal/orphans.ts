@@ -43,9 +43,8 @@ const SETTLE_INTERVAL_MS = 50;
  */
 const LISTING_MAX_BYTES = 64 * 1024 * 1024;
 
-/** Commands named in the progress line, and how much of each. */
+/** Commands named in the progress line, each whole (D-NEW-nothing-shown-is-cut); the rest are counted. */
 const NAMED_IN_PROGRESS = 5;
-const COMMAND_CHARS = 120;
 
 interface RunningProcess {
   pid: number;
@@ -282,7 +281,7 @@ export async function sweepWorktree(args: {
     `ended ${ended.length} process(es) still running under the worktree: ` +
       ended
         .slice(0, NAMED_IN_PROGRESS)
-        .map((entry) => `${entry.pid} ${entry.command.slice(0, COMMAND_CHARS)}`)
+        .map((entry) => `${entry.pid} ${entry.command}`)
         .join("; ") +
       (ended.length > NAMED_IN_PROGRESS ? `; and ${ended.length - NAMED_IN_PROGRESS} more` : ""),
   );

@@ -515,6 +515,19 @@ describe("a ceiling with no price yet holds the second review rather than guessi
   });
 });
 
+describe("a ceiling that cannot be enforced names what it could not price", () => {
+  it("names three whole, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+    const ledger = new SpendLedger(50 * DOLLAR);
+    for (const label of ["#0", "#1", "#2", "#3", "#4"]) {
+      ledger.launch();
+      ledger.settle({ label, cost_micros: 0, cost_basis: "unavailable" });
+    }
+    const stopped = ledger.admit();
+    expect(stopped.verdict).toBe("stop");
+    expect(stopped.verdict === "stop" && stopped.reason).toMatch(/#2 \([^)]*\) and 2 more\), so the/);
+  });
+});
+
 describe("a ceiling stops when it cannot see what a launched review cost", () => {
   it("stops after the first review that produced no artifact to price", async () => {
     const log = join(scratch, "crash-bounded.log");

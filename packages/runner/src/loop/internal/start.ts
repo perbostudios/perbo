@@ -87,7 +87,7 @@ export interface StartedRun {
 /**
  * Settle everything a run can be refused for before it has cost anything: the
  * plan, the providers, a quarantine an earlier crash left, the ticket's record
- * and this run's number, a park still in force, the cut attempt a resume
+ * and this run's number, a park still in force, the stopped attempt a resume
  * names, and whether this repository can be materialized at all.
  *
  * Nothing here provisions a worktree, so a refusal from any of it cuts no
@@ -211,7 +211,7 @@ export async function start(args: {
   }
 
   /**
-   * SCP-154: the cut attempt this run continues, read before anything is
+   * SCP-154: the stopped attempt this run continues, read before anything is
    * provisioned. A `--resume-from` that cannot be honoured stops the run here,
    * where it has cost nothing, rather than after a worktree and an install.
    */

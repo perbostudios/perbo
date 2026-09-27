@@ -187,11 +187,12 @@ function writeLockFile(path: string, held: unknown, exclusive: boolean): boolean
 /**
  * One loop merge per base at a time (SCP-202 criterion 3).
  *
- * Phase 1 runs one ticket at a time, in the founder's words, so the step
- * refuses rather than queues: two merges into one base are two branches whose
- * mergeability was read before the other landed, and the second one's read is
- * stale by the time it merges. A queue that re-levels and re-checks the next
- * branch after each merge is SCP-227, and it is not this.
+ * Runs of different tickets go on at the same time (D-049), and their merges
+ * into one base still take one at a time: two merges into one base are two
+ * branches whose mergeability was read before the other landed, and the second
+ * one's read is stale by the time it merges. The step refuses rather than
+ * queues; the queue re-levels and re-checks the next branch after each merge
+ * (SCP-227), and it is not this.
  *
  * Beside the ticket's run lock and stale the same way — by pid, on this host
  * only — because a killed merge leaves a file behind and a lock this process
@@ -226,7 +227,7 @@ export class MergeLockedError extends Error {
   constructor(held: MergeLock, path: string) {
     super(
       `a loop merge into ${held.base_ref} is already in flight: ${held.ticket_key}, pid ${held.pid} ` +
-        `on ${held.host}, started ${held.started_at}. Phase 1 merges one at a time; wait for it to ` +
+        `on ${held.host}, started ${held.started_at}. Merges into one base take one at a time; wait for it to ` +
         `finish, or stop it and merge again (the lock is ${path}, and a merge that ended leaves none)`,
     );
     this.name = "MergeLockedError";
@@ -293,10 +294,11 @@ export function acquireMergeLock(args: {
 /**
  * Every run lock under the state root whose process is still alive (SCP-227).
  *
- * `perbo serve` counts these against `concurrent_local_attempts` so a run a
- * person started by hand takes a place in the same count as one the queue
- * started: the ceiling is about the laptop, not about who typed the command.
- * A stale lock is a run that ended without cleaning up, and counts for nothing.
+ * `perbo serve` reads these to leave alone a ticket a person is already
+ * running, and, where the limits set `concurrent_local_attempts`, to count a
+ * run a person started by hand in the same number as one the queue started:
+ * that number is about the laptop, not about who typed the command. A stale
+ * lock is a run that ended without cleaning up, and counts for nothing.
  */
 const SERVE_LOCK_FILE = "serve.lock.json";
 

@@ -46,7 +46,7 @@ export class WorkspaceRefresh {
     const opened = this.opened && this.opened.sequence > (snapshot.sequence ?? -1) ? this.opened.lastOpened : undefined;
     return {
       ...snapshot, jobs: [...jobs.values()].slice(-40), refreshingRepos: [...this.pending],
-      ...(preferences ? { settings: preferences.settings, titles: preferences.titles, taskModels: preferences.taskModels, archived: preferences.archived, asks: preferences.asks } : {}),
+      ...(preferences ? { settings: preferences.settings, titles: preferences.titles, taskModels: preferences.taskModels, archived: preferences.archived, calledOff: preferences.calledOff, asks: preferences.asks } : {}),
       ...(power ? { power } : {}),
       ...(opened ? { lastOpened: opened } : {}),
     };

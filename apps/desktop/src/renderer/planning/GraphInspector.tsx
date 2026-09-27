@@ -16,8 +16,11 @@ import type {
  * One node, open: its criteria and its paths, which are contract, and the
  * order around it, which is approach (D-100), as controls, with the Notes a
  * person wrote on the node's page (D-103). The criteria take one half and
- * scroll; the order, the paths and the Notes are one block in the other. What
- * the node's card already reads out is not repeated here.
+ * scroll, each reworded and its verification kind chosen here by hand, with
+ * the chat's last change marked under it (D-128); a change made here is the
+ * person's own and is marked nowhere. The order, the paths and the Notes are
+ * one block in the other half. What the node's card already reads out is not
+ * repeated here.
  *
  * Each control produces one {@link GraphEdit} and hands it up. Nothing here
  * holds a draft of the plan: the text being typed is local until it is left,
@@ -40,7 +43,7 @@ export function GraphInspector({
   view: GraphView;
   node: GraphNodeView;
   /**
-   * The last change to the plan's promise, or null for none to mark
+   * The chat's last change to the plan's promise, or null for none to mark
    * (D-128). A criterion it took away
    * belongs to no node now, so it is shown struck through at the end of this
    * list, whichever node is open.
@@ -272,7 +275,11 @@ function CriterionState({ state }: { state: GraphCriterionState }) {
   );
 }
 
-/** One criterion's text and how it is proven; both go in one `set_criterion`. */
+/**
+ * One criterion's text and how it is proven, both changed by hand in one
+ * `set_criterion` through the validated edit path (D-100), which records the
+ * change as the person's.
+ */
 function CriterionEdit({
   criterion,
   change,
@@ -281,7 +288,7 @@ function CriterionEdit({
   apply,
 }: {
   criterion: GraphCriterionView;
-  /** How the last change left this criterion, or undefined for untouched. */
+  /** How the chat's last change left this criterion, or undefined for untouched. */
   change: CriterionChange | undefined;
   state: GraphCriterionState | undefined;
   busy: boolean;
@@ -289,7 +296,7 @@ function CriterionEdit({
 }) {
   const [text, setText] = useState(criterion.text);
   useEffect(() => setText(criterion.text), [criterion.text]);
-  // The words as the last change left them, marked, under the box that
+  // The words as the chat's last change left them, marked, under the box that
   // edits them: a textarea cannot carry a mark inside it. Not while the
   // person is typing in it, since the words are then moving.
   const marked =
@@ -335,7 +342,7 @@ function CriterionEdit({
           }}
         />
         {marked && (
-          <p className="crit-change" aria-label={`Criterion ${criterion.id} as the last change left it`}>
+          <p className="crit-change" aria-label={`Criterion ${criterion.id} as the chat's last change left it`}>
             <MarkedCriterion text={criterion.text} change={change} />
           </p>
         )}

@@ -296,6 +296,27 @@ export function decidedDelivery(input: {
   };
 }
 
+/**
+ * The review a retained branch is published under
+ * (D-NEW-publish-a-retained-branch-later): the one on record, with each
+ * person's answer recorded on the finding it closed — shipped as it is, or
+ * handed to the executor and closed by a verification — which is what the run
+ * that retained the branch recorded on it.
+ */
+export function retainedReview(
+  judged: NonNullable<ReturnType<typeof judgedOnRecord>>,
+  decided: readonly DecidedFinding[],
+  repository_id: string,
+): { review: ReviewArtifact; decided: DecidedFinding[] } {
+  const closed = new Map(
+    [...decisionsOn(judged.review, judged.reviewed_at, decided)].filter(
+      ([key, decision]) =>
+        decision.choice === "ship_as_is" || (handsToExecutor(decision.choice) && closedByRound(judged, key)),
+    ),
+  );
+  return { review: recordDecisions(judged.review, closed, repository_id), decided: [...closed.values()] };
+}
+
 /** A review bundle's per-node reviews (D-107), `[]` where the bundle holds none. */
 export function readNodeReviews(bundles: BundleStore, bundle: RunBundle): NodeReview[] {
   const artifact = bundle.artifacts.find((entry) => entry.name === "node-reviews.json");

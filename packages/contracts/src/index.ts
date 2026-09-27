@@ -102,6 +102,7 @@ export {
   decodeInterviewTurn,
   encodeInterviewEvent,
   encodeInterviewTurn,
+  INTERVIEW_SAID_MAX_CHARS,
   InterviewEventSchema,
   InterviewQuestionGroupSchema,
   interviewSaidMessage,
@@ -290,6 +291,10 @@ export {
   statesCriteria,
 } from "./source.js";
 export type { SourceContract } from "./source.js";
+export { oneLine, readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
+export type { Speaker } from "./spoken.js";
+export { admittedCommands, readTally, tallyLine } from "./tally.js";
+export type { Tally } from "./tally.js";
 export {
   readStandingProhibited,
   STANDING_PROHIBITED_KEY,
@@ -373,7 +378,6 @@ export {
   attributionOnRecord,
   DELIVERY_ARMS,
   HAND_OFF_NOTE,
-  DECIDED_DELIVERY_NOTE,
   handOff,
   HandOffEvidenceError,
   IllegalTransitionError,
@@ -388,7 +392,6 @@ export {
   TICKET_PRIORITIES,
   TICKET_SCHEMA_VERSION,
   TICKET_STATES,
-  TICKET_TRANSITIONS,
   TicketKeySchema,
   TicketSchema,
   ticketSourceLabel,
@@ -413,6 +416,10 @@ export type {
   Wait,
 } from "./ticket.js";
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
+export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
+export type { TicketTransition } from "./ticket-transitions.js";
+export { gateClosedNote, retainedBranch } from "./retained.js";
+export type { RetainedBranch } from "./retained.js";
 export {
   commitCarriesArm,
   mergedAt,

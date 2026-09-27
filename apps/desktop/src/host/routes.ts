@@ -1,18 +1,19 @@
 import { existsSync } from "node:fs";
-import { keepsPersonsTitle, openDrafts, promiseOf, titleChanged } from "../shared/contract-editing.js";
+import { planNodes } from "@perbo/contracts";
+import { keepsPersonsTitle, openDrafts, problemsHoldApproval, promiseOf } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
-import { heldRepository, isRun } from "../shared/jobs.js";
-import { isArchivable, notArchivable } from "../shared/archive.js";
+import { heldRepository, heldTicket, isRun } from "../shared/jobs.js";
+import { isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { specSlugOf } from "../shared/spec-slug.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { contractImpact, impactView } from "./plan/impact.js";
-import { nameSpecAfterRename, saveSpec, specPath, specTitles, specView, type SpecDeps } from "./plan/spec.js";
+import { draftedReading, nameSpecAfterRename, saveSpec, specPath, specTexts, specTitles, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
+import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import {
   deleteDraftedFromSpec,
   deleteSpec,
@@ -23,7 +24,7 @@ import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/op
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
 import { objectsPath } from "./repository/layout.js";
 import { findingsOnRecord } from "./records.js";
-import { recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
+import { forgetCalledOff, recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
 import {
@@ -39,6 +40,7 @@ import {
   editArgs,
   graphEditArgs,
   principleArgs,
+  publishArgs,
   runArgs,
   runConfig,
   syncArgs,
@@ -190,7 +192,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       return opened;
     },
     editingRead: (request) => m.editing.read(request.id),
-    drafts: () => openDrafts(m.profile.state.editingSessions, specTitles(repository)),
+    drafts: () => openDrafts(m.profile.state.editingSessions, specTexts(repository)),
     editingSave: (request) =>
       m.editing.save(request.id, request.revision, request.repoId, request.form),
     editingSubmit: (request) =>
@@ -232,7 +234,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     explorerUndo: (request) => m.editing.undo(request.id, request.revision, request.edit),
     editingStop: (request) => m.editing.stop(request.id),
     editingVisited: (request) => m.editing.visit(request.id, request.pane),
-    editingContractVisited: (request) => m.editing.visitContract(request.id),
+    editingContractVisited: (request) => m.editing.visitContract(request.id, request.state),
     editingDiscard: async (request) => {
       // The chat goes with the planning it belongs to: a discarded planning has
       // no spec for the interview to write and no plan for it to change.
@@ -248,11 +250,12 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // made, holds that key from birth. Discarding on the key alone would
       // throw away work this planning did not do and cannot give back.
       const session = m.editing.read(request.id);
-      // A command running in the repository holds the delete of the ticket
-      // this planning drafted (D-129), so the discard is refused before
-      // anything goes, and the person finds the work as it was and why.
-      if (session.key !== null && session.admitted && heldRepository(m.jobs.live(), session.repoId))
-        throw new Error(DELETE_WAITS_FOR_COMMANDS);
+      // A command running for the ticket this planning drafted holds its
+      // delete (D-129), so the discard is refused before anything goes, and
+      // the person finds the work as it was and why. Another ticket's run in
+      // the same repository holds nothing of this one.
+      if (session.key !== null && session.admitted && heldTicket(m.jobs.live(), session.repoId, session.key))
+        throw new Error(DELETE_WAITS_FOR_TICKET_COMMAND);
       const discarded = m.editing.discard(request.id, request.revision);
       // Waited out before anything is deleted: a session whose stdin has closed
       // finishes the turn it is in, and a turn that writes the spec after the
@@ -312,7 +315,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         repository(request.repoId),
       ),
     specRead: (request) => specView(m.planDeps, request.id),
-    driftCheck: (request) => m.drift.check(request.id),
+    driftCheck: (request) => m.drift.check(request.id, request.state),
     driftDismiss: (request) => m.drift.dismiss(request.id),
     specDelete: (request) => deleteSpec(work, request.repoId, request.slug),
     impactRead: (request) =>
@@ -444,10 +447,22 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         (ticket) =>
           request.archived &&
           keys.includes(ticket.key) &&
-          !isArchivable({ jobs: m.profile.state.jobs as Job[] }, { repoId: repo.id, ticket }),
+          !isArchivable(
+            { jobs: m.profile.state.jobs as Job[], calledOff: m.profile.state.calledOff },
+            { repoId: repo.id, ticket },
+          ),
       );
       if (carried !== undefined) throw new Error(notArchivable(carried.key, carried.state));
       setArchived(m.profile.state, repo.id, keys, request.archived);
+      m.changes.preferences(m.profile.state);
+      return null;
+    }),
+    callOff: scoped<"callOff">(async (repo, request) => {
+      const ticket = (await m.tickets.list(repo)).tickets.find((each) => each.key === request.key);
+      if (ticket === undefined) throw new Error("The ticket is not in the repository's ticket store.");
+      if (ticket.state !== "pr_open" || ticket.delivery.pull_request_url === null)
+        throw new Error(notCallable(request.key));
+      recordCalledOff(m.profile.state, repo.id, request.key, ticket.delivery.pull_request_url);
       m.changes.preferences(m.profile.state);
       return null;
     }),
@@ -504,9 +519,10 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     specSave: scoped<"specSave">((repo, request) => {
       const saved = saveSpec(m.planDeps, repo, request);
       // The picker and the title bar name the planning by its spec's title,
-      // which they read off the drafts list: a save that landed a new title
-      // has that list read again.
-      if (saved.conflicting.length === 0 && titleChanged(request))
+      // and its contract stays a tab while its spec's sections do
+      // (D-NEW-basic-and-epic-flows), all read
+      // off the drafts list: a save that landed has that list read again.
+      if (saved.conflicting.length === 0)
         m.changes.changed(false, { kind: "editing", sessionId: request.id });
       return saved;
     }),
@@ -542,11 +558,12 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
           m.tickets.assertDigest(repo, request.key, request.digest);
           const current = m.tickets.contract(repo, request.key).contract;
           assertEditable(current);
-          // What the plan promised before this edit, for the marks on it.
+          // What the plan promised before this edit, for the change it records,
+          // the person's (D-128).
           const before = promiseOf(current);
           await run.invoke(editArgs(request.key, request.draft));
           job.resultKey = request.key;
-          m.marks.recordPlanChange(repo, request.key, before);
+          m.marks.recordPlanChange(repo, request.key, before, "person");
           if (request.models) {
             m.profile.state.taskModels[repo.id + ":" + request.key] = request.models;
             m.changes.preferences(m.profile.state);
@@ -559,6 +576,35 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         { repo, key: request.key, kind: request.kind, label: "Refresh delivery from GitHub" },
         async (_job, run) => {
           await run.invoke(syncArgs(request.key));
+        },
+      ),
+    ),
+    publish: scoped<"publish">((repo, request) =>
+      m.jobs.start(
+        { repo, key: request.key, kind: request.kind, label: "Open the pull request" },
+        async (job, run) => {
+          // The merge press on a ticket whose run retained its branch
+          // (D-NEW-publish-a-retained-branch-later): the CLI pushes it and
+          // opens its pull request, holding the person's credential as a run
+          // does, under the configuration a run of this ticket is given with
+          // publishing on — a person merges, whatever the repository says.
+          // Then the pull request opens in the browser, as the press opens one
+          // already there.
+          const settings = m.profile.state.settings;
+          const path = writePrivate(
+            m.dataDirectory,
+            `publish-${job.id}.json`,
+            JSON.stringify(
+              runConfig(
+                m.profile.state.taskModels[repo.id + ":" + request.key] ?? settings,
+                effectiveLimits(repo, settings),
+                true,
+              ),
+            ),
+          );
+          await run.invoke(publishArgs(request.key, path));
+          if (run.signal.aborted) return;
+          await m.io.openExternal(pullRequestUrl(await m.tickets.detail(repo.id, request.key)));
         },
       ),
     ),
@@ -636,13 +682,27 @@ function graphEdit(
       label: request.kind === "graphUndo" ? "Undo a plan edit" : "Change the plan's graph",
     },
     async (job, run) => {
-      // What the plan promised before, so what the edit changed of it can be
-      // marked on every planning over the ticket; an edit that only rearranged
-      // the graph changes nothing here and marks nothing.
+      // What the plan promised before, so what the edit changed of it is
+      // recorded on every planning over the ticket as the person's, which
+      // replaces the chat's marks (D-128); an edit that only rearranged the
+      // graph changes nothing here and records nothing.
       const before = m.marks.promiseAt(repo, request.key);
       await run.invoke(graphEditArgs(request.key, request));
       job.resultKey = request.key;
-      m.marks.recordPlanChange(repo, request.key, before);
+      m.marks.recordPlanChange(repo, request.key, before, "person");
+      // The plan as it now reads, on every planning over the ticket, as the
+      // chat's edits leave it: what a confirm compares with the last reading
+      // of the plan against its spec is the plan the planning holds (D-128).
+      // A read that fails leaves the planning as it was, not the edit failed.
+      try {
+        m.reads.invalidate(repo.id);
+        const now = await m.tickets.detail(repo.id, request.key);
+        for (const session of m.profile.state.editingSessions)
+          if (session.repoId === repo.id && session.key === request.key && session.phase !== "discarded")
+            m.editing.countNodes(session.id, planNodes(now.contract).length, now.digest, now);
+      } catch {
+        // Read again the next time the planning is opened.
+      }
     },
   );
 }
@@ -703,8 +763,9 @@ function fromSpec(
         await m.interviews.exited(request.id);
         if (m.editing.read(request.id).asking !== null) throw new Error(ANSWER_THE_QUESTIONS_FIRST);
       }
-      // What the plan promised before it is drafted again, for the marks on the
-      // re-draft. A first draft has no before, and records nothing.
+      // What the plan promised before it is drafted again, for the change the
+      // re-draft records: the person's, which marks nothing and replaces the
+      // chat's marks (D-128). A first draft has no before, and records nothing.
       const before = request.kind === "startOver" ? m.marks.promiseAt(repo, request.key) : null;
       const settings = m.profile.state.settings;
       // Read once the chat has stopped, so a title its last turn wrote is the
@@ -729,7 +790,7 @@ function fromSpec(
         // keeps it, so the spec the re-draft titled takes it back.
         const given = m.profile.state.titles[repo.id + ":" + request.key];
         if (given !== undefined) await nameSpecAfterRename(m.tickets, repo, request.key, given);
-        m.marks.recordPlanChange(repo, request.key, before);
+        m.marks.recordPlanChange(repo, request.key, before, "person");
       }
     },
   );
@@ -837,7 +898,13 @@ async function replan(
   // The new planning holds the same spec, and who named it with it, so the
   // next draft from it keeps the person's name as this one did (D-127).
   m.editing.carryNamed(opened.id, planning?.named ?? null);
-  return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
+  // The plan drafted here was read by its drafting, as one Generate plan
+  // drafts is (D-128): recorded as read at the state it was drafted at, so its
+  // first confirm unchanged reads nothing again, and a criterion edited first
+  // is what the confirm's reading judges (D-NEW-basic-and-epic-flows).
+  const drafted = draftedReading((id) => m.registry.lookup(id), m.editing.read(opened.id));
+  if (drafted !== null) m.editing.recordRead(opened.id, drafted);
+  return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
 }
 
 /** A contract saved from the form. */
@@ -875,6 +942,13 @@ function loop(
           .filter((job) => job.repoId === repo.id && job.key === request.key && isRun(job))
           .at(-1)?.publish ??
           false);
+  // Refused, before anything starts, while a planning over the ticket records
+  // problems open: an open problem holds approving for either shape, and the
+  // pages are not the only way to ask (D-NEW-basic-and-epic-flows).
+  if (request.kind === "run" && request.approve) {
+    const held = problemsHoldApproval(m.profile.state.editingSessions, repo.id, request.key);
+    if (held !== null) throw new Error(held);
+  }
   const job = m.jobs.start(
     {
       repo,
@@ -928,12 +1002,13 @@ function loop(
     },
   );
   // A filed ticket whose loop starts again is back on Home, and stays there
-  // when that run ends until it is filed again (S4).
+  // when that run ends until it is filed again (S4). A call-off it carried is
+  // over: the run is the loop again, and a pull request it opens waits on a
+  // merge decision of its own (D-097).
   const entry = repo.id + ":" + request.key;
-  if (m.profile.state.archived.includes(entry)) {
-    setArchived(m.profile.state, repo.id, [request.key], false);
-    m.changes.preferences(m.profile.state);
-  }
+  const filed = m.profile.state.archived.includes(entry);
+  if (filed) setArchived(m.profile.state, repo.id, [request.key], false);
+  if (forgetCalledOff(m.profile.state, repo.id, request.key) || filed) m.changes.preferences(m.profile.state);
   return job;
 }
 

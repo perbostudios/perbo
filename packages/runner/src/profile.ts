@@ -5,6 +5,7 @@ import {
   scrubEnvironment,
   type PermissionProfile,
 } from "@perbo/contracts";
+import { z } from "zod";
 import { SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { scratchEnvironment, scratchPath } from "./scratch.js";
 
@@ -192,6 +193,37 @@ export const DEFAULT_NETWORK_ALLOW_LIST = [
   "proxy.golang.org",
 ] as const;
 
+/** What a Codex executor reaches in place of Anthropic's hosts. */
+const CODEX_NETWORK_ALLOW_LIST = [
+  "chatgpt.com",
+  "api.openai.com",
+  ...DEFAULT_NETWORK_ALLOW_LIST.filter((host) => !host.endsWith("anthropic.com")),
+] as const;
+
+/**
+ * One host name as a repository writes it: dot-separated labels of letters,
+ * digits and inner hyphens, 253 characters at most. Exact, so a wildcard, a
+ * scheme, a path, a port or a space is not one.
+ */
+const HOST_NAME = /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
+
+/**
+ * The hosts a repository adds to the executor's egress allow-list, as
+ * `network_allow_list` in `.perbo/config.json`: a plain list of exact host
+ * names, each one refused by name when it is anything else.
+ */
+export const NetworkAllowListSchema = z.array(
+  z.string().superRefine((value, context) => {
+    if (!HOST_NAME.test(value))
+      context.addIssue({
+        code: "custom",
+        message:
+          `${JSON.stringify(value)} is not a host name: name each host exactly, as in ` +
+          '"googlechromelabs.github.io", with no wildcard, scheme, path or port',
+      });
+  }),
+);
+
 /** Pinned by the runner and never read from repository configuration (ADR-0030). */
 export const PINNED_PROVIDER_BASE_URL = "https://api.anthropic.com";
 
@@ -200,6 +232,7 @@ export function buildPermissionProfile(args: {
   provider?: "claude-cli" | "codex-cli";
   allow?: readonly string[];
   deny?: readonly string[];
+  /** Hosts the repository adds to its provider's defaults (`network_allow_list`). */
   network?: readonly string[];
   lifecycle_scripts?: "disabled" | "enabled";
 }): PermissionProfile {
@@ -209,7 +242,12 @@ export function buildPermissionProfile(args: {
     command_deny_list: [...(args.deny ?? DEFAULT_COMMAND_DENY_LIST)],
     path_jail_root: args.worktree,
     env_allow_list: [...DEFAULT_ENV_ALLOW_LIST],
-    network_allow_list: [...(args.network ?? (args.provider === "codex-cli" ? ["chatgpt.com", "api.openai.com", ...DEFAULT_NETWORK_ALLOW_LIST.filter((host) => !host.endsWith("anthropic.com"))] : DEFAULT_NETWORK_ALLOW_LIST))],
+    network_allow_list: [
+      ...new Set([
+        ...(args.provider === "codex-cli" ? CODEX_NETWORK_ALLOW_LIST : DEFAULT_NETWORK_ALLOW_LIST),
+        ...(args.network ?? []),
+      ]),
+    ],
     provider_base_url: args.provider === "codex-cli" ? "https://chatgpt.com/backend-api" : PINNED_PROVIDER_BASE_URL,
     lifecycle_scripts: args.lifecycle_scripts ?? "disabled",
     prohibited_actions: [...PROHIBITED_ACTIONS],

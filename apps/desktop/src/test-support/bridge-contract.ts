@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busyMessage, lane } from "../shared/jobs.js";
+import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import { ChangeSchema, INTERVIEW_NEEDS_A_TITLE } from "../shared/protocol.js";
+import { runnerProgress, spokenWords } from "../shared/runner-progress.js";
 import type { Change, DesktopBridge, Job } from "../shared/protocol.js";
 
 /**
@@ -15,6 +17,13 @@ export interface ContractSubject {
   unapprovedKey: string;
   /** A ticket a run may be started on. */
   runnableKey: string;
+  /**
+   * A second ticket nobody has approved, which the suite approves and starts
+   * beside the held run, and nothing after it reads.
+   */
+  approvableKey: string;
+  /** A ticket nothing else in the suite reads, which a delete may take. */
+  deletableKey: string;
   /** Start a run on `key` and hold it live; the job it resolves to is the one running. */
   startHeldRun(key: string): Promise<Job>;
   /** Every change the subject pushed while the suite ran. */
@@ -30,7 +39,8 @@ const UNKNOWN_KEY = "PRB-9999999";
  *
  * The cases are the promises a screen is written against — a refusal is a
  * refusal, a snapshot's rows name repositories it also carries, one command in
- * the exclusive lane at a time — and not the wording of a message the two
+ * the exclusive lane at a time for each ticket and any number across tickets —
+ * and not the wording of a message the two
  * adapters are free to spell differently. Where the wording is the protocol's
  * own, declared once in `src/shared/`, it is compared as written.
  */
@@ -175,32 +185,128 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
       ).rejects.toThrow(new Error("That command is no longer active."));
     });
 
-    it("refuses a second command in the exclusive lane, naming the one running", async () => {
-      const { bridge, repoId, unapprovedKey } = subject;
-      running = await subject.startHeldRun(subject.runnableKey);
+    it("refuses a second run of the same ticket, naming the one running", async () => {
+      const { bridge, repoId, runnableKey } = subject;
+      running = await subject.startHeldRun(runnableKey);
       const held = running;
       const row = async () =>
         (await bridge.request({ kind: "snapshot" })).tasks.find(
-          (entry) => entry.repoId === repoId && entry.ticket.key === unapprovedKey,
+          (entry) => entry.repoId === repoId && entry.ticket.key === runnableKey,
         )!;
       const before = await row();
       await expect(
         bridge.request({
           kind: "run",
           repoId,
-          key: unapprovedKey,
-          digest: (await bridge.request({ kind: "detail", repoId, key: unapprovedKey })).digest,
+          key: runnableKey,
+          digest: (await bridge.request({ kind: "detail", repoId, key: runnableKey })).digest,
           publish: false,
-          approve: true,
+          approve: false,
           resumeFrom: null,
         }),
       ).rejects.toThrow(new Error(busyMessage(held.label)));
-      expect((await row()).ticket.state).toBe(before.ticket.state);
+      expect({ state: (await row()).ticket.state, history: (await row()).ticket.history }).toEqual({
+        state: before.ticket.state,
+        history: before.ticket.history,
+      });
     });
 
-    it("refuses to stop a command that has already stopped", async () => {
-      const { bridge } = subject;
+    it("tells a live run's progress as it is printed: the stages it reaches and the executor's words, in order", async () => {
       const held = running!;
+      /** The held run as the last progress change told it. */
+      const told = (): Job | undefined =>
+        subject.changes
+          .filter((change) => change.kind === "progress" && change.job.id === held.id)
+          .map((change) => (change as Extract<Change, { kind: "progress" }>).job)
+          .at(-1);
+      let log = "";
+      for (let count = 0; count < 250; count++) {
+        const job = told();
+        log = job?.log ?? "";
+        if (job?.state === "running" && spokenWords(log).length > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      // A stage the run reached, and after it the executor's own words.
+      expect(runnerProgress(log), log).not.toBeNull();
+      expect(spokenWords(log)[0], log).toMatchObject({ speaker: "executor" });
+      const lines = log.split("\n").map((line) => line.trim());
+      expect(lines.findIndex((line) => line.startsWith("executor says: "))).toBeGreaterThan(
+        lines.findIndex((line) => line === "executing"),
+      );
+    }, 30_000);
+
+    it("deletes another ticket at once while a run is under way, and refuses the running ticket's own delete", async () => {
+      const { bridge, repoId, runnableKey, deletableKey } = subject;
+      const held = running!;
+      const listed = async (key: string) =>
+        (await bridge.request({ kind: "snapshot" })).tasks.some(
+          (entry) => entry.repoId === repoId && entry.ticket.key === key,
+        );
+      expect(await listed(deletableKey)).toBe(true);
+      // The running ticket's own delete waits for its run, in the one sentence.
+      await expect(bridge.request({ kind: "discard", repoId, key: runnableKey })).rejects.toThrow(
+        new Error(DELETE_WAITS_FOR_TICKET_COMMAND),
+      );
+      expect(await listed(runnableKey)).toBe(true);
+      // Another ticket's run holds nothing of this one (D-129).
+      await expect(bridge.request({ kind: "discard", repoId, key: deletableKey })).resolves.toBeNull();
+      expect(await listed(deletableKey)).toBe(false);
+      const job = (await bridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === held.id);
+      expect(job?.state, "the run beside it").toBe("running");
+    }, 30_000);
+
+    /**
+     * D-049, D-101: runs of different tickets go on at the same time. A
+     * ticket's approval starts its run at once while another ticket's run is
+     * under way, and each run's progress is told on its own job.
+     */
+    it("starts another ticket's run at its approval while one is under way, each telling its own progress", async () => {
+      const { bridge, repoId, approvableKey, runnableKey } = subject;
+      const held = running!;
+      const second = await bridge.request({
+        kind: "run",
+        repoId,
+        key: approvableKey,
+        digest: (await bridge.request({ kind: "detail", repoId, key: approvableKey })).digest,
+        publish: false,
+        approve: true,
+        resumeFrom: null,
+      });
+      expect(second).toMatchObject({ kind: "run", key: approvableKey, state: "running" });
+      const live = (await bridge.request({ kind: "snapshot" })).jobs.filter((job) =>
+        ["running", "stopping"].includes(job.state),
+      );
+      expect(live.map((job) => job.id)).toEqual(expect.arrayContaining([held.id, second.id]));
+      /** A job's log as the last progress change told it. */
+      const told = (id: string): string =>
+        subject.changes
+          .filter((change) => change.kind === "progress" && change.job.id === id)
+          .map((change) => (change as Extract<Change, { kind: "progress" }>).job.log)
+          .at(-1) ?? "";
+      for (let count = 0; count < 250 && !told(second.id).includes(`/${approvableKey} `); count++)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(told(second.id)).toContain(`/${approvableKey} `);
+      expect(told(second.id)).not.toContain(`/${runnableKey} `);
+      expect(told(held.id)).toContain(`/${runnableKey} `);
+      expect(told(held.id)).not.toContain(`/${approvableKey} `);
+      await bridge.request({ kind: "cancel", jobId: second.id });
+      for (let count = 0; count < 250; count++) {
+        const job = (await bridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === second.id);
+        if (!job || !["running", "stopping"].includes(job.state)) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const first = (await bridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === held.id);
+      expect(first?.state).toBe("running");
+    }, 30_000);
+
+    it("stops a run leaving its ticket where the run left it, with no row for the stop, and refuses to stop it again", async () => {
+      const { bridge, repoId, runnableKey } = subject;
+      const held = running!;
+      const ticket = async () =>
+        (await bridge.request({ kind: "snapshot" })).tasks.find(
+          (entry) => entry.repoId === repoId && entry.ticket.key === runnableKey,
+        )!.ticket;
+      const before = await ticket();
       await bridge.request({ kind: "cancel", jobId: held.id });
       for (let count = 0; count < 400; count++) {
         const job = (await bridge.request({ kind: "snapshot" })).jobs.find(
@@ -209,6 +315,8 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
         if (!job || !["running", "stopping"].includes(job.state)) break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
+      const after = await ticket();
+      expect({ state: after.state, history: after.history }).toEqual({ state: before.state, history: before.history });
       await expect(bridge.request({ kind: "cancel", jobId: held.id })).rejects.toThrow(
         new Error("That command is no longer active."),
       );

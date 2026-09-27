@@ -45,7 +45,7 @@ const CheckSchema = z
     node: z.object({ node_id: z.string() }).passthrough().optional(),
   })
   .passthrough();
-const ReportSchema = z
+export const ReportSchema = z
   .object({
     attempts: z.array(
       z
@@ -72,6 +72,7 @@ const ReportSchema = z
           ),
           review: ReviewArtifactSchema.nullable(),
           review_decision: z.string().nullable(),
+          admitted_commands: z.number().int().nonnegative(),
           changed_files: z
             .array(
               z.object({
@@ -92,6 +93,50 @@ const ReportSchema = z
     verdicts: z.array(z.unknown()),
   })
   .passthrough();
+
+/**
+ * The attempts a `perbo inspect --json` report holds, as the desktop's pages
+ * read them. One mapping, read by the ticket's detail and by the test that
+ * holds the loop page's steps rebuilt from these records to the ones its log
+ * announced.
+ */
+export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["attempts"] {
+  return report.attempts.map((attempt) => ({
+    id: attempt.attempt_id,
+    run: attempt.run,
+    round: attempt.round,
+    startedAt: attempt.started_at,
+    outcome: attempt.outcome,
+    termination: `${attempt.termination.reason}: ${attempt.termination.detail}`,
+    model: attempt.agent.model,
+    costMicros: attempt.cost.micros,
+    costBasis: attempt.cost.basis,
+    partial: attempt.cost.partial,
+    ceilings: attempt.ceilings,
+    admittedCommands: attempt.admitted_commands,
+    review: attempt.review,
+    reviewDecision: attempt.review_decision,
+    changes: attempt.changed_files ?? [],
+    checks: judgingChecks(attempt.checks ?? []).map((check) => ({
+      name: check.name ?? check.check_id ?? "Check",
+      status: check.status,
+      detail: [
+        check.command,
+        check.summary,
+        check.detail ??
+          (check.output === undefined
+            ? null
+            : typeof check.output === "string"
+              ? check.output
+              : JSON.stringify(check.output, null, 2)),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    })),
+    verification: attempt.verification,
+    bundles: attempt.bundles,
+  }));
+}
 
 export interface TicketReadsDeps {
   reads: WorkspaceReads;
@@ -226,40 +271,7 @@ export class TicketReads {
         readDraftEditRecordsOrNone(ticketPath(repo, key, ".draft.json")),
         hasAcceptanceCriteria(held.contract) ? held.contract.acceptance_criteria : [],
       ),
-      attempts: report.attempts.map((attempt) => ({
-        id: attempt.attempt_id,
-        run: attempt.run,
-        round: attempt.round,
-        startedAt: attempt.started_at,
-        outcome: attempt.outcome,
-        termination: `${attempt.termination.reason}: ${attempt.termination.detail}`,
-        model: attempt.agent.model,
-        costMicros: attempt.cost.micros,
-        costBasis: attempt.cost.basis,
-        partial: attempt.cost.partial,
-        ceilings: attempt.ceilings,
-        review: attempt.review,
-        reviewDecision: attempt.review_decision,
-        changes: attempt.changed_files ?? [],
-        checks: judgingChecks(attempt.checks ?? []).map((check) => ({
-          name: check.name ?? check.check_id ?? "Check",
-          status: check.status,
-          detail: [
-            check.command,
-            check.summary,
-            check.detail ??
-              (check.output === undefined
-                ? null
-                : typeof check.output === "string"
-                  ? check.output
-                  : JSON.stringify(check.output, null, 2)),
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-        })),
-        verification: attempt.verification,
-        bundles: attempt.bundles,
-      })),
+      attempts: attemptViews(report),
       cost: {
         micros: report.total_cost.micros,
         partial:

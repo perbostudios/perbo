@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  admittedCommands,
   CheckResultsFileSchema,
   CostBasisSchema,
   EXIT_CODES,
@@ -53,7 +54,7 @@ import {
   type SizeEstimate,
   type TicketSource,
 } from "@perbo/contracts";
-import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
+import { attemptBundles, BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
 import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES, queueOrder } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
@@ -74,7 +75,7 @@ import {
   type LocalRunRecord,
   type RunBase,
 } from "./run/local.js";
-import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "../text.js";
+import { WIDTH, clip, fitted, labelled, pad, painter, spread, wrap, type Paint } from "../text.js";
 import { specStaleness } from "../spec/staleness.js";
 
 import type { Diagnostics } from "../diagnostics.js";
@@ -296,6 +297,8 @@ export interface AttemptReport {
   /** SCP-194: what this round was given and what it closed. Null for round 0. */
   ladder: LadderRung | null;
   declines: Decline[];
+  /** The commands the attempt was let run (`admittedCommands`), which the run's tally counts (D-104). */
+  admitted_commands: number;
   /** Every command the attempt was refused, once each, in the order it asked. */
   denials: DenialReport[];
   bundles: RunBundle[];
@@ -588,47 +591,7 @@ const scalar = (bundle: RunBundle, key: string): string | number | boolean | nul
   bundle.inputs[key] ?? null;
 
 function artifactBody(store: BundleStore | null, bundle: RunBundle, name: string): string | null {
-  const ref = bundle.artifacts.find((artifact) => artifact.name === name);
-  if (!ref || !ref.retained || !store) return null;
-  return store.readObject(ref.sha256);
-}
-
-/**
- * The bundles one attempt wrote. The execution bundle is keyed by the attempt
- * id; the review by the change set it judged; a verification by the
- * `cv_<attempt>` subject the loop gives it.
- *
- * One join, read by the two things that need it: the report a person reads,
- * and `--verify`, which re-hashes what these name. A second copy of the rule
- * would be a second answer to "which bundles are this attempt's".
- */
-export interface AttemptBundles {
-  execution: RunBundle | undefined;
-  review: RunBundle | undefined;
-  verification: RunBundle | undefined;
-}
-
-export function attemptBundles(
-  attempt: ExecutionAttempt,
-  bundles: readonly RunBundle[],
-): AttemptBundles {
-  return {
-    execution: bundles.find(
-      (bundle) => bundle.kind === "execution" && bundle.subject_id === attempt.attempt_id,
-    ),
-    review:
-      attempt.changeset_id === null
-        ? undefined
-        : bundles.find(
-            (bundle) =>
-              bundle.kind === "review" &&
-              bundle.subject_id.startsWith("rev_") &&
-              scalar(bundle, "changeset_id") === attempt.changeset_id,
-          ),
-    verification: bundles.find(
-      (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.attempt_id}`,
-    ),
-  };
+  return store?.artifact(bundle, name) ?? null;
 }
 
 /** One attempt joined to its bundles and read for a person. */
@@ -850,6 +813,7 @@ export function reportAttempt(
     verification,
     ladder,
     declines,
+    admitted_commands: admittedCommands(attempt.commands),
     denials,
     bundles: [execution, reviewBundle, verificationBundle].filter(
       (bundle): bundle is RunBundle => bundle !== undefined,
@@ -1075,9 +1039,9 @@ function admissionLines(
   return [
     paint("  ADMISSION", "sect") + paint("   how this ticket was admitted", "dim"),
     ...sourceLines,
-    `    ${pad("criteria", 10)} ` + paint(clip(criteria, WIDTH - 15), "mid"),
-    `    ${pad("approval", 10)} ` + paint(clip(approval, WIDTH - 15), "mid"),
-    `    ${pad("level", 10)} ` + paint(clip(level, WIDTH - 15), "mid"),
+    ...labelled(`    ${pad("criteria", 10)} `, criteria, paint, "mid"),
+    ...labelled(`    ${pad("approval", 10)} `, approval, paint, "mid"),
+    ...labelled(`    ${pad("level", 10)} `, level, paint, "mid"),
     // The `admit` command's own runtime, which measures the machine.
     `    ${pad("admit", 10)} ` +
       paint(or(admission.elapsed_ms, (ms) => `${formatDuration(ms)} of machine time`), "dim"),
@@ -1279,8 +1243,8 @@ function localRunLines(report: InspectReport, paint: Paint): string[] {
         : `${source.criteria.length} criteri${source.criteria.length === 1 ? "on" : "a"}`;
   const lines = [
     paint("  LOCAL RUN", "sect") + paint("   no ticket was admitted for this work", "dim"),
-    `    ${pad("contract", 10)} ` + paint(clip(from, WIDTH - 15), "mid"),
-    `    ${pad("criteria", 10)} ` + paint(clip(criteria, WIDTH - 15), "mid"),
+    ...labelled(`    ${pad("contract", 10)} `, from, paint, "mid"),
+    ...labelled(`    ${pad("criteria", 10)} `, criteria, paint, "mid"),
   ];
   if (report.outcome !== null) {
     lines.push(
@@ -1289,7 +1253,7 @@ function localRunLines(report: InspectReport, paint: Paint): string[] {
     );
   }
   if (source !== null && source.url !== null) {
-    lines.push(`    ${pad("url", 10)} ` + paint(clip(source.url, WIDTH - 15), "dim"));
+    lines.push(...labelled(`    ${pad("url", 10)} `, source.url, paint, "dim"));
   }
   lines.push("");
   return lines;
@@ -1476,18 +1440,14 @@ export function renderInspect(
     for (const attempt of rungs) {
       const rung = attempt.ladder!;
       const counted = rung.kind === "resolve_conflict" ? " (conflict — not a remediation round)" : "";
-      out.push(
-        `  ${paint(pad(`round ${attempt.round}`, 9), "hi")}` +
-          paint(
-            clip(
-              `given ${rung.given.length}  closed ${rung.closed.length}  ` +
-                (rung.open.length === 0 ? "all closed" : `open ${rung.open.length}`) +
-                counted,
-              WIDTH - 11,
-            ),
-            rung.open.length === 0 ? "ok" : "warn",
-          ),
-      );
+      // Whole (D-NEW-nothing-shown-is-cut): beside the round where it fits, under it where it does not.
+      const said =
+        `given ${rung.given.length}  closed ${rung.closed.length}  ` +
+        (rung.open.length === 0 ? "all closed" : `open ${rung.open.length}`) +
+        counted;
+      const style = rung.open.length === 0 ? "ok" : "warn";
+      if (11 + said.length <= WIDTH) out.push(`  ${paint(pad(`round ${attempt.round}`, 9), "hi")}` + paint(said, style));
+      else out.push(`  ${paint(`round ${attempt.round}`, "hi")}`, ...wrap(said, 11).map((line) => paint(line, style)));
       if (rung.open.length > 0) {
         for (const line of wrap(
           `still open: ${rung.open.map((key) => key.slice(0, 12)).join(", ")}`,
@@ -1642,29 +1602,29 @@ export function renderInspect(
         const hang = `${margin}   `;
         const commandWidth = 28 - indent;
         const mark = CHECK_MARK[check.status] ?? "?";
-        const visible = `${margin}${mark}  ${pad(check.name, 15)} ${pad(check.command ?? "", commandWidth)}`;
-        const summary = clip(check.summary, WIDTH - visible.length - 2);
-        lines.push(
-          `${margin}${paint(mark, check.status === "passed" ? "ok" : "bad")}  ` +
-            `${pad(check.name, 15)} ${pad(check.command ?? "", commandWidth)}` +
-            " ".repeat(Math.max(2, WIDTH - visible.length - summary.length)) +
-            paint(summary, "mid"),
-        );
+        // The command and the summary whole (D-NEW-nothing-shown-is-cut): the
+        // summary right of the command where both fit the width, and under
+        // the row, wrapped, where they do not.
+        const command = (check.command ?? "").padEnd(commandWidth);
+        const visible = `${margin}${mark}  ${pad(check.name, 15)} ${command}`;
+        const head = `${margin}${paint(mark, check.status === "passed" ? "ok" : "bad")}  ${pad(check.name, 15)} ${command}`;
+        if (visible.length + 2 + check.summary.length <= WIDTH) {
+          lines.push(head + " ".repeat(Math.max(2, WIDTH - visible.length - check.summary.length)) + paint(check.summary, "mid"));
+        } else {
+          lines.push(head.trimEnd(), ...wrap(check.summary, hang.length).map((line) => paint(line, "mid")));
+        }
         // D-107: what a node's run was aimed at, or why it could not be aimed
         // anywhere narrower than the whole change.
         if (check.node) {
           lines.push(
-            paint(
-              clip(
-                `${hang}${
-                  check.node.scope === "files"
-                    ? `narrowed to ${check.node.paths.join(", ")}`
-                    : `over the whole change: ${check.node.note ?? "not narrowed"}`
-                }`,
-                WIDTH,
-              ),
-              "dim",
-            ),
+            ...fitted(
+              `${hang}${
+                check.node.scope === "files"
+                  ? `narrowed to ${check.node.paths.join(", ")}`
+                  : `over the whole change: ${check.node.note ?? "not narrowed"}`
+              }`,
+              hang.length,
+            ).map((line) => paint(line, "dim")),
           );
         }
         // What the second run measured, and the tests both runs named. A
@@ -1673,17 +1633,17 @@ export function renderInspect(
         if (check.rerun) {
           const verdict =
             check.flaky === true ? "flaky · re-run passed" : `re-run ${check.rerun.status}`;
-          lines.push(paint(clip(`${hang}${verdict}  ${check.rerun.command}`, WIDTH), "dim"));
-          if (check.rerun.note) lines.push(paint(clip(`${hang}${check.rerun.note}`, WIDTH), "dim"));
+          lines.push(...fitted(`${hang}${verdict}  ${check.rerun.command}`, hang.length).map((line) => paint(line, "dim")));
+          if (check.rerun.note) lines.push(...fitted(`${hang}${check.rerun.note}`, hang.length).map((line) => paint(line, "dim")));
         }
         for (const test of check.failing_tests ?? []) {
-          lines.push(paint(clip(`${hang}${test}`, WIDTH), "mid"));
+          lines.push(...fitted(`${hang}${test}`, hang.length).map((line) => paint(line, "mid")));
         }
         // The directory the command ran under. A check that behaves one way
         // here and another in a clean checkout is often reading this, and
         // absent means the record predates the field rather than "none".
         if (check.tmpdir !== undefined) {
-          lines.push(paint(clip(`${hang}tmpdir ${check.tmpdir ?? "unset"}`, WIDTH), "dim"));
+          lines.push(...fitted(`${hang}tmpdir ${check.tmpdir ?? "unset"}`, hang.length).map((line) => paint(line, "dim")));
         }
       };
 
@@ -1745,10 +1705,10 @@ export function renderInspect(
         const tag = FINDING_TAG[finding.routing] ?? finding.routing;
         const at = finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""}` : "(no file)";
         const style = finding.blocking ? "bad" : finding.routing === "remediable" ? "warn" : "dim";
-        lines.push(
-          `    ${paint(pad(tag, 8), style)} ${paint(pad(clip(finding.rule_id, 28), 28), "hi")} ` +
-            paint(clip(at, WIDTH - 43), "mid"),
-        );
+        // The location whole: beside the rule where it fits, under it where it does not.
+        const row = `    ${paint(pad(tag, 8), style)} ${paint(pad(finding.rule_id, 28), "hi")} `;
+        if (43 + at.length <= WIDTH) lines.push(row + paint(at, "mid"));
+        else lines.push(row.trimEnd(), ...wrap(at, 13).map((line) => paint(line, "mid")));
         lines.push(
           paint(
             `             ${finding.blocking ? "blocking" : "not blocking"} · ${finding.routing} · ` +
@@ -1790,11 +1750,9 @@ export function renderInspect(
         for (const line of wrap(verification.deterministic_failure, 4)) lines.push(paint(line, "bad"));
       }
       for (const row of verification.per_finding) {
-        lines.push(
-          `    ${paint(pad(row.status, 11), row.status === "closed" ? "ok" : "warn")} ` +
-            `${paint(row.finding_key.slice(0, 12), "hi")} ` +
-            paint(clip(row.pointer, WIDTH - 30), "dim"),
-        );
+        const head = `    ${paint(pad(row.status, 11), row.status === "closed" ? "ok" : "warn")} ${paint(row.finding_key.slice(0, 12), "hi")} `;
+        if (30 + row.pointer.length <= WIDTH) lines.push(head + paint(row.pointer, "dim"));
+        else lines.push(head.trimEnd(), ...wrap(row.pointer, 6).map((line) => paint(line, "dim")));
       }
       lines.push(
         paint(
@@ -1813,10 +1771,10 @@ export function renderInspect(
           paint(`   ${attempt.denials.length} command(s) the executor did not get`, "dim"),
       );
       for (const denial of attempt.denials) {
-        lines.push(
-          `    ${paint(pad(clip(denial.rule, 24), 24), "warn")} ` +
-            paint(clip(denial.target, WIDTH - 32), "hi"),
-        );
+        // The refused target whole (D-NEW-nothing-shown-is-cut): beside the rule where it fits.
+        const rule = `    ${paint(pad(denial.rule, 24), "warn")} `;
+        if (32 + denial.target.length <= WIDTH) lines.push(rule + paint(denial.target, "hi"));
+        else lines.push(rule.trimEnd(), ...wrap(denial.target, 6).map((line) => paint(line, "hi")));
         const by = denial.agent === null ? "" : `${denial.agent}  `;
         for (const line of wrap(`${by}${denial.tool}  ${denial.command}`, 6)) {
           lines.push(paint(line, "dim"));
@@ -1855,10 +1813,15 @@ export function renderInspect(
         lines.push(paint("    empty", "dim"));
       } else {
         for (const file of attempt.changed_files) {
-          lines.push(
-            `    ${pad(file.change_kind, 9)} ${paint(clip(file.path, WIDTH - 28), "hi")}` +
-              paint(`  +${file.additions} -${file.deletions}`, "dim"),
-          );
+          const counts = `  +${file.additions} -${file.deletions}`;
+          if (14 + file.path.length + counts.length <= WIDTH) {
+            lines.push(`    ${pad(file.change_kind, 9)} ${paint(file.path, "hi")}` + paint(counts, "dim"));
+          } else {
+            lines.push(
+              `    ${pad(file.change_kind, 9)}` + paint(counts, "dim"),
+              ...wrap(file.path, 14).map((line) => paint(line, "hi")),
+            );
+          }
         }
       }
       lines.push("");

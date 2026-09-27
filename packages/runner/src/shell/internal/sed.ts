@@ -344,7 +344,7 @@ function sedArithmetic(word: Word): Word {
  * cannot be read, and neither can one no reading gets to the end of.
  */
 export function sedFindings(rest: readonly Word[], context: Context): WriteFinding[] {
-  const segment = context.segment.slice(0, 200);
+  const { segment } = context;
   const unreadable = (why: string): WriteFinding => ({
     detail: `what this sed script writes or runs cannot be read — ${why}: ${segment}`,
     target: null,

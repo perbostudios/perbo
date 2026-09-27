@@ -27,7 +27,7 @@ export function programSourceFindings(
   context: Context,
   cwd: Cwd,
 ): WriteFinding[] {
-  const tail = `: ${context.segment.slice(0, 200)}`;
+  const tail = `: ${context.segment}`;
   // `python3 script.py`, `node build.js`: a file, and files are not read here.
   // A lone `-` is the operand that says the program is on standard input, and
   // so can one that is empty when the line runs — `""`, or a word that begins
@@ -108,7 +108,7 @@ export function shellFromStdin(
   source: StdinSource,
   context: Context,
 ): { findings: WriteFinding[]; script: string[]; accounted: boolean } {
-  const tail = `: ${context.segment.slice(0, 200)}`;
+  const tail = `: ${context.segment}`;
   const unreadable = (reason: string) => ({
     findings: [
       { detail: `the script ${verb} reads from ${reason}${tail}`, target: null, resolved: null },

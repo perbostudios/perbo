@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { Decline } from "../../declines.js";
 import { CostBasisSchema, costOf, rollCosts } from "@perbo/contracts";
-import type { Cost, ExecutionAttempt } from "@perbo/contracts";
+import type { AttemptWait, Cost, ExecutionAttempt } from "@perbo/contracts";
 import { appendAttempts, sealedByAttempt, type AttemptsRecord } from "../../attempts.js";
+import type { VerificationCost } from "./deliver.js";
 import type { RoundRecord } from "./state.js";
 
 /**
@@ -112,6 +113,15 @@ export class Ledger {
     return this.allDeclines;
   }
 
+  /** What each closure verification this run made cost, round by round. */
+  get verificationCosts(): VerificationCost[] {
+    return this.roundRecords.flatMap((entry) =>
+      entry.verification
+        ? [{ cost_micros: entry.verification.cost_micros, cost_basis: entry.verification.cost_basis }]
+        : [],
+    );
+  }
+
   /**
    * Which attempt sealed a commit, this run's or any earlier run's, or null
    * where nothing on record claims it.
@@ -128,6 +138,23 @@ export class Ledger {
   addAttempt(attempt: ExecutionAttempt, sealedOwnHead: string | null): void {
     this.mine.push(attempt);
     if (sealedOwnHead !== null) this.sealed.set(sealedOwnHead, attempt.attempt_id);
+  }
+
+  /**
+   * Put on this run's attempt the wait the run sits out after it, before the
+   * record is flushed: a review its provider refused parks on the attempt it
+   * was judging, so a run restarted mid-wait reads the instant from the record
+   * (`parkedWait`) as it would an attempt's own park. An attempt already on
+   * disk is never rewritten, so one that is refuses.
+   */
+  parkAfter(attemptId: string, wait: AttemptWait): ExecutionAttempt {
+    const index = this.mine.findIndex((attempt) => attempt.attempt_id === attemptId);
+    if (index < this.recordedThrough) {
+      throw new Error(`${attemptId} is not an attempt of this run still to be written, so no wait can be put on it`);
+    }
+    const parked = { ...this.mine[index]!, wait };
+    this.mine[index] = parked;
+    return parked;
   }
 
   addRound(record: RoundRecord): void {
