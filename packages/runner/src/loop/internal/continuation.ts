@@ -5,6 +5,7 @@ import {
   answersReview,
   decidable,
   decisionChoicesFor,
+  declinesOnRecord,
   loopOnRecord,
   routedToPerson,
   type ExecutionAttempt,
@@ -14,15 +15,17 @@ import {
   type ReviewArtifact,
   type RunBundle,
   type HistoryRow,
+  type RecordedDecline,
 } from "@perbo/contracts";
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
+import { git } from "@perbo/workspace";
 import { z } from "zod";
 import type { AttemptsRecord } from "../../attempts.js";
 import { handsToExecutor, recordDecisions, type DecidedFinding } from "../../decisions.js";
 import type { BundleStore } from "../../bundle.js";
 import { sameCommit } from "../../resume.js";
 import { changedPathsBetween, commitsSince } from "../../seal.js";
-import type { RoundState } from "./state.js";
+import type { EarlierAnswer, RoundState } from "./state.js";
 
 /**
  * Whether a re-run continues a remediation already under way (SCP-194).
@@ -60,6 +63,7 @@ export function remediationToContinue(input: {
   ticket_id: string;
   decided: readonly DecidedFinding[];
   history: readonly HistoryRow[];
+  declines: readonly RecordedDecline[];
 }): {
   review: ReviewArtifact;
   node_reviews: NodeReview[];
@@ -102,6 +106,32 @@ export function remediationToContinue(input: {
   };
 }
 
+/**
+ * A person's answers to the last review on record, each with the finding as
+ * that review stated it (D-132): what a run that reviews afresh — its branch
+ * moved past the commit that review judged — carries into its executor's
+ * first brief as data. Empty where no answer stands on that review, or none
+ * is readable.
+ */
+export function answersBefore(input: {
+  bundles: BundleStore;
+  ticket_id: string;
+  decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
+  declines: readonly RecordedDecline[];
+}): EarlierAnswer[] {
+  if (input.decided.length === 0) return [];
+  const judged = judgedOnRecord(input);
+  if (judged === null) return [];
+  const decisions = decisionsOn(judged.review, judged.reviewed_at, input.decided, judged.loop);
+  return judged.review.findings.flatMap((finding) => {
+    const decision = decisions.get(finding.key);
+    return decision === undefined
+      ? []
+      : [{ finding_key: finding.key, statement: finding.statement, choice: decision.choice, words: decision.note }];
+  });
+}
+
 /** A person's words for a finding they handed to the executor, which its brief carries as data. */
 export interface Direction {
   finding_key: string;
@@ -120,14 +150,16 @@ export interface Direction {
  * caller hands in. The commit the branch should still be at is the last one a
  * verification judged, or the review's where none did: a round the scope rule
  * refused (SCP-194) records the commit it refused under a key of its own and
- * judged no tree, so a branch left at that commit has moved past what was
- * judged and is reviewed afresh. Null where there is no readable review, or
+ * judged no tree, and the runner puts the branch back at the commit this
+ * names (`restoreJudgedCommit`). Null where there is no readable review, or
  * where a verification cannot say what it left open.
  */
 export function judgedOnRecord(input: {
   bundles: BundleStore;
   ticket_id: string;
   history: readonly HistoryRow[];
+  /** The declines the ticket's attempts record (`declinesOfRecord`). */
+  declines: readonly RecordedDecline[];
 }): {
   review: ReviewArtifact;
   node_reviews: NodeReview[];
@@ -166,7 +198,12 @@ export function judgedOnRecord(input: {
   // the same default the schema gives a record that never held them.
   const node_reviews = readNodeReviews(input.bundles, last);
 
-  const onRecord = loopOnRecord({ review_id: review.review_id, bundles: forTicket, history: input.history });
+  const onRecord = loopOnRecord({
+    review_id: review.review_id,
+    bundles: forTicket,
+    history: input.history,
+    declines: input.declines,
+  });
   if (onRecord === null) return null;
   const { verifications, loop } = onRecord;
   const keysOf = (value: unknown): string[] =>
@@ -270,6 +307,8 @@ export function decidedDelivery(input: {
   repository_id: string;
   decided: readonly DecidedFinding[];
   history: readonly HistoryRow[];
+  /** The declines the ticket's attempts record (`declinesOfRecord`). */
+  declines: readonly RecordedDecline[];
 }): DecidedDelivery | null {
   if (input.decided.length === 0) return null;
   const judged = judgedOnRecord(input);
@@ -335,9 +374,13 @@ export function readNodeReviews(bundles: BundleStore, bundle: RunBundle): NodeRe
  *
  * Asked of the branch rather than of the record, and before the merge-up, so
  * what is compared is the work on the branch and not the base moving under it.
- * A branch that has moved carries commits no review has seen, and a
- * verification against it would grade a change nobody judged — so the run
- * drops back to a fresh review of what is there.
+ * The runner never leaves the branch at a commit it refused: a refused round
+ * is put back at the judged commit (`restoreJudgedCommit`), so a person's
+ * answers continue here. A branch that has moved otherwise — a commit made
+ * outside the run — carries commits no review has seen, and a verification
+ * against it would grade a change nobody judged, so the run drops back to a
+ * fresh review of what is there, the person's answers to the earlier review
+ * carried into its brief as data (`answersBefore`).
  *
  * Asked before the attempt id is minted, because the answer decides the round
  * this attempt is in. Answered once per run: the state it returns carries no
@@ -393,6 +436,40 @@ async function branchHead(worktree: string, base_commit: string): Promise<string
   return onBranch[onBranch.length - 1] ?? null;
 }
 
+/**
+ * Puts the ticket's branch back at the commit last judged, after the runner
+ * refused a round's work (SCP-194): the review's commit, or the last one a
+ * closure verification judged (`judgedOnRecord`). The refused work stays on
+ * the record — its diff in the attempt's bundle and its commit as the
+ * refusal's `refused_head_commit` — and the branch never ends at a commit the
+ * runner rejected, so a person's answers to that review act on the branch
+ * the next run finds rather than on a fresh review of work nobody judged.
+ *
+ * Only the worktree's own branch, the ticket's, is moved, only backwards along
+ * its own line, and only by argv git (ADR-0023). Returns the commit it is back
+ * at, or null where the record names none or the branch is not the ticket's or
+ * does not carry that commit, which it leaves where it is.
+ */
+export async function restoreJudgedCommit(args: {
+  worktree: string;
+  branch: string;
+  bundles: BundleStore;
+  ticket_id: string;
+}): Promise<string | null> {
+  const judged = judgedOnRecord({ bundles: args.bundles, ticket_id: args.ticket_id, history: [], declines: [] });
+  if (judged === null) return null;
+  const on = await git.run(args.worktree, ["symbolic-ref", "--short", "HEAD"], RESTORE_CALL);
+  if (on.code !== 0 || on.stdout.trim() !== args.branch) return null;
+  const head = await git.head(args.worktree, RESTORE_CALL);
+  if (head === null) return null;
+  if (sameCommit(head, judged.head_commit)) return head;
+  if (!(await git.isAncestor(args.worktree, judged.head_commit, head, RESTORE_CALL))) return null;
+  await git.runOrThrow(args.worktree, ["reset", "--hard", judged.head_commit], RESTORE_CALL);
+  return judged.head_commit;
+}
+
+const RESTORE_CALL = { timeoutMs: 120_000 };
+
 /** Whether the branch is still at the commit a review judged. */
 export async function branchStillAt(worktree: string, base_commit: string, judged: string): Promise<boolean> {
   const head = await branchHead(worktree, base_commit);
@@ -422,4 +499,22 @@ export function attemptsThatSealed(record: AttemptsRecord | null, head_commit: s
       const parsed = ExecutionAttemptSchema.safeParse(entry);
       return parsed.success ? [parsed.data] : [];
     });
+}
+
+/**
+ * The declines a ticket's attempts record (`declinesOnRecord`), read from its
+ * attempts record: an entry that does not parse as an attempt with its start
+ * time adds none.
+ */
+export function declinesOfRecord(record: AttemptsRecord | null): RecordedDecline[] {
+  const Declining = z.object({
+    created_at: z.string(),
+    declines: z.array(z.object({ finding_key: z.string(), reason: z.string() })).optional(),
+  });
+  return declinesOnRecord(
+    (record?.attempts ?? []).flatMap((entry) => {
+      const parsed = Declining.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
 }

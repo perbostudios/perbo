@@ -17,6 +17,7 @@ import {
   FINDING_ROUTINGS,
   ReviewDecisionSchema,
   costOf,
+  declinesOnRecord,
   parseUnifiedDiff,
   rollCosts,
 } from "@perbo/contracts";
@@ -53,6 +54,8 @@ export const StoredAttemptSchema = z.looseObject({
     })
     .optional(),
   termination: z.looseObject({ reason: z.string() }).optional(),
+  /** What the attempt declined (D-065), with the reason it gave; absent where the record does not say. */
+  declines: z.array(z.looseObject({ finding_key: z.string(), reason: z.string() })).optional(),
 });
 export type StoredAttempt = z.infer<typeof StoredAttemptSchema>;
 const AttemptsRecordSchema = z.looseObject({
@@ -571,6 +574,8 @@ export function reviewOnRecord(input: {
   ticket: Pick<Ticket, "ticket_id" | "history">;
   objectsDirectory: string;
   verdictsPath: string;
+  /** The ticket's attempts record, whose declines make a finding the person's (D-065). */
+  attemptsPath: string;
 }): { review: FindingsOnRecord; settled: SettledFindings } | null {
   const review = findingsOnRecord(input.bundles, input.ticket.ticket_id, input.objectsDirectory);
   if (review === null) return null;
@@ -589,6 +594,11 @@ export function reviewOnRecord(input: {
         : [],
     ),
     history: input.ticket.history,
+    declines: declinesOnRecord(
+      readAttempts(input.attemptsPath).attempts.flatMap((attempt) =>
+        attempt.created_at === undefined ? [] : [{ created_at: attempt.created_at, declines: attempt.declines }],
+      ),
+    ),
     verdicts,
     verification: null,
   });

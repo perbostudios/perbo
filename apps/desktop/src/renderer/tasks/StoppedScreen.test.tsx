@@ -214,8 +214,8 @@ describe("the stopped page", () => {
    */
   function closedGate(
     outcome: string,
-    review: { decision: string } | null,
-    declines: readonly string[] = [],
+    review: { decision: string; findings?: unknown[] } | null,
+    declines: readonly { finding_key: string; reason: string }[] = [],
   ): { workspace: Snapshot; detail: Detail } {
     const run = stopped({ state: "completed", outcome: outcome as Job["outcome"], error: null });
     const template = sample.detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
@@ -224,7 +224,21 @@ describe("the stopped page", () => {
       attempt.declines = [];
     }
     const last = run.detail.attempts.at(-1)!;
-    if (review !== null) last.review = { ...template!, ...review, findings: [] } as AttemptView["review"];
+    if (review !== null) {
+      last.review = { ...template!, ...review, findings: review.findings ?? [] } as AttemptView["review"];
+      // The review's own bundle, recorded before the attempt that followed it started.
+      last.bundles = [
+        ...last.bundles,
+        {
+          ...last.bundles[0]!,
+          bundle_id: "bundle_closedgate0001",
+          kind: "review",
+          subject_id: last.review!.review_id,
+          created_at: "2026-09-08T04:10:30.000Z",
+          inputs: {},
+        },
+      ];
+    }
     last.declines = declines;
     run.detail.ticket = {
       ...run.detail.ticket,
@@ -248,16 +262,24 @@ describe("the stopped page", () => {
     expect(carryOn().title).toMatch(/for the reason listed/);
   });
 
-  it("says a run escalated on the executor's declines only where an attempt records them", () => {
-    mount(closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]));
-    expect(reasons()).toEqual(["The executor declined the findings left open, saying no practice determines them."]);
-    expect(behind()[0]).toMatch(/perbo principle add/);
-    expect(behind()[0]).not.toMatch(/Nothing on its record is left for you to answer/);
-    cleanup();
-    // An incomplete review that escalated with every finding the executor's: nothing was declined.
+  it("lands an escalation that asks nothing here, and one the executor declined a finding on never (D-065)", () => {
+    // An incomplete review that escalated with every finding the executor's: nothing is asked.
     mount(closedGate("escalated", { decision: "incomplete" }));
     expect(reasons()).toEqual(["The review escalated the run, and put nothing on its record to you."]);
-    expect(behind()[0]).not.toMatch(/declined/);
+    expect(behind()[0]).not.toMatch(/declined|principle add/);
+    cleanup();
+    // A finding the executor declined is the person's question: a pause, not a stop.
+    const template = sample.detail.attempts.findLast((attempt) => attempt.review !== null)!.review!.findings[0]!;
+    const declined = { ...template, key: "e".repeat(64), routing: "remediable", status: "open", closure: "executor" };
+    mount(
+      closedGate("escalated", { decision: "remediable", findings: [declined] }, [
+        { finding_key: declined.key, reason: "A person must decide whether review runs the suite." },
+      ]),
+    );
+    expect(document.querySelector('section[data-screen="stopped"]')).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Decisions required" }).textContent).toContain(
+      "A person must decide whether review runs the suite.",
+    );
   });
 
   it("says the review could not be read where no review is on record, rather than that nothing is asked", () => {

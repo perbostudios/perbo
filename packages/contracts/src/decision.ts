@@ -56,36 +56,95 @@ export interface LoopOnReview {
    * last verification given each one left it out of its open set.
    */
   closed: ReadonlySet<string>;
+  /**
+   * The findings the executor declined since the review (D-065) that no later
+   * verification closed, each with every reason it gave for them since the
+   * review, in order: the executor has said it cannot close them alone.
+   */
+  declined: ReadonlyMap<string, readonly string[]>;
+  /**
+   * The findings a round since the review was given and the runner refused
+   * (SCP-194: it widened the change set instead of narrowing it) that no later
+   * verification closed: the executor has shown it cannot close them within
+   * the contract alone.
+   */
+  refused: ReadonlySet<string>;
 }
 
 /** The part of a ticket's row the loop's end is read from. */
 export type HistoryRow = Pick<TicketHistoryEntry, "at" | "note">;
 
 /** A review nothing has run on since: no round verified, no run ended. */
-export const NOTHING_TRIED: LoopOnReview = { finished: false, closed: new Set() };
+export const NOTHING_TRIED: LoopOnReview = { finished: false, closed: new Set(), declined: new Map(), refused: new Set() };
+
+/** A finding an attempt declined (D-065), with the reason it gave and when that attempt started. */
+export interface RecordedDecline {
+  finding_key: string;
+  reason: string;
+  at: string;
+}
 
 /**
- * What the loop has done on a review, from the ticket's rows and the closure
- * verifications recorded since the review, in the order they were recorded,
- * each with the findings it was given and the ones it left open. A finding's
- * status is its last verification's: a round given only some of the open
- * findings says nothing about the rest.
+ * The declines the ticket's attempts record (`ExecutionAttempt.declines`),
+ * each at the time its attempt started. An attempt whose record does not say
+ * what it declined adds none.
+ */
+export function declinesOnRecord(
+  attempts: readonly { created_at: string; declines?: readonly { finding_key: string; reason: string }[] | undefined }[],
+): RecordedDecline[] {
+  return attempts.flatMap((attempt) =>
+    (attempt.declines ?? []).map((decline) => ({ finding_key: decline.finding_key, reason: decline.reason, at: attempt.created_at })),
+  );
+}
+
+/**
+ * What the loop has done on a review, from the ticket's rows, and the closure
+ * verifications and the executor's declines recorded since the review, in the
+ * order of their times: each verification with the findings it was given and
+ * the ones it left open, each decline with its finding and reason. A finding's
+ * status is the last one recorded for it: a round given only some of the open
+ * findings says nothing about the rest, a decline makes a finding the
+ * person's, and it stays theirs until a later verification closes it.
  */
 export function loopOnReview(input: {
   reviewed_at: string;
   history: readonly HistoryRow[];
-  verifications: readonly { given: readonly string[]; open: readonly string[] }[];
+  verifications: readonly { at: string; given: readonly string[]; open: readonly string[]; refused: boolean }[];
+  declines: readonly RecordedDecline[];
 }): LoopOnReview {
   const since = Date.parse(input.reviewed_at);
   const endings = FINISHED_TRYING.map((outcome) => gateClosedNote(outcome));
   const closed = new Set<string>();
-  for (const verification of input.verifications) {
-    for (const key of verification.given) closed.add(key);
-    for (const key of verification.open) closed.delete(key);
+  const declined = new Map<string, string[]>();
+  const refused = new Set<string>();
+  const events = [
+    ...input.verifications.map((verification) => ({ at: Date.parse(verification.at), verification, decline: null })),
+    ...input.declines
+      .filter((decline) => Date.parse(decline.at) >= since)
+      .map((decline) => ({ at: Date.parse(decline.at), verification: null, decline })),
+  ].sort((left, right) => left.at - right.at);
+  for (const { verification, decline } of events) {
+    if (decline !== null) {
+      closed.delete(decline.finding_key);
+      declined.set(decline.finding_key, [...(declined.get(decline.finding_key) ?? []), decline.reason]);
+      continue;
+    }
+    for (const key of verification!.given) closed.add(key);
+    for (const key of verification!.open) closed.delete(key);
+    for (const key of verification!.given) {
+      if (verification!.refused && !closed.has(key)) refused.add(key);
+      // Closed by a round, it is no longer declined or refused; left open, it is still the person's.
+      if (closed.has(key)) {
+        declined.delete(key);
+        refused.delete(key);
+      }
+    }
   }
   return {
     finished: input.history.some((row) => Date.parse(row.at) >= since && endings.includes(row.note)),
     closed,
+    declined,
+    refused,
   };
 }
 
@@ -105,6 +164,8 @@ export function loopOnRecord(input: {
   review_id: string;
   bundles: readonly RecordedBundle[];
   history: readonly HistoryRow[];
+  /** The declines the ticket's attempts record (`declinesOnRecord`). */
+  declines: readonly RecordedDecline[];
 }): { reviewed_at: string; verifications: RecordedBundle[]; loop: LoopOnReview } | null {
   const recorded = input.bundles.findLast((bundle) => bundle.kind === "review" && bundle.subject_id === input.review_id);
   if (recorded === undefined) return null;
@@ -124,20 +185,25 @@ export function loopOnRecord(input: {
       reviewed_at: recorded.created_at,
       history: input.history,
       verifications: verifications.map((bundle) => ({
+        at: bundle.created_at,
         given: keysOf(bundle.inputs["findings_given"]),
         open: keysOf(bundle.inputs["findings_open"]),
+        refused: bundle.inputs["refused_head_commit"] !== undefined,
       })),
+      declines: input.declines,
     }),
   };
 }
 
 /**
  * Whether a finding is a person's to answer: open, and routed `blocks` or
- * `escalates`, or routed `remediable` on a review the loop has finished trying
- * and not closed by a round (D-132). The routing is the policy's answer to who
- * is asked while the executor is still trying; once a run ended on
- * `FINISHED_TRYING` every finding it left open is the person's, because the
- * executor has shown it cannot close it alone. The reviewer's `closure` does
+ * `escalates`, or routed `remediable`, not closed by a round, and one the loop
+ * has finished trying (D-132): a run since the review ended on
+ * `FINISHED_TRYING`, the executor declined it (D-065), or the runner refused the
+ * round given it for widening the change set (SCP-194), and no later round
+ * closed it. The routing is the policy's answer to who is asked while the
+ * executor is still trying; once it has shown it cannot close a finding alone,
+ * the finding is the person's. The reviewer's `closure` does
  * not decide it, and one routed `advisory` closes no gate.
  */
 export function routedToPerson(
@@ -146,14 +212,20 @@ export function routedToPerson(
 ): boolean {
   if (finding.status !== "open") return false;
   if (finding.routing === "blocks" || finding.routing === "escalates") return true;
-  return finding.routing === "remediable" && loop.finished && !loop.closed.has(finding.key);
+  return (
+    finding.routing === "remediable" &&
+    !loop.closed.has(finding.key) &&
+    (loop.finished || loop.declined.has(finding.key) || loop.refused.has(finding.key))
+  );
 }
 
 /**
  * Whether a review's findings routed to a person take one of the three
  * answers: a review that judged every criterion and stopped for a person, or
  * one that routed its findings to the executor and that the loop has finished
- * trying. An `incomplete` or `error` review did not judge the whole change, so
+ * trying — a run since ended stalled or exhausted, or the executor declined a
+ * finding of it, or the runner refused a round given one, that no round closed
+ * since. An `incomplete` or `error` review did not judge the whole change, so
  * an answer to it would deliver a change nobody finished judging: its findings
  * are asked for a principle only, as any other finding a person is asked
  * about, and a run goes on as though none of them were answered.
@@ -162,7 +234,7 @@ export function decidable(review: Pick<ReviewArtifact, "decision">, loop: LoopOn
   return (
     review.decision === "changes_requested" ||
     review.decision === "escalate" ||
-    (review.decision === "remediable" && loop.finished)
+    (review.decision === "remediable" && (loop.finished || loop.declined.size > 0 || loop.refused.size > 0))
   );
 }
 

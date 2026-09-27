@@ -310,13 +310,14 @@ export {
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  declinesOnRecord,
   loopOnRecord,
   loopOnReview,
   NEVER_HANDED_FAMILIES,
   NOTHING_TRIED,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle, RecordedDecline } from "./decision.js";
 export { compareLevels, deriveActualRisk, derivePlannedRisk, maxLevel } from "./risk.js";
 export type { RiskDerivation } from "./risk.js";
 export { bundleId, BundleIdSchema, computeReplayability, RunBundleSchema } from "./runbundle.js";

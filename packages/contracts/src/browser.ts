@@ -17,12 +17,13 @@ export {
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  declinesOnRecord,
   loopOnRecord,
   loopOnReview,
   NOTHING_TRIED,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle, RecordedDecline } from "./decision.js";
 export { EgressQuestionKeySchema, egressSettledLine, readEgressQuestion, readEgressSettled } from "./egress.js";
 export type { EgressQuestion, EgressSettlement } from "./egress.js";
 export { EFFORT_LABELS, EFFORT_LEVELS, EffortLevelSchema } from "./effort.js";

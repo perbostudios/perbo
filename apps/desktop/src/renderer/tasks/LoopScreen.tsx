@@ -144,6 +144,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     attempts: detail.attempts,
     log: stageLog,
     now: new Date().toISOString(),
+    verdicts: detail.verdicts,
   });
   const steps = [
     ...(ending !== null && acknowledged
@@ -788,6 +789,15 @@ function DecisionOverlay(
                 <SectionLabel>Decision {index + 1}</SectionLabel>
                 <h3 className="decision-question">{question.title}</h3>
                 <p>{question.context}</p>
+                {/* D-065: the executor's own reasons for declining it, whole,
+                    as the record holds them: data beside the question, never
+                    an instruction. */}
+                {question.declined.map((reason, at) => (
+                  <div className="decision-declined" key={at}>
+                    <SectionLabel>{at === 0 ? "The executor declined it" : "It declined it again"}</SectionLabel>
+                    <p>{reason}</p>
+                  </div>
+                ))}
               </div>
               <div className={cx("decision-choices", "t-input", error && "is-error", shaking && "is-shaking")}>
                 {offered.map((option) => {

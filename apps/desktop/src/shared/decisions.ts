@@ -3,12 +3,14 @@ import {
   answersReview,
   decidable,
   decisionChoicesFor,
+  declinesOnRecord,
   loopOnRecord,
   NOTHING_TRIED,
   routedToPerson,
   type HistoryRow,
   type LoopOnReview,
   type RecordedBundle,
+  type RecordedDecline,
 } from "@perbo/contracts/browser";
 import type { Finding, ReviewArtifact, Ticket } from "@perbo/contracts";
 import type { AttemptView, DecisionQuestion } from "./protocol.js";
@@ -85,6 +87,7 @@ export function decisionQuestions(
         .filter((text) => text.trim().length > 0)
         .map(asSentence)
         .join(" "),
+      declined: settled.loop.declined.get(finding.key) ?? [],
       choices: decides(finding) ? decisionChoicesFor(finding.rule_id) : [],
     }));
 }
@@ -150,6 +153,9 @@ export function settledFindings(detail: {
     review_id: review.review_id,
     bundles: detail.attempts.flatMap((attempt) => attempt.bundles),
     history: detail.ticket.history,
+    declines: declinesOnRecord(
+      detail.attempts.map((attempt) => ({ created_at: attempt.startedAt, declines: attempt.declines })),
+    ),
     verdicts: detail.verdicts,
     verification: verified.at(-1) ?? null,
   });
@@ -166,10 +172,17 @@ export function settledOnRecord(input: {
   review_id: string;
   bundles: readonly RecordedBundle[];
   history: readonly HistoryRow[];
+  /** What the ticket's attempts declined (`declinesOnRecord`). */
+  declines: readonly RecordedDecline[];
   verdicts: readonly unknown[];
   verification: { open_keys: readonly string[]; deterministic_failure: string | null } | null;
 }): SettledFindings {
-  const onRecord = loopOnRecord({ review_id: input.review_id, bundles: input.bundles, history: input.history });
+  const onRecord = loopOnRecord({
+    review_id: input.review_id,
+    bundles: input.bundles,
+    history: input.history,
+    declines: input.declines,
+  });
   if (onRecord === null) return { keys: new Set(), refusal: null, loop: NOTHING_TRIED };
   const shipped = input.verdicts.flatMap((row) => {
     const parsed = ShippedSchema.safeParse(row);

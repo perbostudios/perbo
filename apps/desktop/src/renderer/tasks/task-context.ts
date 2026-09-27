@@ -1,4 +1,5 @@
-import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, type Cost } from "@perbo/contracts/browser";
+import { z } from "zod";
+import { costOf, DECISION_CHOICES, formatUsd, gateClosedNote, rollCosts, runEndedOn, type Cost } from "@perbo/contracts/browser";
 import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
 import { ATTEMPT_STARTS, runnerStages, runnerTally, spokenByAttempt, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
@@ -388,15 +389,11 @@ const RUN_OUTCOME_SENTENCES: Record<string, string> = {
  * beside the outcome sentences they stand for.
  */
 const NOTHING_ASKED = {
-  /** The executor declined what was left (D-065), as the attempts record it: answered by a principle, not on the card. */
-  declined: {
-    text: "The executor declined the findings left open, saying no practice determines them.",
-    detail:
-      "The executor declined the findings left open, saying no practice determines them; its reasons are on the " +
-      "round record. A declined finding takes no answer on the decision card: `perbo principle add` records " +
-      "your answer in .perbo/principles.md, which the executor reads on the next run.",
-  },
-  /** An escalation with nothing declined and nothing on the record for the person, as an incomplete review's can be. */
+  /**
+   * An escalation with nothing on the record for the person, as an incomplete
+   * review's can be. A finding the executor declined is always one: it is put
+   * to them on the decision card (D-065, D-132), so the run is a pause.
+   */
   escalated: {
     text: "The review escalated the run, and put nothing on its record to you.",
     detail:
@@ -425,27 +422,20 @@ const rowWords = (entry: Pick<Detail["ticket"]["history"][number], "note" | "to"
 /**
  * Why a ticket whose last run closed the gate stopped, where the record puts
  * no question to the person: that its review could not be read; for an
- * escalation, that the executor declined what was left where an attempt since
- * the review records declines, and otherwise that the review put nothing to
- * them; for any other outcome, its row's outcome in Perbo's words and that
- * nothing is left to answer. Null where its last row is not such a run's end.
+ * escalation, that the review put nothing to them; for any other outcome, its
+ * row's outcome in Perbo's words and that nothing is left to answer. Null
+ * where its last row is not such a run's end.
  */
 export function gateClosedReasons(
   history: Detail["ticket"]["history"],
-  attempts: readonly Pick<AttemptView, "review" | "declines">[],
+  attempts: readonly Pick<AttemptView, "review">[],
 ): StopReason[] | null {
   const last = history.at(-1);
   if (last === undefined || !last.note.startsWith(gateClosedNote(""))) return null;
   const outcome = runEndedOn(last.note);
   if (outcome === null) return null;
-  const reviewed = attempts.findLastIndex((attempt) => attempt.review !== null);
-  if (reviewed === -1) return [NOTHING_ASKED.unreadable];
-  if (outcome === "escalated")
-    return [
-      attempts.slice(reviewed).some((attempt) => (attempt.declines ?? []).length > 0)
-        ? NOTHING_ASKED.declined
-        : NOTHING_ASKED.escalated,
-    ];
+  if (!attempts.some((attempt) => attempt.review !== null)) return [NOTHING_ASKED.unreadable];
+  if (outcome === "escalated") return [NOTHING_ASKED.escalated];
   const text = outcomeSentence(outcome);
   return [
     {
@@ -505,6 +495,8 @@ export function loopSteps(input: {
   attempts: readonly AttemptView[];
   log: StageLog;
   now: string;
+  /** The verdicts record's rows (`Detail.verdicts`): each standing answer a person gave is a step. */
+  verdicts?: readonly unknown[];
 }): LoopStep[] {
   const { history, jobs, active, attempts, log, now } = input;
   const last = jobs.filter(isRun).at(-1);
@@ -539,11 +531,43 @@ export function loopSteps(input: {
     ...recorded.map((step) => ({ ...step, key: step.at! })),
     ...(logged === undefined ? [] : stages(logged)),
     ...moves.map((step) => ({ ...step, key: step.at! })),
+    ...answeredSteps(input.verdicts ?? []).map((step) => ({ ...step, key: step.at! })),
   ]
     .map((step, order) => ({ step, time: Date.parse(step.key), order }))
     .sort((left, right) => left.time - right.time || left.order - right.order)
     .reverse()
     .map(({ step: { text, reason, at } }) => ({ text, reason, at }));
+}
+
+const AnsweredSchema = z.object({
+  finding_key: z.string(),
+  decision: z.literal("decide"),
+  choice: z.enum(DECISION_CHOICES),
+  note: z.string(),
+  decided_at: z.string(),
+  superseded_at: z.null(),
+});
+
+/**
+ * Each standing answer a person gave to a finding (D-132), as a step at the
+ * time they gave it: what they decided, in their words, and the finding it
+ * answered behind the `i`. It stays a step whatever the run after it did with
+ * it, a fresh review included, so the page keeps saying what the person
+ * decided.
+ */
+function answeredSteps(verdicts: readonly unknown[]): LoopStep[] {
+  return verdicts.flatMap((row) => {
+    const parsed = AnsweredSchema.safeParse(row);
+    if (!parsed.success) return [];
+    const { finding_key, choice, note, decided_at } = parsed.data;
+    const text =
+      choice === "ship_as_is"
+        ? "You chose to ship a finding as it is."
+        : choice === "let_it_decide"
+          ? "You left a finding's approach to the executor."
+          : `You gave your approach to a finding: ${note}`;
+    return [{ text, reason: `The finding ${finding_key.slice(0, 12)}, answered in your words: ${note}`, at: decided_at }];
+  });
 }
 
 /**

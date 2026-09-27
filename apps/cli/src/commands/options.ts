@@ -8,6 +8,7 @@ import {
   decidable,
   decisionChoicesFor,
   hasAcceptanceCriteria,
+  declinesOnRecord,
   loopOnRecord,
   NOTHING_TRIED,
   routedToPerson,
@@ -110,6 +111,7 @@ export async function options(
       review_id: review.review_id,
       bundles: report.attempts.flatMap((attempt) => attempt.bundles),
       history: ticket.history,
+      declines: declinesOnRecord(report.attempts.map((attempt) => attempt.record)),
     })?.loop ?? NOTHING_TRIED;
 
   const findings: Finding[] = [...new Set(input.findings)].map((wanted) => {
@@ -183,7 +185,11 @@ export async function options(
   const handed: DecisionFinding[] = missing.map((finding) => ({
     rule_id: finding.rule_id,
     statement: finding.statement,
-    reason: finding.blocking_reason,
+    // The executor's own reasons for declining it (D-065) stand beside the
+    // reviewer's, as data inside the finding's delimited block.
+    reason: [finding.blocking_reason, ...(loop.declined.get(finding.key) ?? []).map((why) => `The executor declined it: ${why}`)]
+      .filter((part) => part.trim().length > 0)
+      .join("\n"),
     criterion: criteria.find((criterion) => criterion.id === finding.criterion_id) ?? null,
     file: finding.file,
     line: finding.line,

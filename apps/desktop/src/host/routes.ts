@@ -22,7 +22,7 @@ import {
 } from "./tickets/work.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
-import { objectsPath, verdictsPath } from "./repository/layout.js";
+import { attemptsPath, objectsPath, verdictsPath } from "./repository/layout.js";
 import { reviewOnRecord } from "./records.js";
 import { forgetCalledOff, recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
@@ -1025,6 +1025,7 @@ function loop(
             ticket,
             objectsDirectory: objectsPath(repo),
             verdictsPath: verdictsPath(repo),
+            attemptsPath: attemptsPath(repo, ticket.ticket_id),
           }),
           request.decisions,
         );

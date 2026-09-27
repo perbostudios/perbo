@@ -396,7 +396,8 @@ describe("a ticket's last review on record, and the questions it puts to the per
       ...(note === null ? [] : [{ at: "2026-09-27T12:53:04.517Z", from: "independent_review", to: "changes_requested", note }]),
     ];
     const verdictsPath = join(root, "verdicts.json");
-    return { bundles, objects, verdictsPath, ticket: { ticket_id: "ticket_1", history } as unknown as Ticket };
+    const attemptsPath = join(root, "attempts.json");
+    return { bundles, objects, verdictsPath, attemptsPath, ticket: { ticket_id: "ticket_1", history } as unknown as Ticket };
   }
   const asked = (input: ReturnType<typeof recorded>) =>
     questionsOnFiles({
@@ -404,6 +405,7 @@ describe("a ticket's last review on record, and the questions it puts to the per
       ticket: input.ticket,
       objectsDirectory: input.objects,
       verdictsPath: input.verdictsPath,
+      attemptsPath: input.attemptsPath,
     }) ?? [];
 
   it("says nothing either way where no review can be read, rather than that nothing is asked", () => {
@@ -415,6 +417,7 @@ describe("a ticket's last review on record, and the questions it puts to the per
         ticket: withoutReview.ticket,
         objectsDirectory: withoutReview.objects,
         verdictsPath: withoutReview.verdictsPath,
+        attemptsPath: withoutReview.attemptsPath,
       }),
     ).toBeNull();
   });
@@ -447,5 +450,69 @@ describe("a ticket's last review on record, and the questions it puts to the per
       }),
     );
     expect(asked(shipped).map((question) => question.id)).toEqual([alsoOpen]);
+  });
+});
+
+/**
+ * D-065 meets D-132, on PRB-20's records as the host reads them: the review
+ * routed two findings to the executor, its round closed one and declined the
+ * other with a reason, and the run ended escalated. The declined one is the
+ * person's question, with the executor's reason beside it and the three
+ * answers; the closed one is not.
+ */
+describe("a finding the executor declined, on the files the loop wrote", () => {
+  const [closing, declined] = ["a", "e"].map((digit) => digit.repeat(64)) as [string, string];
+  const REASON =
+    "A person must decide whether review should run `node --test tests/flappy.test.mjs` itself, which needs a CI job.";
+  it("is the one question, with the executor's reason and the three answers", () => {
+    const root = scratchDirectory();
+    const objects = join(root, "objects");
+    mkdirSync(objects, { recursive: true });
+    const finding = (key: string) => ({
+      key,
+      rule_id: "verification.execution_missing",
+      status: "open",
+      routing: "remediable",
+      closure: "executor",
+      statement: `Finding ${key.slice(0, 1)}.`,
+      blocking_reason: "",
+    });
+    const body = JSON.stringify({ review_id: "rev_23a5fd52e1b1d056", decision: "remediable", findings: [closing, declined].map(finding) });
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    writeFileSync(join(objects, sha256), body);
+    const manifest = (subject_id: string, created_at: string, inputs: Record<string, string>, artifacts: unknown[] = []) =>
+      ({ bundle_id: `bundle_${subject_id}`, kind: "review", subject_id, ticket_id: "ticket_1", created_at, inputs, artifacts }) as never;
+    const bundles = [
+      manifest("rev_23a5fd52e1b1d056", "2026-09-27T17:22:52.274Z", {}, [
+        { name: "review.json", sha256, bytes: Buffer.byteLength(body), retained: true },
+      ]),
+      manifest("cv_att_1475c2842fb5ae56", "2026-09-27T17:27:32.945Z", { findings_given: closing, findings_open: "" }),
+    ];
+    const attemptsPath = join(root, "attempts.json");
+    writeFileSync(
+      attemptsPath,
+      JSON.stringify({
+        ticket_id: "ticket_1",
+        attempts: [
+          { attempt_id: "att_dc9cf2f4bbabade7", created_at: "2026-09-27T17:18:09.500Z", declines: [] },
+          {
+            attempt_id: "att_1475c2842fb5ae56",
+            created_at: "2026-09-27T17:22:52.300Z",
+            declines: [{ finding_key: declined, reason: REASON }],
+          },
+        ],
+      }),
+    );
+    const history = [{ at: "2026-09-27T17:27:33.112Z", from: "independent_review", to: "changes_requested", note: "the gate closed: escalated" }];
+    const questions = questionsOnFiles({
+      bundles,
+      ticket: { ticket_id: "ticket_1", history } as unknown as Ticket,
+      objectsDirectory: objects,
+      verdictsPath: join(root, "verdicts.json"),
+      attemptsPath,
+    });
+    expect(questions?.map((question) => [question.id, question.declined, question.choices])).toEqual([
+      [declined, [REASON], ["approach", "let_it_decide", "ship_as_is"]],
+    ]);
   });
 });
