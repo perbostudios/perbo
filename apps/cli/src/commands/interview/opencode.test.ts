@@ -18,7 +18,7 @@ import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * The interview on OpenCode: what only this transport has
- * (D-NEW-opencode-is-a-provider). What all three share runs from
+ * (D-134). What all three share runs from
  * `index.test.ts` through `test-support/contract.ts`; here is `opencode acp`
  * itself — how it is started, the tool server the chat's tools are served on,
  * the turn a refusal ends and the one that follows it, and the resume —

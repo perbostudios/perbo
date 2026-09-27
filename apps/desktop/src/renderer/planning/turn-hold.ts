@@ -17,7 +17,7 @@ export function useChatTalking(workspace: Pick<Snapshot, "working">, sessionId: 
 /**
  * The state a reading of this planning is of now, and the state its last
  * reading was of, read from the host at the moment a confirm asks rather than
- * off this window's copies (D-NEW-basic-and-epic-flows). A turn's edits reach
+ * off this window's copies (D-138). A turn's edits reach
  * the host before it says the turn is over, and reach this window a round trip
  * later, so a confirm pressed the instant the turn ends compares the state the
  * turn left and never one read before its edits landed. Null where the

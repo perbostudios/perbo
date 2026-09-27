@@ -201,7 +201,7 @@ export function issueAuthoredAttempts(
           attempts.push({
             kind: rule.kind,
             what: rule.what,
-            // Whole: quoted evidence a person checks against the source (D-NEW-nothing-shown-is-cut).
+            // Whole: quoted evidence a person checks against the source (D-133).
             quote: line,
             line: segment.firstLine + index,
           });

@@ -8,7 +8,7 @@ import { answerAsk, EGRESS_RELAY_DIRECTORY, pendingAsks, relayEgress } from "./e
 const scratch = scratchDirectories("perbo-runner-");
 
 /**
- * The hook's half of the egress relay (D-NEW-an-unlisted-host-asks), driven
+ * The hook's half of the egress relay (D-137), driven
  * with its clock and its sleep in the test's hands: it holds the call until
  * the runner answers, refuses it itself where no answer comes by the deadline
  * — a hook the binary gave up on would let the call run — and refuses a call

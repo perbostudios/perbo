@@ -40,7 +40,7 @@ from anywhere but the user's own settings
 ([ADR-0030](../../docs/adr/0030-neutralise-repository-supplied-agent-configuration.md)). OpenCode
 reads not even those: its reviewer runs under directories of its own, holds no tool it can use, and
 answers in JSON the transport reads only whole, because ACP carries no output schema
-([D-NEW-opencode-is-a-provider](../../docs/11-open-decisions.md)).
+([D-134](../../docs/11-open-decisions.md)).
 
 ## How hard a model thinks
 

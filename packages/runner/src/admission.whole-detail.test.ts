@@ -3,7 +3,7 @@ import { judgeCommand } from "./admission.js";
 
 /**
  * What a refusal names as its target is the command it refused, whole
- * (D-NEW-nothing-shown-is-cut).
+ * (D-133).
  */
 
 const PAD = `PADDINGTOKEN${"x".repeat(240)}END`;

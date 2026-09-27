@@ -352,7 +352,7 @@ it("takes a principle with no finding answered as the host takes it", async () =
 }, 60_000);
 
 /**
- * D-NEW-publish-a-retained-branch-later: the merge press on a run that
+ * D-136: the merge press on a run that
  * retained its branch is a job in the exclusive lane on both, which records
  * the pull request it opened; and the sample refuses, as the CLI behind the
  * host does, a ticket with no retained branch to publish, in the rule's own

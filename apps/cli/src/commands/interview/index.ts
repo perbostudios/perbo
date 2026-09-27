@@ -822,7 +822,7 @@ function judgedInvocations(command: string, name: string, scope: WorktreeScope):
 /**
  * The three sessions the interview runs on: the person's own Claude Code
  * through the Claude Agent SDK, their own Codex through `codex app-server`
- * (D-102), and OpenCode through `opencode acp` (D-NEW-opencode-is-a-provider).
+ * (D-102), and OpenCode through `opencode acp` (D-134).
  */
 export const INTERVIEW_PROVIDERS = ["claude", "codex", "opencode"] as const;
 export type InterviewProvider = (typeof INTERVIEW_PROVIDERS)[number];

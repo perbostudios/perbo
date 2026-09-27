@@ -17,7 +17,7 @@ import { optionsCommandLine } from "./options.js";
 
 /**
  * `perbo options`: the Architect's answers to the findings a ticket's last
- * review left for a person (D-NEW-decision-options), and the record that keeps
+ * review left for a person (D-135), and the record that keeps
  * them for that review so asking again spends nothing.
  *
  * Nothing here calls a model. The reading is a scripted double, and the one

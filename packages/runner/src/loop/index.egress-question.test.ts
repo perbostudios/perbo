@@ -15,7 +15,7 @@ const scratch = scratchDirectories("perbo-runner-");
 const RUN_BEFORE = [{ started_at: "2026-01-01T00:00:00.000Z" }];
 
 /**
- * The question end to end, as a run asks it (D-NEW-an-unlisted-host-asks):
+ * The question end to end, as a run asks it (D-137):
  * the executor's call is held by the write guard's hook, the run records the
  * question on the ticket and prints it, a person answers it on the ticket's
  * record — as `perbo verdict --egress` does — and the same attempt carries on

@@ -43,7 +43,7 @@ const SETTLE_INTERVAL_MS = 50;
  */
 const LISTING_MAX_BYTES = 64 * 1024 * 1024;
 
-/** Commands named in the progress line, each whole (D-NEW-nothing-shown-is-cut); the rest are counted. */
+/** Commands named in the progress line, each whole (D-133); the rest are counted. */
 const NAMED_IN_PROGRESS = 5;
 
 interface RunningProcess {

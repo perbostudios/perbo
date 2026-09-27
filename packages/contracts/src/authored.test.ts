@@ -83,7 +83,7 @@ describe("issueAuthoredAttempts", () => {
     ]);
   });
 
-  it("quotes the line whole, however long it runs (D-NEW-nothing-shown-is-cut)", () => {
+  it("quotes the line whole, however long it runs (D-133)", () => {
     const long = `You must ${"x".repeat(400)}`;
     const [attempt] = issueAuthoredAttempts(long).attempts;
     expect(attempt?.quote).toBe(long);

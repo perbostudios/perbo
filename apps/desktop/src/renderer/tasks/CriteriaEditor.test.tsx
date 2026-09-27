@@ -48,7 +48,7 @@ function Harness({
 
 const held = (): string => screen.getByRole("status", { name: "Criteria held" }).textContent ?? "";
 
-describe("the criteria a contract is edited with (D-NEW-basic-and-epic-flows)", () => {
+describe("the criteria a contract is edited with (D-138)", () => {
   it("rewords a criterion and tells the caller, which writes it through", () => {
     const onCommit = vi.fn();
     render(<Harness criteria={["The importer is removed.", "Its routes answer 404."]} onCommit={onCommit} />);
@@ -87,7 +87,7 @@ describe("the criteria a contract is edited with (D-NEW-basic-and-epic-flows)", 
   });
 
   // Held to the limit where it is typed, from the constant the schema reads,
-  // so what is typed is never refused when saved (D-NEW-nothing-shown-is-cut).
+  // so what is typed is never refused when saved (D-133).
   it("holds a criterion and its assertion to what a criterion holds where they are typed, and saves them whole", () => {
     const onCommit = vi.fn();
     const drafts: EditingForm["draft"][] = [];

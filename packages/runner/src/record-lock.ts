@@ -20,7 +20,7 @@ import { z } from "zod";
  * Two records are changed by reading them, adding to them and writing them
  * back, by more than one process at once: `verdicts.json`, which `perbo
  * verdict` commands over different tickets write side by side (D-049), and a
- * ticket's egress questions (D-NEW-an-unlisted-host-asks), which the run
+ * ticket's egress questions (D-137), which the run
  * appends to and closes and `perbo verdict --egress` answers — from a
  * terminal and from the desktop's press. Two such changes at once would each
  * start from the file before the other wrote, and one would be lost. So the

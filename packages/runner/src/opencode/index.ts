@@ -185,7 +185,7 @@ export function opencodeDecision(call: AcpToolCall, state: PreToolGuardState): O
 }
 
 /**
- * The executor on OpenCode, through `opencode acp` (D-NEW-opencode-is-a-provider).
+ * The executor on OpenCode, through `opencode acp` (D-134).
  *
  * OpenCode runs its own tools under the executor's permission rules, which ask
  * about every command, every file change and every call reaching outside the
@@ -341,7 +341,7 @@ export async function runOpenCodeAgent(request: AgentRequest): Promise<AgentResu
       if (writes.length > 0) writtenBy.set(entry, writes);
     }
     // On one line, whole: a command's own newline would otherwise print a line
-    // that reads as one of the run's stages (D-NEW-nothing-shown-is-cut).
+    // that reads as one of the run's stages (D-133).
     progress(`OpenCode ${oneLine(entry.detail)}`);
     return entry;
   };
@@ -359,7 +359,7 @@ export async function runOpenCodeAgent(request: AgentRequest): Promise<AgentResu
 
   /**
    * An admitted command naming hosts off the list, held while each is settled
-   * through the gate (D-NEW-an-unlisted-host-asks). Without a gate the host is
+   * through the gate (D-137). Without a gate the host is
    * refused and the attempt ends `unlisted_egress_host`, as on every adapter.
    */
   const settleEgress = async (entry: CommandRecord, command: string, hosts: readonly string[]): Promise<boolean> => {

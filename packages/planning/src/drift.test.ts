@@ -149,7 +149,7 @@ describe("readDrift", () => {
     expect(result.model.turns).toBe(2);
   });
 
-  it("hands a report whose words run past a field back to be condensed, rather than cut (D-NEW-nothing-shown-is-cut)", async () => {
+  it("hands a report whose words run past a field back to be condensed, rather than cut (D-133)", async () => {
     const long = { findings: [{ ...finding, difference: "The spec and the plan part here. ".repeat(30) }] };
     const model = scriptedDrafter([submits(long), submits({ findings: [finding] })]);
     const result = await readDrift({ spec, plan, model });
@@ -166,7 +166,7 @@ describe("readDrift", () => {
     expect(stubborn.requests).toHaveLength(3);
   });
 
-  it("measures a field as it is shown, so one that redaction lengthens past its length is asked for again, not failed or cut (D-NEW-nothing-shown-is-cut)", async () => {
+  it("measures a field as it is shown, so one that redaction lengthens past its length is asked for again, not failed or cut (D-133)", async () => {
     // An eight-character credential is written as the ten of `[redacted]`.
     const env = { PERBO_TEST_TOKEN: "hunter2x" };
     const said = "The spec and the plan part here over hunter2x.";

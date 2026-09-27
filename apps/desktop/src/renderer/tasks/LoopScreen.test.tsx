@@ -133,7 +133,7 @@ describe("the three answers a question takes", () => {
     expect(decision).toMatchObject({ choice: "approach", answer: "Park it on the dead-letter queue." });
   });
 
-  it("holds a typed approach to the room the answer leaves where it is typed, and sends it whole without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+  it("holds a typed approach to the room the answer leaves where it is typed, and sends it whole without a refusal (D-133)", async () => {
     let held = "";
     const request = await sent(() => {
       const dialog = screen.getByRole("dialog", { name: "Decisions required" });
@@ -576,7 +576,7 @@ describe("the strip of commands, spend and files", () => {
   });
 });
 
-describe("the Architect's answers on the decision card (D-NEW-decision-options)", () => {
+describe("the Architect's answers on the decision card (D-135)", () => {
   const offered = [
     { text: "Drop a permanently failed email after the last retry and log it.", recommended: false },
     { text: "Park a permanently failed email on the dead-letter queue and alert on-call.", recommended: true },

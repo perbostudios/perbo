@@ -129,7 +129,7 @@ export function StoppedScreen(context: TaskContext) {
       .then((opened) => {
         // Into the planning over the new plan, on the page that holds it: an
         // epic's Graph, a basic ticket's contract
-        // (D-NEW-basic-and-epic-flows).
+        // (D-138).
         navigate(draftedLanding(opened));
         settle(release);
       })

@@ -3,7 +3,7 @@ import { interviewGuardState, judgeInterviewCall } from "./index.js";
 
 /**
  * The command the interview's guard refused is named whole, as its target and
- * in its reason (D-NEW-nothing-shown-is-cut): it is tool output the person
+ * in its reason (D-133): it is tool output the person
  * reads to know what the Architect was refused.
  */
 

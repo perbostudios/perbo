@@ -538,7 +538,7 @@ it("lands a plan Start over drafts with none of the problems of the plan it repl
   expect(readingsOf(key)).toHaveLength(before);
 });
 
-it("tries a reading again until it runs, and stops trying once it is cancelled, landing nothing (D-NEW-basic-and-epic-flows)", async () => {
+it("tries a reading again until it runs, and stops trying once it is cancelled, landing nothing (D-138)", async () => {
   const { id, key } = await draftedFromSpec("reading-cancelled-between-tries", [
     "A signup queues exactly one email.",
     "A failed send is retried once.",
@@ -569,7 +569,7 @@ it("tries a reading again until it runs, and stops trying once it is cancelled, 
   }
 });
 
-it("records what the try that ran found, where the spec could not be read on the first (D-NEW-basic-and-epic-flows)", async () => {
+it("records what the try that ran found, where the spec could not be read on the first (D-138)", async () => {
   const slug = "reading-readable-later";
   const { id, key } = await draftedFromSpec(slug, [
     "A signup queues exactly one email.",

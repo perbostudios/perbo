@@ -525,7 +525,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       const saved = saveSpec(m.planDeps, repo, request);
       // The picker and the title bar name the planning by its spec's title,
       // and its contract stays a tab while its spec's sections do
-      // (D-NEW-basic-and-epic-flows), all read
+      // (D-138), all read
       // off the drafts list: a save that landed has that list read again.
       if (saved.conflicting.length === 0)
         m.changes.changed(false, { kind: "editing", sessionId: request.id });
@@ -589,7 +589,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         { repo, key: request.key, kind: request.kind, label: "Open the pull request" },
         async (job, run) => {
           // The merge press on a ticket whose run retained its branch
-          // (D-NEW-publish-a-retained-branch-later): the CLI pushes it and
+          // (D-136): the CLI pushes it and
           // opens its pull request, holding the person's credential as a run
           // does, under the configuration a run of this ticket is given with
           // publishing on — a person merges, whatever the repository says.
@@ -631,7 +631,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     ),
     run: scoped<"run">((repo, request) => loop(m, repo, request)),
     decide: scoped<"decide">((repo, request) => loop(m, repo, request)),
-    // D-NEW-decision-options: answered here rather than as a job, so it holds
+    // D-135: answered here rather than as a job, so it holds
     // nothing a decision or a run waits on; the card offers the typed field
     // while it is asked.
     decisionOptions: scoped<"decisionOptions">((repo, request) =>
@@ -647,7 +647,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         request.findings,
       ),
     ),
-    // D-NEW-an-unlisted-host-asks: the question a live run is waiting on,
+    // D-137: the question a live run is waiting on,
     // answered directly and never as a job — the run holds the ticket's lane,
     // and it is the run that acts on the answer, reading it off the ticket's
     // record. The CLI refuses a question already answered, one whose window
@@ -937,7 +937,7 @@ async function replan(
   // The plan drafted here was read by its drafting, as one Generate plan
   // drafts is (D-128): recorded as read at the state it was drafted at, so its
   // first confirm unchanged reads nothing again, and a criterion edited first
-  // is what the confirm's reading judges (D-NEW-basic-and-epic-flows).
+  // is what the confirm's reading judges (D-138).
   const drafted = draftedReading((id) => m.registry.lookup(id), m.editing.read(opened.id));
   if (drafted !== null) m.editing.recordRead(opened.id, drafted);
   return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
@@ -980,7 +980,7 @@ function loop(
           false);
   // Refused, before anything starts, while a planning over the ticket records
   // problems open: an open problem holds approving for either shape, and the
-  // pages are not the only way to ask (D-NEW-basic-and-epic-flows). And while
+  // pages are not the only way to ask (D-138). And while
   // the chat on one owes the person a turn, which may still be moving the plan
   // approving would freeze (D-102).
   if (request.kind === "run" && request.approve) {

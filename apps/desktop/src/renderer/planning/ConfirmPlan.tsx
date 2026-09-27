@@ -24,7 +24,7 @@ type Editor = ReturnType<typeof useContractEditing>;
  * It goes where {@link confirmRoute} says every way from the plan to the
  * contract goes, and says what it confirms: an epic's plan, through the
  * reading of it against the spec, or a basic ticket's contract, whose plan is
- * its contract and whose confirm there reads it (D-NEW-basic-and-epic-flows).
+ * its contract and whose confirm there reads it (D-138).
  *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are

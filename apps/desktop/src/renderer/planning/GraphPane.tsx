@@ -569,7 +569,7 @@ const ZOOM_MAX = 2.5;
  *
  * Read-only on the contract, where the graph is read and not curated: it pans
  * and zooms, and nothing on it selects, draws or removes
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  */
 function Canvas({
   view,
@@ -943,7 +943,7 @@ function Node({
 /**
  * The plan's graph on the contract of an epic, in place of the criteria list:
  * read, panned and zoomed, and changed only on the Graph pane
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  */
 export function ContractGraph({ repoId, ticketKey }: { repoId: string; ticketKey: string }) {
   const graph = useGraph(repoId, ticketKey);

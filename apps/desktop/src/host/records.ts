@@ -226,7 +226,7 @@ export function readLatestDraftEdit(path: string, by: InterviewEdit["author"]): 
     n: at + 1,
     author: last.author,
     // Whole: a `set_node_paths` summary carries every glob it was given, and
-    // the conversation line holds it all (D-NEW-nothing-shown-is-cut).
+    // the conversation line holds it all (D-133).
     summary,
     undone: last.undone,
     undoes: last.undoes,

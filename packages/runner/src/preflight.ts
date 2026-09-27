@@ -246,7 +246,7 @@ function checkCodexVersion(
 /**
  * An OpenCode below {@link OPENCODE_MIN_VERSION}, or one whose version cannot
  * be read, is refused: the guarantees an OpenCode role keeps were measured on
- * that build's ACP server (D-NEW-opencode-is-a-provider). And where no
+ * that build's ACP server (D-134). And where no
  * `OPENCODE_API_KEY` is set, a person is told once that OpenCode runs only its
  * free models, which is a choice and not a fault.
  */

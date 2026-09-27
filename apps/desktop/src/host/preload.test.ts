@@ -26,7 +26,7 @@ beforeAll(async () => {
 
 /**
  * Why the editor could not save before the window closed reaches the host
- * whole (D-NEW-nothing-shown-is-cut): it is what the person is told.
+ * whole (D-133): it is what the person is told.
  */
 describe("the editor's answer to a close", () => {
   it("carries the whole reason a save failed", async () => {

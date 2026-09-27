@@ -1756,7 +1756,7 @@ describe("the denials of an attempt that ended without changes", () => {
 });
 
 /**
- * What `inspect` prints a person is never cut (D-NEW-nothing-shown-is-cut):
+ * What `inspect` prints a person is never cut (D-133):
  * text longer than its column goes under it, wrapped, and every word of it is
  * there. Each value here is longer than any column the card gives it.
  */

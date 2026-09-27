@@ -203,7 +203,7 @@ describe("the two answers every part carries", () => {
     expect(radio(/Something else/).checked).toBe(false);
   });
 
-  it("holds the person's own words to what a turn carries, where they are typed, and sends them whole without a refusal (D-NEW-nothing-shown-is-cut)", () => {
+  it("holds the person's own words to what a turn carries, where they are typed, and sends them whole without a refusal (D-133)", () => {
     const sent: string[] = [];
     render(
       <QuestionCard group={group} number={1} of={1} standing="interview" busy={false} onSend={(turn) => sent.push(turn)} />,
@@ -364,7 +364,7 @@ describe("what the asked line says the questions are about", () => {
   });
 });
 
-describe("a note about a tool's output (D-NEW-nothing-shown-is-cut)", () => {
+describe("a note about a tool's output (D-133)", () => {
   it("says what happened in its one sentence, with the whole output behind an i", () => {
     const stderr = "the provider said a great deal about why it would not serve this session. ".repeat(1_000).trim();
     render(<NoteLine line={{ kind: "note", text: "The chat stopped with code 2.", output: stderr }} />);

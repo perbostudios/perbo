@@ -3,7 +3,7 @@ import { DraftModelRecordSchema } from "./model-record.js";
 
 /**
  * The shape of the answers the Architect offers to a finding a review routed
- * to a person (D-NEW-decision-options), kept apart from the reading itself so
+ * to a person (D-135), kept apart from the reading itself so
  * the desktop's renderer can hold them without loading a model transport: this
  * file touches no file system and no provider.
  */

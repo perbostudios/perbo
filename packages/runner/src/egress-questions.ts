@@ -15,7 +15,7 @@ import { withRecordLock } from "./record-lock.js";
 
 /**
  * One ticket's egress questions on disk, `<store>/state/<ticket id>.egress.json`
- * (D-NEW-an-unlisted-host-asks).
+ * (D-137).
  *
  * More than one process changes it: the run appends a question and closes one
  * it stopped waiting on, and `perbo verdict --egress` writes the answer — from
@@ -162,7 +162,7 @@ function answerUnderLock(args: Parameters<typeof answerEgressQuestion>[0]): Egre
 
 /**
  * Add one host to a repository's `network_allow_list` in `.perbo/config.json`
- * (D-NEW-an-unlisted-host-asks, D-035): the person's allow, written by the
+ * (D-137, D-035): the person's allow, written by the
  * runner. The host is refused unless it is a plain host name, by the same
  * schema a run reads the list with (ADR-0023), and the rest of the file —
  * every other key, `_comment` keys included, in its order — is kept. The file

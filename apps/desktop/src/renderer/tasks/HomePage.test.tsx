@@ -89,7 +89,7 @@ describe("the archive's cost column", () => {
   });
 });
 
-describe("the search a person types (D-NEW-nothing-shown-is-cut)", () => {
+describe("the search a person types (D-133)", () => {
   it("is held to what an archive search holds where it is typed, on Home and in the archive, and exports without a refusal", async () => {
     const { workspace } = archived(null);
     const sent: Request[] = [];
@@ -212,7 +212,7 @@ describe("a Home card", () => {
     for (const name of ["Ticket 0 merged", "Ticket 1 executing"])
       expect(card(name).querySelector(".task-card-outcome")!.textContent).toBe("\u00a0");
     // Whole, wrapping onto more lines at the card's other end rather than cut
-    // short there (D-NEW-nothing-shown-is-cut).
+    // short there (D-133).
     const rule = /\.task-card-description > \.task-card-outcome \{([^}]*)\}/.exec(
       readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"),
     )?.[1];

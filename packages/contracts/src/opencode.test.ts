@@ -9,7 +9,7 @@ import {
   opencodeVersionFits,
 } from "./opencode.js";
 
-describe("how every role starts OpenCode (D-NEW-opencode-is-a-provider)", () => {
+describe("how every role starts OpenCode (D-134)", () => {
   it("asks about every command, file change and reach outside, and denies every other tool, for the executor and the chat", () => {
     for (const role of ["executor", "interview"] as const) {
       const rules = opencodePermissions(role, ["read_plan"]);

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 /**
  * A stand-in for `opencode acp`, answering the Agent Client Protocol the way
- * OpenCode 2.0.14 was measured to (D-NEW-opencode-is-a-provider).
+ * OpenCode 2.0.14 was measured to (D-134).
  *
  * Each `session/prompt` plays the next entry of `turns`, in order. A `say` is
  * an `agent_message_chunk` of the message it names; a `call` announces a tool

@@ -54,7 +54,7 @@ export const completedLabel = (count: number): string => `${count} completed`;
  * header's counts and the rail's Home badge all read: yellow where the loop
  * paused for the person — a finding waits on their answer, the run just ended
  * on a verdict for them, or a live run waits on their answer about a host off
- * the allow-list (D-NEW-an-unlisted-host-asks); red only where the loop
+ * the allow-list (D-137); red only where the loop
  * stopped on an error or because the person stopped it, and will not reach the
  * end on its own; green where the journey ended — a pull request opened,
  * merged or closed without merge, or a local run finished with no pull request
@@ -331,7 +331,7 @@ export function projectTicket(
   if (requested === "output") screen = "output";
   // The merge screen follows the review whatever the ticket holds: it merges
   // the pull request, opens it first where the run retained its branch, or
-  // says why neither (D-NEW-publish-a-retained-branch-later). Calling a merge
+  // says why neither (D-136). Calling a merge
   // off needs a pull request to leave open.
   else if (requested === "merge") screen = "merge";
   else if (requested === "called-off") screen = ticket.delivery.pull_request_url ? "called-off" : "review";

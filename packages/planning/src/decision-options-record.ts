@@ -7,7 +7,7 @@ import { PlanningError } from "./errors.js";
 /**
  * `<KEY>.options.json` on disk: the one reader and the one writer of the
  * answers the Architect offered to a review's findings
- * (D-NEW-decision-options), so reopening the decision page reads them back
+ * (D-135), so reopening the decision page reads them back
  * rather than spending again. `store` is the repository's `.perbo` directory;
  * the record's place under it is `decisionOptionsPath`'s.
  */

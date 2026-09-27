@@ -33,7 +33,7 @@ interface RunEgressQuestionsArgs {
 }
 
 /**
- * One run's egress questions (D-NEW-an-unlisted-host-asks).
+ * One run's egress questions (D-137).
  *
  * An unlisted host the executor names on a call the runner holds is put to a
  * person, and the attempt waits on the answer rather than stopping. The rules

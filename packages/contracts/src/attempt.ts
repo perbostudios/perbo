@@ -624,7 +624,7 @@ export const ExecutionAttemptSchema = z.strictObject({
    * The findings this attempt declined (D-065), recorded at the seal: empty
    * where it declined none, which is every round that was handed no finding.
    * The pull request a retained branch is published with lists them as the run
-   * that made them would have (D-NEW-publish-a-retained-branch-later). Absent
+   * that made them would have (D-136). Absent
    * where the record does not say what the attempt declined, which is not the
    * same fact as declining nothing.
    */

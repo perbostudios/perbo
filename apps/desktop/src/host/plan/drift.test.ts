@@ -211,12 +211,12 @@ describe("a reading owed that could not be started", () => {
     });
     await drift.reread("s-1");
     expect(reason.length).toBeGreaterThan(2000);
-    // One sentence, and why behind its `i`, whole (D-NEW-nothing-shown-is-cut).
+    // One sentence, and why behind its `i`, whole (D-133).
     expect(said).toEqual([{ kind: "note", text: `${REREAD_COULD_NOT_START}.`, output: reason }]);
   });
 });
 
-describe("a reading that does not run (D-NEW-basic-and-epic-flows)", () => {
+describe("a reading that does not run (D-138)", () => {
   const down = (): Error => new Error("perbo drift exited with code 1: No credential for Claude.");
 
   it("is run again after 2, 4 and 8 seconds, and fails its job with the last error once all four tries have failed", async () => {
@@ -269,7 +269,7 @@ describe("a re-read owed once a turn ends", () => {
     // The re-read after an answer on the Problems pane is a reading like any
     // other: a basic ticket's Confirm contract after it compares the state it
     // is at with this reading's and reads nothing again
-    // (D-NEW-basic-and-epic-flows).
+    // (D-138).
     const { drift, answer, ran, recorded, asked } = readings();
     answer([]);
     await drift.reread("s-1");
@@ -292,7 +292,7 @@ describe("a turn's end with no problem open", () => {
   });
 });
 
-describe("a reading the plan was drafted again under (D-NEW-basic-and-epic-flows)", () => {
+describe("a reading the plan was drafted again under (D-138)", () => {
   it("lands nothing and records no state once Generate plan or Start over replaced the plan it read", async () => {
     const planning = { ...session, drift: null, operation: { id: "op-1", intent: "generate" } } as unknown as EditingSession;
     const { drift, landed, recorded, answer, ran } = readings({ session: planning });

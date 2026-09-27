@@ -61,7 +61,7 @@ export function specPath(repo: RegisteredRepository, slug: string): string {
  * Each spec as its file states it, by repository id and slug — its title and
  * its five sections — for the drafts list to name a planning by and to say
  * whether its spec has moved since the contract was reached
- * (D-NEW-basic-and-epic-flows): null where the
+ * (D-138): null where the
  * repository or the file has gone or the file cannot be read.
  */
 export function specTexts(repository: (id: string) => RegisteredRepository): SpecReader {

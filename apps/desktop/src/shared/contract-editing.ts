@@ -144,7 +144,7 @@ export const REREAD_COULD_NOT_START = "The plan could not be read against the sp
  * its spec; null where none does. Both hosts refuse a `run` that approves by
  * it, for an epic as for a basic ticket, so the hold the pages keep is not
  * the renderer's alone: the only ways past a problem are answering it on the
- * Problems page or changing the plan (D-NEW-basic-and-epic-flows).
+ * Problems page or changing the plan (D-138).
  */
 export function problemsHoldApproval(
   records: readonly EditingSession[],
@@ -207,7 +207,7 @@ export const turnMark = (session: EditingSession, working: boolean): TurnMark =>
  * Whether the plan was drafted again — Generate plan or Start over pressed —
  * since a reading that started at `mark`: what it read is a plan that has
  * gone, and a plan the model drafts from its spec is not read as it lands,
- * so both hosts record nothing of it (D-NEW-basic-and-epic-flows).
+ * so both hosts record nothing of it (D-138).
  */
 export const redraftedSince = (mark: TurnMark, session: EditingSession): boolean => {
   const operation = session.operation;
@@ -374,7 +374,7 @@ export function fingerprint(text: string): string {
  * what the reading reads and all it reads of the plan (D-128). While it is the
  * state recorded as the last reading's (`read`), nothing that reading judged
  * has moved, and a basic ticket's Confirm contract needs no reading of its own
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  */
 export function readingState(
   spec: string | null,
@@ -401,7 +401,7 @@ export function readingStateOf(record: EditingSession, spec: SpecReader): string
  * on the snapshot, each reading a spec from where it keeps specs (`spec`,
  * null where there is none): its title, none while the spec has no title line
  * (D-118), and a fingerprint of its sections, which is the spec's part of the
- * state the contract was reached at (D-NEW-basic-and-epic-flows).
+ * state the contract was reached at (D-138).
  */
 export function openDrafts(records: readonly EditingSession[], spec: SpecReader): OpenDraft[] {
   return records
@@ -436,7 +436,7 @@ export function openDrafts(records: readonly EditingSession[], spec: SpecReader)
 /**
  * A title on one line, as the spec's title line and a ticket's name hold it:
  * folded, never cut. One past a ticket name's cap is renamed or refused at
- * admission (D-127), and nothing shown is cut (D-NEW-nothing-shown-is-cut).
+ * admission (D-127), and nothing shown is cut (D-133).
  */
 const oneLineTitle = (title: string): string => title.replace(/\s+/g, " ").trim();
 
@@ -872,7 +872,7 @@ export class ContractEditing {
    * Write down that the person is now on this planning's contract, which is
    * where the planning reopens (D-130),
    * and the state they reached it at, which keeps the contract a tab of the
-   * planning until that state moves (D-NEW-basic-and-epic-flows),
+   * planning until that state moves (D-138),
    * as {@link visit} writes a pane: no revision moves, and a discarded
    * planning records nothing.
    */
@@ -888,7 +888,7 @@ export class ContractEditing {
 
   /**
    * How many paths the impact check of this planning's draft just found
-   * outside its scope (D-NEW-basic-and-epic-flows).
+   * outside its scope (D-138).
    * Leaves `revision` where it stands, as {@link visit} does: a check puts
    * nothing into the planning.
    */
@@ -902,7 +902,7 @@ export class ContractEditing {
 
   /**
    * The state of the spec and the plan's promise a reading of the two has just
-   * landed of (D-NEW-basic-and-epic-flows). Leaves `revision` where it
+   * landed of (D-138). Leaves `revision` where it
    * stands, as {@link recordImpact} does: a reading puts nothing into the
    * planning.
    */
@@ -1339,7 +1339,7 @@ export class ContractEditing {
               // wrote, where that still holds, so its first confirm unchanged
               // reads nothing again, and the problems a reading found in the
               // plan it replaces go with that plan, so it never lands on
-              // Problems (D-NEW-basic-and-epic-flows).
+              // Problems (D-138).
               if (operation.intent !== "compile") {
                 next.impact = null;
                 next.read = this.io.drafted?.(next) ?? null;

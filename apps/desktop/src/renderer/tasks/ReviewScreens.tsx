@@ -684,7 +684,7 @@ export function MergeScreen(context: TaskContext) {
     setChecks([]);
   };
   // No pull request yet: the branch the run retained, which the press
-  // publishes first, or why there is none (D-NEW-publish-a-retained-branch-later).
+  // publishes first, or why there is none (D-136).
   const retained = url ? null : retainedBranch(ticket);
   const publishing = jobs.filter((job) => job.kind === "publish").at(-1);
   const publishingNow = publishing !== undefined && isLive(publishing);

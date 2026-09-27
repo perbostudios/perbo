@@ -204,7 +204,7 @@ const CODEX_NETWORK_ALLOW_LIST = [
 /**
  * What an OpenCode executor reaches in place of Anthropic's hosts: OpenCode
  * Zen, which serves every model an OpenCode role is let call, and the model
- * catalogue OpenCode reads as it starts (D-NEW-opencode-is-a-provider).
+ * catalogue OpenCode reads as it starts (D-134).
  */
 const OPENCODE_NETWORK_ALLOW_LIST = [
   "opencode.ai",

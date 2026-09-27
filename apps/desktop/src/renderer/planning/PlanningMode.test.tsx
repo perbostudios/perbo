@@ -219,7 +219,7 @@ describe("Create in the rail (SCP-334)", () => {
     const panes = screen.getByRole("group", { name: "Planning panes" });
     expect(within(panes).getByRole("button", { name: "Spec" }).getAttribute("aria-current")).toBe("page");
     // No plan yet, so nothing measured against one: the Spec and the files
-    // it is written against (D-NEW-basic-and-epic-flows).
+    // it is written against (D-138).
     expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await screen.findByRole("heading", { name: /Hi, / });
@@ -492,7 +492,7 @@ describe("clicking away from a planning nothing was put into (D-129)", () => {
     location.hash = `planning/${opened.id}/graph`;
     mount();
     await screen.findByLabelText("Message the chat");
-    // Held to what a turn carries where it is typed (D-NEW-nothing-shown-is-cut).
+    // Held to what a turn carries where it is typed (D-133).
     const box = screen.getByLabelText("Message the chat") as HTMLTextAreaElement;
     typeInto(box, "m".repeat(TYPED_TEXT_MAX_CHARS + 50));
     expect(box.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
@@ -1978,7 +1978,7 @@ describe("the Spec pane (SCP-336)", () => {
     // drafter divides this spec into two nodes, so the plan has a graph and
     // the graph is where the person goes. Work it does not divide lands where
     // its checks say, with a pop-up saying the task is simple; a divided plan
-    // has its graph, and no pop-up (D-NEW-basic-and-epic-flows).
+    // has its graph, and no pop-up (D-138).
     await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/), {
       timeout: 5000,
     });
@@ -2363,7 +2363,7 @@ describe("the Graph pane (SCP-316)", () => {
       const inspector = await screen.findByRole("region", { name: "Node node_1" });
       const node = (await graphOf(plan)).nodes.find((each) => each.id === "node_1")!;
       // The card reads out the title, under it how many criteria it covers
-      // and its paths (D-NEW-basic-and-epic-flows),
+      // and its paths (D-138),
       // and each criterion and how it is proven; the inspector changes them.
       expect(card.textContent).toContain(node.title);
       for (const criterion of node.criteria) {
@@ -3335,7 +3335,7 @@ describe("the Graph pane (SCP-316)", () => {
     mount();
     // Work with nothing to divide has no graph to curate, and its plan is the
     // criteria its contract shows: the rail offers no Graph and no pane of
-    // the criteria's own (D-NEW-basic-and-epic-flows).
+    // the criteria's own (D-138).
     await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
     const panes = screen.getByRole("group", { name: "Planning panes" });
     await waitFor(() => expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull());
@@ -3357,7 +3357,7 @@ describe("the Graph pane (SCP-316)", () => {
     fireEvent.click(next);
     // Straight to the contract: a basic ticket's plan is read against its
     // spec at the contract's own confirm, not on the way there
-    // (D-NEW-basic-and-epic-flows).
+    // (D-138).
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
     expect(await readings()).toBe(before);
     expect((await detail()).ticket.approved_at).toBeNull();
@@ -3459,7 +3459,7 @@ describe("the Graph pane (SCP-316)", () => {
       return plan;
     }
 
-    it("reads nothing on a later arrival at Problems where a confirm's route ended elsewhere (D-NEW-basic-and-epic-flows)", async () => {
+    it("reads nothing on a later arrival at Problems where a confirm's route ended elsewhere (D-138)", async () => {
       const plan = await parted();
       const readings = async () =>
         (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
@@ -3821,7 +3821,7 @@ describe("the Graph pane (SCP-316)", () => {
       return approve;
     }
 
-    it("refuses to approve an epic while a problem is open, reached by its contract's own address, starting nothing (D-NEW-basic-and-epic-flows)", async () => {
+    it("refuses to approve an epic while a problem is open, reached by its contract's own address, starting nothing (D-138)", async () => {
       const plan = await problems();
       const approve = await contractByAddress(plan);
       const sent = vi.spyOn(bridge, "request");
@@ -3836,7 +3836,7 @@ describe("the Graph pane (SCP-316)", () => {
       }
     });
 
-    it("refuses the approve binding on an epic's contract while a problem is open, starting nothing (D-NEW-basic-and-epic-flows)", async () => {
+    it("refuses the approve binding on an epic's contract while a problem is open, starting nothing (D-138)", async () => {
       const plan = await problems();
       await contractByAddress(plan);
       const sent = vi.spyOn(bridge, "request");
@@ -3852,7 +3852,7 @@ describe("the Graph pane (SCP-316)", () => {
       }
     });
 
-    it("reads an epic's plan that moved since the last reading before approving it, by way of the Problems pane (D-NEW-basic-and-epic-flows)", async () => {
+    it("reads an epic's plan that moved since the last reading before approving it, by way of the Problems pane (D-138)", async () => {
       const plan = await planned();
       // Drafted, and recorded as read at the state it was drafted at.
       await waitFor(async () => expect((await editingRead(plan.id)).read).not.toBeNull());
@@ -6791,7 +6791,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
 describe("the Impact pane (SCP-320)", () => {
   /**
    * A pane by its address. Impact is in the rail only once there is a plan
-   * (D-NEW-basic-and-epic-flows), and what
+   * (D-138), and what
    * the pane does is the same either way, so these cases reach it directly.
    */
   const openPane = async (name: string): Promise<void> => {
@@ -6998,7 +6998,7 @@ describe("the Impact pane (SCP-320)", () => {
   it("is not in the rail before there is a plan, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
     // No plan has been drafted here, so there is nothing to measure impact
-    // against, and the rail does not offer it (D-NEW-basic-and-epic-flows).
+    // against, and the rail does not offer it (D-138).
     expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     // Opening the pane reads nothing: the answer is a parse of the whole tree.
     expect(document.querySelector(".pane-head .sub")!.textContent).toContain("not checked yet");
@@ -8134,7 +8134,7 @@ describe("the one piece of work a page is about: its name, its row in the picker
     expect(document.querySelector(".titlebar-name")).toBeNull();
   });
 
-  it("opens a plan's contract as the planning's contract tab until it is approved, its other tabs going back into the planning (D-130, D-NEW-basic-and-epic-flows)", async () => {
+  it("opens a plan's contract as the planning's contract tab until it is approved, its other tabs going back into the planning (D-130, D-138)", async () => {
     const plan = await ticketPlanning("A billing page in tabs");
     location.hash = `task/${plan.repoId}/${plan.key}/contract`;
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
@@ -8171,7 +8171,7 @@ describe("the one piece of work a page is about: its name, its row in the picker
   });
 });
 
-describe("what a person types while planning is held where they type it (D-NEW-nothing-shown-is-cut)", () => {
+describe("what a person types while planning is held where they type it (D-133)", () => {
   it("holds the question's answer to what a turn carries, and sends it without a refusal", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -8210,7 +8210,7 @@ describe("what a person types while planning is held where they type it (D-NEW-n
   });
 });
 
-describe("the chat's header (D-NEW-opencode-is-a-provider)", () => {
+describe("the chat's header (D-134)", () => {
   it("names the provider the planning drafts with, OpenCode included", async () => {
     const before = (await sampleBridge.request({ kind: "snapshot" })).settings;
     try {

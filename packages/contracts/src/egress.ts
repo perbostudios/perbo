@@ -4,7 +4,7 @@ import { escaped, unescaped } from "./spoken.js";
 
 /**
  * An unlisted host the executor named, put to a person as a question while
- * the attempt waits (D-NEW-an-unlisted-host-asks).
+ * the attempt waits (D-137).
  *
  * Three readers agree on it: the runner, which asks and waits; `perbo verdict
  * --egress`, which records the answer; and the desktop, which shows the

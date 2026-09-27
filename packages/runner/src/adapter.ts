@@ -207,7 +207,7 @@ export interface AgentRequest {
   supervision?: "runner_guard" | "agent_permissions";
   /**
    * Whether an unlisted host may be reached, asked of a person while the call
-   * that named it is held (D-NEW-an-unlisted-host-asks). The loop hands one to
+   * that named it is held (D-137). The loop hands one to
    * every attempt. Omitted, nothing is held and an unlisted host ends the
    * attempt `unlisted_egress_host` as the stream reading finds it.
    */
@@ -217,7 +217,7 @@ export interface AgentRequest {
 /**
  * How much longer than the attempt waits for a person the hook holds a call,
  * so that where nobody answers the runner's own stop comes first and names the
- * host (D-NEW-an-unlisted-host-asks).
+ * host (D-137).
  */
 const HOOK_HOLD_MARGIN_MS = 30_000;
 
@@ -532,7 +532,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
    */
   const supervision = request.supervision ?? "runner_guard";
   /**
-   * D-NEW-an-unlisted-host-asks: the gate that answers for an unlisted host,
+   * D-137: the gate that answers for an unlisted host,
    * where there is one and the runner's guard holds the executor's calls. The
    * direct-agent arm has no guard to hold a call with.
    */
@@ -834,7 +834,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   ticker.unref();
 
   /**
-   * The runner's half of the egress relay (D-NEW-an-unlisted-host-asks).
+   * The runner's half of the egress relay (D-137).
    *
    * The hook holds a call naming an unlisted host and asks; this reads the
    * ask, takes the command from the stream's own redacted record of that call
@@ -1315,7 +1315,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         // decides its calls — so a kill here would void its run for a reason
         // the arm never saw, while the record still says what it reached for.
         //
-        // D-NEW-an-unlisted-host-asks: a call the guard's hook holds is not
+        // D-137: a call the guard's hook holds is not
         // ended here. The hook holds it before it runs and the relay above
         // settles its host with a person; only a call nothing holds ends the
         // attempt on what the stream shows.

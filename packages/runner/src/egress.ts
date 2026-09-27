@@ -6,7 +6,7 @@ import { replaceFile } from "@perbo/workspace";
 
 /**
  * Egress logging, and the question an unlisted host puts to a person (docs/08,
- * threat 3, launch-blocking item 5, D-NEW-an-unlisted-host-asks).
+ * threat 3, launch-blocking item 5, D-137).
  *
  * **What this is, exactly.** On the local provider network egress cannot be
  * intercepted — ADR-0004's amendment says so in a table — so this observes the
@@ -148,7 +148,7 @@ export class EgressLog {
   }
 
   /**
-   * A person allowed `host` (D-NEW-an-unlisted-host-asks): it joins the list
+   * A person allowed `host` (D-137): it joins the list
    * for the rest of the attempt, and every record of it so far is allowed,
    * since the call that named it runs once it is.
    */
@@ -171,7 +171,7 @@ export class EgressLog {
 
 /**
  * The relay between the write guard's hook and the runner, for a call naming
- * an unlisted host (D-NEW-an-unlisted-host-asks).
+ * an unlisted host (D-137).
  *
  * The hook is a separate process that holds the call before it runs: it writes
  * an ask naming the call and the unlisted hosts into the guard's own
@@ -301,7 +301,7 @@ export function answerAsk(directory: string, name: string, answer: EgressRelayAn
 
 /**
  * How an attempt learns whether an unlisted host may be reached
- * (D-NEW-an-unlisted-host-asks). The loop hands one to each attempt; the
+ * (D-137). The loop hands one to each attempt; the
  * adapter calls it for each unlisted host on a call it holds, and waits.
  */
 export type EgressVerdict =

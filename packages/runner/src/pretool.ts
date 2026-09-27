@@ -186,7 +186,7 @@ export interface PreToolGuardState {
    */
   agent_roles?: string[];
   /**
-   * The egress relay (D-NEW-an-unlisted-host-asks): a call naming a host off
+   * The egress relay (D-137): a call naming a host off
    * this list is held until the runner answers whether it may be reached.
    * Absent where no run asks, and then the call is judged as it always was and
    * the runner's stream reading ends the attempt on the host.
@@ -450,7 +450,7 @@ export function attemptSettings(command: string, holdSeconds?: number): Record<s
   return {
     hooks: {
       // A hook the binary gives up on runs the tool, so where the guard may
-      // hold a call for a person (D-NEW-an-unlisted-host-asks) the binary is
+      // hold a call for a person (D-137) the binary is
       // told to wait longer than the guard ever holds one.
       PreToolUse: [
         {
@@ -507,7 +507,7 @@ export function preparePreToolGuard(args: {
    */
   brief?: { text: string; records: BriefRecords };
   /**
-   * The egress relay (D-NEW-an-unlisted-host-asks), where the runner answers
+   * The egress relay (D-137), where the runner answers
    * whether an unlisted host may be reached. Omitted, the hook holds nothing.
    */
   egress?: EgressRelayState;
@@ -968,7 +968,7 @@ export function runPreToolHook(
     );
   }
 
-  // D-NEW-an-unlisted-host-asks: a call the guard would let run and that names
+  // D-137: a call the guard would let run and that names
   // a host off the list is held here, before it runs, until the runner says
   // whether it may reach it. A refusal refuses the call, so it moves nothing.
   if (judged.decision.decision === "allowed" && attempt.egress !== undefined) {

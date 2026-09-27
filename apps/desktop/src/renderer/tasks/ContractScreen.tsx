@@ -45,7 +45,7 @@ const effortText = (effort: EffortLevel | null): string =>
 /**
  * What a contract shows of its plan, on the planning's contract tab and on
  * the ticket's contract after approval alike, so the two cannot differ
- * (D-NEW-basic-and-epic-flows): an epic's
+ * (D-138): an epic's
  * graph, read, panned and zoomed, and changed only on the Graph pane; a basic
  * ticket's criteria, open to edit on the contract tab while the plan waits for
  * approval and read-only everywhere else.
@@ -60,7 +60,7 @@ type Editor = ReturnType<typeof useContractEditing>;
 /**
  * The contract, and the one approval there is. Inside planning (`planning`)
  * it is one of the planning's tabs, above Problems
- * (D-NEW-basic-and-epic-flows): the tabs are the way back, and a basic
+ * (D-138): the tabs are the way back, and a basic
  * ticket's criteria are edited here, each change written into the contract as
  * it is made, and the plan read against the spec as the person confirms
  * (D-128). An open problem holds the confirm for either shape.
@@ -120,7 +120,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // A change to a basic ticket's criteria, written into the contract as it is
   // made — the operation it waits on is the first after the one it saw. The
   // person stays here: the plan is read against the spec when they confirm
-  // (D-NEW-basic-and-epic-flows).
+  // (D-138).
   const editor = planning?.editor ?? null;
   const [writing, setWriting] = useState<{ after: string | null } | null>(null);
   // Why the host turned the last write away, kept here because the editor's
@@ -163,7 +163,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // A write that landed moves the plan the person is looking at, which is not
   // a change made behind their back: the state it leaves is recorded as the
   // contract reached, once the drafts list carries it, so the contract stays
-  // a tab (D-NEW-basic-and-epic-flows).
+  // a tab (D-138).
   const [reachedAgain, setReachedAgain] = useState<string | null>(null);
   useEffect(() => {
     if (!written || session === null) return;
@@ -183,7 +183,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // is read against the spec first, where the spec or the criteria have moved
   // since the last reading, and the confirm is refused while problems are
   // open — resolved on the Problems tab, or by changing the criteria here and
-  // confirming again (D-NEW-basic-and-epic-flows). A plan with no spec to read
+  // confirming again (D-138). A plan with no spec to read
   // it against confirms as it is.
   const settled = useSettled();
   const reads =
@@ -213,7 +213,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // Why the confirm's reading did not run, once the host tried it until it
   // ran and every try failed: said in a pop-up over this page, which puts the
   // person back here with the confirm offered again. Nothing is confirmed
-  // without the reading (D-NEW-basic-and-epic-flows).
+  // without the reading (D-138).
   const [failedReading, setFailedReading] = useState<string | null>(null);
   // The last change the chat made to a basic ticket's criteria, marked over
   // the words it left; a change made here by hand is the person's own and is
@@ -279,7 +279,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // Whether a planning over this ticket records problems open. Any open
   // problem holds approving, for an epic as for a basic ticket, whichever
   // route reached this page: the only ways past are answering on the Problems
-  // page or changing the plan (D-NEW-basic-and-epic-flows). Both hosts refuse
+  // page or changing the plan (D-138). Both hosts refuse
   // the approval too.
   const problemsHeld =
     ticket.approved_at === null &&
@@ -383,7 +383,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   useShortcut("rename", () => setRenaming(true));
   // While the confirm's reading runs, that is the page: the contract is not
   // pressed again under it, and approving follows only where it finds nothing
-  // open (D-NEW-basic-and-epic-flows).
+  // open (D-138).
   if (confirming)
     return (
       <WaitScreen
@@ -425,7 +425,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
             {shows === "graph" ? (
               // What a graph freezes, on the page that freezes it: the division
               // itself, read and never curated here — that is the Graph pane's
-              // (D-NEW-basic-and-epic-flows).
+              // (D-138).
               <div>
                 <SectionLabel>Execution graph · {criteria.length} criteria</SectionLabel>
                 <Suspense fallback={<p className="small muted">Reading the graph…</p>}>

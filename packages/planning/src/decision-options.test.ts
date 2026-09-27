@@ -20,7 +20,7 @@ import { DecisionOptionsRecordSchema } from "./decision-options-report.js";
 import { DraftRejectedError, PlanningError } from "./errors.js";
 
 /**
- * The Architect's answers to a decision (D-NEW-decision-options): what the
+ * The Architect's answers to a decision (D-135): what the
  * model is handed, what is accepted back, and the record they are kept in. The
  * model itself is a double, as it is for the drafter.
  */
@@ -109,7 +109,7 @@ describe("readDecisionOptions", () => {
     expect(result.answers[0]).toHaveLength(5);
   });
 
-  it("hands back an answer that runs past its length to be condensed, rather than cut (D-NEW-nothing-shown-is-cut)", async () => {
+  it("hands back an answer that runs past its length to be condensed, rather than cut (D-133)", async () => {
     const long = { answers: [{ finding: 1, options: [{ text: "Park it. ".repeat(60), recommended: true }] }] };
     const model = scriptedDrafter([submits(long), submits({ answers: [{ finding: 1, options: answers }] })]);
     const result = await readDecisionOptions({ contract, findings: [finding], change: null, model });
@@ -128,7 +128,7 @@ describe("readDecisionOptions", () => {
     expect(stubborn.requests).toHaveLength(3);
   });
 
-  it("measures an answer as it is shown, so one redaction lengthens past its length is handed back to condense, not taken or cut (D-NEW-nothing-shown-is-cut)", async () => {
+  it("measures an answer as it is shown, so one redaction lengthens past its length is handed back to condense, not taken or cut (D-133)", async () => {
     // An eight-character credential is written as the ten of `[redacted]`:
     // 399 characters as submitted, 401 as the person would be shown them.
     const env = { PERBO_TEST_TOKEN: "hunter2x" };

@@ -20,7 +20,7 @@ export function Composer({
    * draft in hand, rather than as the ticket's own editor. There it is that
    * screen and nothing else: planning decides where a drafted plan lands, and
    * a plan's criteria are read and changed on its Graph or its contract
-   * (D-NEW-basic-and-epic-flows).
+   * (D-138).
    */
   plan?: boolean;
 }) {

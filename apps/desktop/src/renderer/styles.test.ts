@@ -4,7 +4,7 @@ import { build } from "esbuild";
 import { expect, it } from "vitest";
 
 /**
- * Nothing a person reads is cut (D-NEW-nothing-shown-is-cut), and that holds
+ * Nothing a person reads is cut (D-133), and that holds
  * at the edge of a box as much as in the text: a line too long for its box
  * wraps onto more lines rather than ending in an ellipsis. Read from every
  * stylesheet the renderer ships — the bundle its entry builds, the same module

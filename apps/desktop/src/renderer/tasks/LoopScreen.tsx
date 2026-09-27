@@ -163,7 +163,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   // to a person who just pressed the one button that freezes their work.
   const approving =
     active !== undefined && !recoverable && ["plan_review", "ready"].includes(ticket.state);
-  // D-NEW-an-unlisted-host-asks: the question the run is waiting on, where the
+  // D-137: the question the run is waiting on, where the
   // projection says it is asking — a run still going, never one being stopped —
   // so the card and Home agree.
   const asking = projection.asking && active !== undefined ? pendingEgressQuestion(active.log) : null;
@@ -469,12 +469,12 @@ const ARROW_KEYS: ReadonlySet<string> = new Set(["ArrowUp", "ArrowDown", "ArrowL
 /** Why an offered answer cannot be picked: the message every answer goes down in has no room left for it. */
 export const ANSWER_TOO_LONG =
   "This answer cannot be picked: it is longer than the room your other answers leave in the one message the executor is handed, so shorten one of them or write your own.";
-/** What the card says when the Architect's answers could not be had, in one sentence (D-NEW-decision-options). */
+/** What the card says when the Architect's answers could not be had, in one sentence (D-135). */
 export const OPTIONS_FAILED = "The Architect’s suggested answers could not be fetched, so write your own below.";
 /**
  * The Architect's answers to each question that takes the person's words,
  * asked for once as the card opens and kept for the page's life
- * (D-NEW-decision-options). The host keeps them beside the ticket for the
+ * (D-135). The host keeps them beside the ticket for the
  * review they answer, so reopening the card later spends nothing either.
  */
 function useDecisionOptions(repoId: string, key: string, reviewId: string | null, asked: readonly string[]) {
@@ -543,7 +543,7 @@ function DecisionOverlay(
   // The person's words are held where they type them to the room the answer
   // has left: every answer goes down together as one principle, which holds
   // what a typed field holds, so nothing typed is refused when it is sent
-  // (D-NEW-nothing-shown-is-cut). An offered answer longer than that room is
+  // (D-133). An offered answer longer than that room is
   // not one to pick, for the same reason.
   const room = Math.max(
     0,

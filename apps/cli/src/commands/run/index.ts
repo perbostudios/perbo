@@ -236,7 +236,7 @@ export interface TicketRuns {
   /** Record what the run did to the ticket, and answer the state it left it in. */
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean): string;
   /**
-   * D-NEW-publish-a-retained-branch-later: the branch the ticket's last run
+   * D-136: the branch the ticket's last run
    * retained without publishing, and the outcome the ticket records for it.
    * Throws a {@link UsageError} where there is none to publish. Moves nothing.
    */
@@ -307,7 +307,7 @@ export interface ExecuteArgs {
    */
   relevel: boolean;
   /**
-   * D-NEW-publish-a-retained-branch-later: push the branch an approved or
+   * D-136: push the branch an approved or
    * escalated run retained without publishing, and open its pull request,
    * rather than run the ticket. Takes `--ticket`.
    */
@@ -957,7 +957,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
           store: args.store,
           key: args.ticket,
         });
-  // D-NEW-publish-a-retained-branch-later: which branch, or why there is none,
+  // D-136: which branch, or why there is none,
   // read from the ticket before the machine is asked anything, so a ticket
   // with nothing to publish is told so rather than what the machine lacks.
   // Refused before anything is pushed, and moving nothing: the ticket is not
@@ -1032,7 +1032,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   const config = {
     ...parsedConfig.data,
     // Publishing a retained branch is publishing, whatever the configuration
-    // says a run does (D-NEW-publish-a-retained-branch-later).
+    // says a run does (D-136).
     publish: args.publish || args.publishRetained || parsedConfig.data.publish,
     resume_from: args.resumeFrom ?? parsedConfig.data.resume_from,
   };
@@ -1434,7 +1434,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
 
 /**
  * `perbo run --ticket <KEY> --publish-retained`
- * (D-NEW-publish-a-retained-branch-later): the branch the ticket's last run
+ * (D-136): the branch the ticket's last run
  * retained, pushed and its pull request opened by the runner's own delivery,
  * without executing or reviewing again, and the pull request recorded on the
  * ticket, which stays where it is. A refusal is the runner's, said before

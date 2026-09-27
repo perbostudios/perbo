@@ -5,7 +5,7 @@ import type { RegisteredRepository } from "../profile/store.js";
 
 /**
  * The host's side of the Architect's answers to a decision
- * (D-NEW-decision-options): the command it runs, on which model, and what it
+ * (D-135): the command it runs, on which model, and what it
  * lets through to the page.
  */
 
@@ -93,7 +93,7 @@ describe("the Architect's answers, as the host asks for them", () => {
     }
   });
 
-  it("redacts an answer and fails one redaction lengthens past its length rather than cutting it (D-NEW-nothing-shown-is-cut)", async () => {
+  it("redacts an answer and fails one redaction lengthens past its length rather than cutting it (D-133)", async () => {
     vi.stubEnv("PERBO_TEST_TOKEN", "hunter2x");
     try {
       const kept = await decisionOptions(

@@ -153,7 +153,7 @@ export function decisionArgs(
 
 /**
  * The person's answer to the question a live run is waiting on
- * (D-NEW-an-unlisted-host-asks). Every word is the host's own or the
+ * (D-137). Every word is the host's own or the
  * protocol's: the key is schema-checked and the answer is one of two flags,
  * so nothing the run printed reaches the command but the key it names.
  */
@@ -219,7 +219,7 @@ export function runArgs(key: string, configPath: string, resumeFrom: string | nu
 /**
  * The branch a run retained without publishing, pushed and its pull request
  * opened, under the configuration a run of the ticket is given with publishing
- * on (D-NEW-publish-a-retained-branch-later).
+ * on (D-136).
  */
 export function publishArgs(key: string, configPath: string): string[] {
   return ["run", "--ticket", key, "--config", configPath, "--publish-retained", "--json"];

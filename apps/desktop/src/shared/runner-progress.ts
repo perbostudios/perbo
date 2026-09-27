@@ -30,7 +30,7 @@ export type RunnerStage =
   | { kind: "delivery" }
   /**
    * The run waiting on a person's answer about a host off the allow-list, and
-   * that answer (D-NEW-an-unlisted-host-asks). Only the host is taken: the
+   * that answer (D-137). Only the host is taken: the
    * command the line also carries is the card's to show.
    */
   | { kind: "egress"; host: string }

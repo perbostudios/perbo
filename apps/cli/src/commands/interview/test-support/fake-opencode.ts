@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 
 /**
- * `opencode acp`, faked (D-NEW-opencode-is-a-provider).
+ * `opencode acp`, faked (D-134).
  *
  * A separate process that speaks the Agent Client Protocol over stdio the way
  * OpenCode 2.0.14 was measured to, and invokes no model. It reads the chat's

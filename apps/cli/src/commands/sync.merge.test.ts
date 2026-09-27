@@ -413,7 +413,7 @@ describe("ac_1 — the refusals that are not one of the six", () => {
     expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
-  it("quotes gh's whole refusal, every line of it (D-NEW-nothing-shown-is-cut)", async () => {
+  it("quotes gh's whole refusal, every line of it (D-133)", async () => {
     const { repo } = publishedTicket("refused-long", { merge: "loop" });
     const lines = [
       "X Pull request #202 is not mergeable: the merge commit cannot be cleanly created.",

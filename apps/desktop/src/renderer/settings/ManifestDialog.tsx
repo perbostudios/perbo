@@ -186,7 +186,7 @@ export function ManifestDialog({
                 const lines = event.target.value.split("\n");
                 // Each glob is held to what one holds where it is typed, as a
                 // one-line field's own limit would hold it, so nothing typed is
-                // refused when it is saved (D-NEW-nothing-shown-is-cut).
+                // refused when it is saved (D-133).
                 if (lines.some((path) => path.length > TYPED_PATH_MAX_CHARS)) return;
                 edit({
                   ...value,

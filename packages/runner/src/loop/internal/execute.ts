@@ -45,7 +45,7 @@ export async function execute(args: {
   progress: (message: string) => void;
   /** What the attempt has done so far, as the adapter counts it, for the run's tally. */
   tally?: (tally: AttemptTally) => void;
-  /** Whether an unlisted host may be reached, asked of a person (D-NEW-an-unlisted-host-asks). */
+  /** Whether an unlisted host may be reached, asked of a person (D-137). */
   egress?: EgressGate;
 }): Promise<{ executed: Executed } | Stop> {
   const { config, state, brief, secrets, progress } = args;

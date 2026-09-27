@@ -28,7 +28,7 @@ The half of execution that is not the agent.
 - `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
   the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
   the agent role files it writes.
-- `opencode/` — the OpenCode adapter (D-NEW-opencode-is-a-provider): `index.ts` is the surface
+- `opencode/` — the OpenCode adapter (D-134): `index.ts` is the surface
   (`runOpenCodeAgent`, and `opencodeDecision`, the runner's answer to one call OpenCode asks about,
   judged as Codex's approvals are); `internal/acp.ts` holds the `opencode acp` session, the home it
   runs under and the brief in its instructions. A refusal ends OpenCode's turn, so the adapter starts
@@ -68,7 +68,7 @@ The half of execution that is not the agent.
 - `bundle.ts` — immutable, content-addressed run bundles with a computed replayability tier.
 - `egress.ts` — the egress log, and the relay through which the write guard's hook holds a call
   naming a host off the allow-list while the runner asks whether it may be reached
-  ([D-NEW-an-unlisted-host-asks](../../docs/11-open-decisions.md)): the hook writes an ask into
+  ([D-137](../../docs/11-open-decisions.md)): the hook writes an ask into
   its own directory and waits, the adapter answers beside it. `egress-questions.ts` is the
   ticket's record of those questions — appended, answered by `perbo verdict --egress` and closed
   when the run stops waiting, each under the lock beside it — and the one write of
@@ -124,7 +124,7 @@ The half of execution that is not the agent.
     again, with the body that run would have opened — the closure verifications' cost from their
     bundles and the declines its attempts sealed — the delivery recorded under the run lock, and
     refused where the branch is not what the review judged
-    (D-NEW-publish-a-retained-branch-later).
+    (D-136).
   - `internal/merge-up.ts` — the base branch's tip merged into the attempt's branch, and the paths
     a conflict left markers in.
   - `internal/orphans.ts` — the processes an attempt left behind, swept from its worktree.

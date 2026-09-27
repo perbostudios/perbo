@@ -18,7 +18,7 @@ import {
 
 /**
  * One `opencode acp` child speaking the Agent Client Protocol on stdio, for the
- * executor (D-NEW-opencode-is-a-provider).
+ * executor (D-134).
  *
  * The runner is the ACP client. OpenCode runs its own tools and puts every call
  * its permission rules mark `ask` to this client as `session/request_permission`

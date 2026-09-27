@@ -28,7 +28,7 @@ import type { ModelUsage } from "./usage.js";
 
 /**
  * The reviewer on OpenCode, through `opencode acp`
- * (D-NEW-opencode-is-a-provider): one session per conversation, holding no
+ * (D-134): one session per conversation, holding no
  * tool at all, in a scratch directory of its own.
  *
  * OpenCode's Agent Client Protocol carries no output schema, so nothing

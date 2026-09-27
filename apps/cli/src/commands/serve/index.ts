@@ -363,7 +363,7 @@ function runDocumentAnswer(stdout: string): string | null {
   return parsed.success ? `${parsed.data.outcome} — ${parsed.data.detail}` : null;
 }
 
-/** Tracker text on one line of this queue's stderr, whole: line breaks and control characters become spaces (D-NEW-nothing-shown-is-cut). */
+/** Tracker text on one line of this queue's stderr, whole: line breaks and control characters become spaces (D-133). */
 const oneLine = (text: string): string =>
   Array.from(text, (char) => {
     const code = char.charCodeAt(0);

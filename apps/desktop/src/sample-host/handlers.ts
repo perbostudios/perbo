@@ -310,7 +310,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const markdown = session.specSlug === null ? null : (specFiles()[session.specSlug] ?? null);
     const report = impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index });
     // How many it found outside the scope, on the session, as the host writes
-    // it (D-NEW-basic-and-epic-flows).
+    // it (D-138).
     editing.recordImpact(request.id, report.warnings.length + report.truncated);
     return { ...report, readAt: new Date().toISOString() };
   },
@@ -552,7 +552,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     editing.carryNamed(opened.id, planning?.named ?? null);
     emit({ kind: "records", repoId: request.repoId, key: drafted.key });
     // Read by its drafting, as the host records it, so its first confirm
-    // unchanged reads nothing again (D-NEW-basic-and-epic-flows).
+    // unchanged reads nothing again (D-138).
     const read = draftedReading(editing.read(opened.id));
     if (read !== null) editing.recordRead(opened.id, read);
     return { sessionId: opened.id, key: drafted.key, nodes: opened.nodes };
@@ -913,7 +913,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   run: (request) => {
     // Refused while a planning over the ticket records problems open, in the
     // host's words: an open problem holds approving for either shape
-    // (D-NEW-basic-and-epic-flows). And while the chat on one owes the person
+    // (D-138). And while the chat on one owes the person
     // a turn (D-102).
     const held = request.approve
       ? (problemsHoldApproval(editingRecords(), request.repoId, request.key) ??
@@ -922,7 +922,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     if (held !== null) throw new Error(held);
     return startWork(request.kind, request.repoId, request.key, request.publish);
   },
-  // D-NEW-an-unlisted-host-asks: the answer to the question a live run is
+  // D-137: the answer to the question a live run is
   // waiting on, settled on that run's output as the CLI's run settles it.
   egressAnswer: (request) => {
     const running = snapshot.jobs.find(
@@ -935,7 +935,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     emit({ kind: "progress", job: running });
     return null;
   },
-  // D-NEW-decision-options: the Architect's answers to the findings the
+  // D-135: the Architect's answers to the findings the
   // ticket's last review left for a person, as the host runs `perbo options`:
   // kept for that review, so asking again spends nothing and says so.
   decisionOptions: (request) => {
@@ -1019,7 +1019,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     }),
   // The merge press on a retained branch: pushed and its pull request opened
   // as the host does it, refused as the CLI refuses it
-  // (D-NEW-publish-a-retained-branch-later).
+  // (D-136).
   publish: (request) =>
     job("publish", request.repoId, request.key, () => {
       const { ticket } = ticketRow(request.key);

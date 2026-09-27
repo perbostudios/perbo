@@ -157,7 +157,7 @@ describe("a failure that named no test file", () => {
 
 /**
  * A check's summary is a line of the test run's own output, and it is recorded
- * whole (D-NEW-nothing-shown-is-cut): a totals line longer than any width a
+ * whole (D-133): a totals line longer than any width a
  * screen would pick still arrives with its last word.
  */
 describe("a check's summary line", () => {

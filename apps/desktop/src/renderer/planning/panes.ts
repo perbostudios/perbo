@@ -17,7 +17,7 @@ const PANES = {
   /**
    * The contract, after the plan's own panes: the page approving happens on,
    * reached inside planning rather than as a place of its own
-   * (D-NEW-basic-and-epic-flows). Drawn as a
+   * (D-138). Drawn as a
    * tick, the nearest drawing there is to "approve this".
    */
   contract: { id: "contract", label: "Confirm contract", icon: "approve" },
@@ -40,7 +40,7 @@ const draftOf = (drafts: Snapshot["drafts"], sessionId: string): OpenDraft | und
   (drafts ?? []).find((entry) => entry.id === sessionId);
 
 /**
- * What a planning is planning (D-NEW-basic-and-epic-flows):
+ * What a planning is planning (D-138):
  * "spec" while the spec is being written and there is no plan, "basic" for a
  * plan the drafter left flat, and "epic" for one it divided into a graph.
  */
@@ -55,7 +55,7 @@ export function shapeOf(draft: Pick<OpenDraft, "key" | "nodes"> | undefined): Pl
  * as the host fingerprints them, the plan as its ticket last moved, and the
  * scope the planning holds. While it is the state recorded as they last
  * reached the contract, nothing has changed since and the contract is still
- * a tab to go back to (D-NEW-basic-and-epic-flows).
+ * a tab to go back to (D-138).
  */
 export function contractState(
   workspace: Pick<Snapshot, "drafts" | "tasks">,
@@ -82,7 +82,7 @@ export interface PlanningFlow {
 }
 
 /**
- * The one rule for which tabs a planning shows (D-NEW-basic-and-epic-flows).
+ * The one rule for which tabs a planning shows (D-138).
  *
  * While the spec is being written there is no plan to measure anything
  * against, so the Spec and the Explorer are all there is. A plan divided into
@@ -193,7 +193,7 @@ export function reopenPane(workspace: Pick<Snapshot, "drafts" | "tasks">, sessio
 
 /**
  * Where a plan drafted again from a stopped run's spec lands
- * (D-NEW-basic-and-epic-flows, D-129): an
+ * (D-138, D-129): an
  * epic on its Graph, and a basic ticket on its contract, the page its
  * criteria are read and changed on, both inside the planning over it.
  */
@@ -203,7 +203,7 @@ export function draftedLanding(plan: { sessionId: string; nodes: number }): Rout
 
 /**
  * Where a basic ticket lands once the impact check its fresh plan is given
- * has come back (D-NEW-basic-and-epic-flows): the Impact pane where it found
+ * has come back (D-138): the Impact pane where it found
  * paths outside the scope, else the contract. Never on Problems: a basic
  * ticket's plan is read against its spec only at its Confirm contract.
  */
@@ -244,7 +244,7 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
  * contract tab by itself where none is. A basic ticket's goes to its
  * contract, where its criteria are edited and where its Confirm contract
  * reads the plan against the spec by the same rule
- * (D-NEW-basic-and-epic-flows). An approved plan is frozen and goes straight
+ * (D-138). An approved plan is frozen and goes straight
  * to its contract, and so does a plan with no planning to read it in.
  *
  * Every press that asks it is held while the chat is still talking on the
@@ -277,7 +277,7 @@ const confirmsOnTheWay = new Set<string>();
 /**
  * Whether this planning's arrival at its Problems pane is a Confirm the
  * plan's, which is the one arrival that reads the plan against its spec
- * (D-NEW-basic-and-epic-flows). `take` is the arrival itself, which uses it
+ * (D-138). `take` is the arrival itself, which uses it
  * up, so a later arrival by the rail is not taken for a confirm.
  */
 export function confirmArrives(sessionId: string, take = false): boolean {

@@ -239,7 +239,7 @@ describe("interactive desktop flows", () => {
     });
   }
 
-  it("lands a flat plan on its contract once it is checked, says the task is simple there, and offers no graph (D-NEW-basic-and-epic-flows)", async () => {
+  it("lands a flat plan on its contract once it is checked, says the task is simple there, and offers no graph (D-138)", async () => {
     // Work the drafter did not divide has no graph to curate: its plan is its
     // criteria, and the contract is where they are read. The impact check runs
     // first; with nothing from it, the person lands on the contract, with a
@@ -278,7 +278,7 @@ describe("interactive desktop flows", () => {
     expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
   });
 
-  it("lands an epic's fresh plan on its Graph without reading it, and confirms it unchanged with no reading (D-NEW-basic-and-epic-flows)", async () => {
+  it("lands an epic's fresh plan on its Graph without reading it, and confirms it unchanged with no reading (D-138)", async () => {
     // A plan the model drafted from its spec counts as satisfying it: nothing
     // reads it at Generate plan, nothing waits, and it never lands on Problems.
     const workspace = await sampleBridge.request({ kind: "snapshot" });
@@ -515,7 +515,7 @@ describe("interactive desktop flows", () => {
     await gone(run.id);
   }
 
-  it("shows Checking for drift while the confirm's reading runs, then goes on to approving where it found nothing (D-NEW-basic-and-epic-flows)", async () => {
+  it("shows Checking for drift while the confirm's reading runs, then goes on to approving where it found nothing (D-138)", async () => {
     const { id, key } = await landedFlat("Signup ordered mail");
     // The spec moves in a way that promises nothing new: the confirm reads the
     // plan, finds nothing, and goes ahead.
@@ -543,7 +543,7 @@ describe("interactive desktop flows", () => {
     expect(await readings(key)).toBe(readingsBefore + 1);
   });
 
-  it("puts up no Checking for drift where the confirm reads nothing, and goes straight on to approving (D-NEW-basic-and-epic-flows)", async () => {
+  it("puts up no Checking for drift where the confirm reads nothing, and goes straight on to approving (D-138)", async () => {
     const { key } = await landedFlat("Signup unread mail");
     const before = await readings(key);
     const pages = loadingPages();
@@ -589,7 +589,7 @@ describe("interactive desktop flows", () => {
     expect(await readings(key)).toBe(before);
   });
 
-  it("confirms a flat plan nobody changed straight away, reading nothing again (D-NEW-basic-and-epic-flows)", async () => {
+  it("confirms a flat plan nobody changed straight away, reading nothing again (D-138)", async () => {
     const { key } = await landedFlat("Signup thanks mail");
     const before = await readings(key);
     const sent = holdRun();
@@ -602,7 +602,7 @@ describe("interactive desktop flows", () => {
     // The contract is where a basic ticket's criteria are changed, by hand. A
     // change is written in at once and read nowhere yet; the plan is read
     // against the spec when the person confirms, and the confirm is refused
-    // while the reading has problems open (D-NEW-basic-and-epic-flows).
+    // while the reading has problems open (D-138).
     const { id, key } = await landedFlat("Signup welcome mail");
     const before = await readings(key);
     await reword("Every new signup queues exactly one email.");
@@ -993,7 +993,7 @@ describe("interactive desktop flows", () => {
   });
 
   /**
-   * D-NEW-publish-a-retained-branch-later: a run that ended approved with
+   * D-136: a run that ended approved with
    * publishing off kept its branch and opened nothing. Next always leads on
    * to the merge screen, and its one press publishes the branch — the host
    * pushes it, opens the pull request and opens it in the browser — and the
@@ -2154,7 +2154,7 @@ describe("Plan it again on a stopped run (D-129)", () => {
    * From the Archive: a stopped ticket filed there opens on its stopped page,
    * and Plan it again goes into the planning over the plan it drafts, with its
    * tabs — the Graph for an epic, the contract for a basic ticket — and never
-   * to the loop's pages (D-NEW-basic-and-epic-flows).
+   * to the loop's pages (D-138).
    */
   it.each([
     ["an epic on its Graph", false, "graph"],
@@ -2249,7 +2249,7 @@ describe("Plan it again on a stopped run (D-129)", () => {
   it("confirms a basic plan drafted again unchanged straight away, with no reading", async () => {
     const { host, id, key, drifts } = await plannedAgainFlat();
     // Read by its drafting, as a plan Generate plan drafts is: nothing read as
-    // it lands, and no Problems tab (D-NEW-basic-and-epic-flows).
+    // it lands, and no Problems tab (D-138).
     expect((await host.request({ kind: "editingRead", id })).read).not.toBeNull();
     expect(await drifts()).toEqual([]);
     expect(railTabs()).not.toContain("Problems");

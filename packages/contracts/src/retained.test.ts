@@ -3,7 +3,7 @@ import { gateClosedNote, retainedBranch } from "./retained.js";
 import type { Ticket } from "./ticket.js";
 
 /**
- * D-NEW-publish-a-retained-branch-later: which ticket has a retained branch to
+ * D-136: which ticket has a retained branch to
  * publish, read from the ticket's own record of how its last run ended.
  */
 

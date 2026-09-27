@@ -69,7 +69,7 @@ describe("an approval across a re-level", () => {
     expect(decision.statement).toContain("inside the change's own scope");
   });
 
-  it("names five of the paths the base touched whole, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names five of the paths the base touched whole, then how many more (D-133)", () => {
     const paths = [1, 2, 3, 4, 5, 6, 7].map((n) => `src/feature-${n}.ts`);
     const decision = loopMergeDecision({
       mode: "loop",

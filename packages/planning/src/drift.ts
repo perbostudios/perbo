@@ -53,7 +53,7 @@ const MAX_DRIFT_TURNS = 2;
  * How many times a report whose words run past a field's length is handed
  * back to be condensed, each a turn past {@link MAX_DRIFT_TURNS}: the words
  * are the person's to read, and they are asked for again rather than cut
- * (D-NEW-nothing-shown-is-cut).
+ * (D-133).
  */
 const MAX_CONDENSE_ASKS = 2;
 
@@ -67,7 +67,7 @@ const MAX_CONDENSE_ASKS = 2;
  * Applied before the report's lengths are measured, so a field that redaction
  * lengthens past its length — a short secret written as `[redacted]` — is
  * handed back to the same session to condense like any other long field, and
- * is never cut (D-NEW-nothing-shown-is-cut).
+ * is never cut (D-133).
  */
 export function shownDriftText(text: string, env: NodeJS.ProcessEnv): string {
   const values = replaceValues(text, credentialValuesOf(env), "[redacted]").text;

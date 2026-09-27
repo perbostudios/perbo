@@ -12,7 +12,7 @@ import { DraftModelRecordSchema, type DraftModelRecord } from "./model-record.js
 
 /**
  * The Architect proposes answers a person can pick for the findings a review
- * routed to them (D-NEW-decision-options): for each, a few concrete principles
+ * routed to them (D-135): for each, a few concrete principles
  * with one recommended, from the finding, the criterion it sits on, the
  * contract and the change.
  *
@@ -71,7 +71,7 @@ const MAX_TURNS = 2;
  * a finding with no answers or two recommended — is handed back to be put
  * right, each a turn past {@link MAX_TURNS}. The words are the person's to
  * read, and they are asked for again rather than cut
- * (D-NEW-nothing-shown-is-cut).
+ * (D-133).
  */
 const MAX_REPAIR_ASKS = 2;
 

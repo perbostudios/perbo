@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 /**
- * OpenCode as a provider (D-NEW-opencode-is-a-provider): how each of the three
+ * OpenCode as a provider (D-134): how each of the three
  * roles Perbo runs on it — the executor, the reviewer and the chat — starts
  * `opencode acp`, in one place so the three cannot start it differently.
  *

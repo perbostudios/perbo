@@ -43,7 +43,7 @@ import { NetworkAllowListSchema } from "../../profile.js";
 export const BaseSourceSchema = z.enum(["branch", "config", "remote_default"]);
 export type BaseSource = z.infer<typeof BaseSourceSchema>;
 
-/** The executors a run can hand its brief to: Claude Code, Codex and OpenCode (D-NEW-opencode-is-a-provider). */
+/** The executors a run can hand its brief to: Claude Code, Codex and OpenCode (D-134). */
 export const AGENT_PROVIDERS = ["claude-cli", "codex-cli", "opencode-cli"] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 

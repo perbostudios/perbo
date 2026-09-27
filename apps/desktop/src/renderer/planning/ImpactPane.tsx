@@ -54,7 +54,7 @@ const IMPACT_ASKED = new Set<string>();
 
 /**
  * The one reading of a planning's impact, asked here or by the checks a basic
- * ticket's fresh plan is given (D-NEW-basic-and-epic-flows):
+ * ticket's fresh plan is given (D-138):
  * the same query either way, so an answer those checks fetched is the one this
  * pane opens on.
  */

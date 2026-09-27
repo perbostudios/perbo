@@ -9,7 +9,7 @@ It runs on your machine, on your own model credential.
 
 ## Quick start
 
-Before the first command, `doctor` checks your machine: Node 22 or newer; the package manager your repository installs with — missing it, `doctor` reports `install_binary_missing` and names what to get; a coding agent, `claude-cli` by default, `codex-cli` at 0.145.0 or later, already signed in, or `opencode-cli`, OpenCode 2.0.14 or later, which needs no sign-in and runs on `OPENCODE_API_KEY` or OpenCode's free models (D-NEW-opencode-is-a-provider); set `ANTHROPIC_API_KEY` to run the reviewer against a hosted Anthropic key instead of that local agent; and, once you publish, the GitHub CLI signed in (`gh auth login`).
+Before the first command, `doctor` checks your machine: Node 22 or newer; the package manager your repository installs with — missing it, `doctor` reports `install_binary_missing` and names what to get; a coding agent, `claude-cli` by default, `codex-cli` at 0.145.0 or later, already signed in, or `opencode-cli`, OpenCode 2.0.14 or later, which needs no sign-in and runs on `OPENCODE_API_KEY` or OpenCode's free models (D-134); set `ANTHROPIC_API_KEY` to run the reviewer against a hosted Anthropic key instead of that local agent; and, once you publish, the GitHub CLI signed in (`gh auth login`).
 
 In the repository you want changed, once the binary is installed:
 
@@ -152,7 +152,7 @@ number of rounds, and with `--publish` open the pull request — which a human m
 ended approved or escalated without `--publish` keeps its branch on this machine;
 `run --ticket PRB-1 --publish-retained` publishes it later through the same delivery, without
 executing or reviewing again, and refuses, pushing nothing, what
-[D-NEW-publish-a-retained-branch-later](../../docs/11-open-decisions.md) names. `review`
+[D-136](../../docs/11-open-decisions.md) names. `review`
 is the review step on its own, with nothing behind it.
 
 `review --pr owner/repo#412` (or its URL) reviews a pull request nobody admitted: `gh` reads the
@@ -189,7 +189,7 @@ checkout in `~/.perbo/opencode/`, a directory per repository the chat refuses to
 holds anything Perbo does not recognise from OpenCode 2.0.14. On OpenCode the session reads none of your OpenCode configuration or data,
 every command, file change and read outside the checkout is put to the interview's rules, and a
 refusal ends OpenCode's turn, so the transport starts the next one with it
-(D-NEW-opencode-is-a-provider). On Codex the session runs on your login and none of the rest of your Codex
+(D-134). On Codex the session runs on your login and none of the rest of your Codex
 configuration, because a tool server or an approval rule in it would decide a call before the
 interview's rules were consulted, and every approval the app server asks for is answered by those
 rules; anything it asks that they do not admit, an escalation for the rest of the session included,

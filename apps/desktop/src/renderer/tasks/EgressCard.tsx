@@ -5,7 +5,7 @@ import type { AskedEgress } from "../../shared/egress-question.js";
 
 /**
  * The question a live run is waiting on: whether the executor may reach a
- * host off the repository's allow-list (D-NEW-an-unlisted-host-asks).
+ * host off the repository's allow-list (D-137).
  *
  * In the decision card's frame and under its title, since it is a decision
  * required of the person. It shows the host and the whole command that named

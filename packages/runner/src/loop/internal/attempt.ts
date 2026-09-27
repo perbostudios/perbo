@@ -111,7 +111,7 @@ export function classifyTermination(args: {
    * were refused changed nothing because it could not.
    */
   const denied = agentResult.commands.filter((command) => command.decision === "denied");
-  // Whole commands, the first five, then how many more (D-NEW-nothing-shown-is-cut).
+  // Whole commands, the first five, then how many more (D-133).
   const deniedSummary =
     denied
       .slice(0, 5)
@@ -317,7 +317,7 @@ export function recordAttempt(args: {
   // termination handling — an executor that declines everything and,
   // correctly, changes nothing must end as an escalation with its reasons,
   // not as `no_changes` — and sealed on the attempt's record, which is where a
-  // pull request opened later reads them (D-NEW-publish-a-retained-branch-later).
+  // pull request opened later reads them (D-136).
   const declines =
     state.kind === "remediate"
       ? parseDeclines(args.agentResult.transcript, brief.toClose.map((finding) => finding.key))

@@ -3,7 +3,7 @@ import { inspectCommand } from "./prohibited.js";
 
 /**
  * A prohibited action names the line it was read from, whole
- * (D-NEW-nothing-shown-is-cut): the executor's command is tool output, and a
+ * (D-133): the executor's command is tool output, and a
  * person reads it to know what ended the attempt.
  */
 

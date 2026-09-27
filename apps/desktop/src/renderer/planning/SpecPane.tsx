@@ -455,7 +455,7 @@ export function SpecPane({
       inFlight.current = false;
     }
     // Where the plan lands once it is drafted, first or again, is planning
-    // mode's to say (D-NEW-basic-and-epic-flows).
+    // mode's to say (D-138).
     editor.submit(intent);
   };
 

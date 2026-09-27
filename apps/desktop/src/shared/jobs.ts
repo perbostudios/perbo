@@ -176,7 +176,7 @@ export const isRun = (job: Pick<Job, "kind">): boolean => job.kind === "run" || 
  * until the records are read again the ticket still says the stage the run
  * started at, and that is the pause catching up, never a stop. A run still
  * going that waits on the person's answer about a host off the allow-list
- * (D-NEW-an-unlisted-host-asks) is `asking`: paused for them the same way,
+ * (D-137) is `asking`: paused for them the same way,
  * until the answer is printed or the run is stopped.
  */
 export function ticketRun(

@@ -39,7 +39,7 @@ const problemKey = (open: readonly DriftFinding[]): string =>
  * Arriving any other way — the rail, a planning reopened on its problems —
  * reads nothing: the pane puts the last reading's problems, since the plan is
  * read against the spec only when the person confirms it
- * (D-NEW-basic-and-epic-flows). The verdict is the CLI's, kept beside
+ * (D-138). The verdict is the CLI's, kept beside
  * the ticket and keyed by the spec and the plan's promise texts, so the model
  * runs only where one of them moved.
  *
@@ -58,7 +58,7 @@ const problemKey = (open: readonly DriftFinding[]): string =>
  * page offers no way past one, and each is resolved — answered here, or by
  * changing the plan and confirming again, which reads it again. Once none is
  * open the tab goes, and the person is moved back to where they confirm: a
- * basic ticket's contract, an epic's Graph (D-NEW-basic-and-epic-flows).
+ * basic ticket's contract, an epic's Graph (D-138).
  * "Back to the plan" is on every state.
  *
  * **A reading that does not run holds the way on too.** The host tries it
@@ -93,7 +93,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   const asked = useRef<string | null>(null);
   // The reading asked of a state, which the host records once it lands of it,
   // so a basic ticket's Confirm contract at the same state reads nothing again
-  // (D-NEW-basic-and-epic-flows).
+  // (D-138).
   const check = useCallback(
     async (state: string | null): Promise<void> => {
       if (id === null) return;
@@ -316,7 +316,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   }, [decided]);
   // Every problem resolved here: the tab goes, and the person is back where
   // they confirm — a basic ticket's contract, an epic's Graph — to confirm
-  // again (D-NEW-basic-and-epic-flows).
+  // again (D-138).
   const basic = flowFor(workspace, id ?? "").shape === "basic";
   const resolved =
     drift !== null &&
@@ -358,7 +358,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // Back to the pane the person confirmed from, once they have read that
   // the reading did not run: the pane the planning was left at, since this
   // one is never recorded as that, else where the shape confirms — a basic
-  // ticket's contract, an epic's Graph (D-NEW-basic-and-epic-flows).
+  // ticket's contract, an epic's Graph (D-138).
   const confirmedFrom = (): void => {
     if (id === null) {
       navigate({ page: "home" });
@@ -390,7 +390,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // way on to the contract, for an epic as for a basic ticket, so there is
   // no way past one: each is resolved, here or by changing the plan, and the
   // person is moved back to confirm once none is open
-  // (D-NEW-basic-and-epic-flows).
+  // (D-138).
   const footer = (): ReactNode => (
     <div className="approve-actions pane-confirm">
       <Button onClick={back}>Back to the plan</Button>
@@ -417,7 +417,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // to the contract, which is being taken: nothing is shown over that either.
   // Arrived at a state the last reading was of, with none under way: nothing
   // is read, so the wait is not said while the pane passes through or puts
-  // the problems that reading found (D-NEW-basic-and-epic-flows).
+  // the problems that reading found (D-138).
   const unreadArrival =
     (asked.current !== id || settling === id || unread === id) &&
     !checking &&

@@ -36,7 +36,7 @@ import { buildReportForSubject, ticketSubject } from "./inspect.js";
 
 /**
  * `perbo options` — the answers the Architect offers to the findings a
- * ticket's last review routed to a person (D-NEW-decision-options): for each
+ * ticket's last review routed to a person (D-135): for each
  * finding asked about, a few principles the person could adopt, one of them
  * recommended, from the finding, the criterion it sits on, the contract and
  * the change the review judged.

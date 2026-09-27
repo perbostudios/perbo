@@ -46,7 +46,7 @@ const mount = (element: React.ReactNode): void => {
   render(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
 };
 
-describe("what a contract shows of its plan (D-NEW-basic-and-epic-flows)", () => {
+describe("what a contract shows of its plan (D-138)", () => {
   it("is one rule for the contract tab and the contract after approval", async () => {
     const epic = await contextFor({ flat: false, approved: false });
     const flat = await contextFor({ flat: true, approved: false });
@@ -87,7 +87,7 @@ describe("what a contract shows of its plan (D-NEW-basic-and-epic-flows)", () =>
   });
 });
 
-describe("a basic ticket's criteria written into its contract (D-NEW-basic-and-epic-flows)", () => {
+describe("a basic ticket's criteria written into its contract (D-138)", () => {
   /**
    * A write the host turns away before it becomes an operation leaves nothing
    * to wait on: the page says why, rather than saying it is still writing.

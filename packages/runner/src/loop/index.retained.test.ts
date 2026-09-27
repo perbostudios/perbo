@@ -29,7 +29,7 @@ const kept =
   (): RetainedBranch => ({ branch, outcome, refusal: null });
 
 /**
- * D-NEW-publish-a-retained-branch-later: a run that ended approved or
+ * D-136: a run that ended approved or
  * escalated with publishing off retained its branch and opened nothing. A
  * person's press publishes it later through the run's own delivery, without
  * executing or reviewing again, and refuses a branch that is not what the

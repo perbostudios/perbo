@@ -65,7 +65,7 @@ export function graphColumns(
 /**
  * What a node's card says under its title: how many criteria it covers and
  * the paths expected to satisfy them, on the Graph pane and on the contract's
- * graph alike (D-NEW-basic-and-epic-flows).
+ * graph alike (D-138).
  */
 export function nodeSummary(node: { criteria: readonly unknown[]; paths: readonly string[] }): string {
   const count = `${node.criteria.length} ${node.criteria.length === 1 ? "criterion" : "criteria"}`;

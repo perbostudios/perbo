@@ -300,7 +300,7 @@ export function decidedDelivery(input: {
 
 /**
  * The review a retained branch is published under
- * (D-NEW-publish-a-retained-branch-later): the one on record, with each
+ * (D-136): the one on record, with each
  * person's answer recorded on the finding it closed — shipped as it is, or
  * handed to the executor and closed by a verification — which is what the run
  * that retained the branch recorded on it.

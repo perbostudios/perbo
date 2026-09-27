@@ -12,7 +12,7 @@ import { stageWords, watchTranscript, type TaskContext } from "./task-context.js
 import { homeTone } from "./ticket-workspace.js";
 
 /**
- * The question a live run waits on, on the desktop (D-NEW-an-unlisted-host-asks):
+ * The question a live run waits on, on the desktop (D-137):
  * a card in the decision card's frame showing the host and the whole command,
  * Refuse the default and highlighted, Allow beside it, the press sending the
  * question's key and the answer; the ticket reads as needing the person on

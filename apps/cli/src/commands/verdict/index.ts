@@ -103,7 +103,7 @@ const VerdictCommonSchema = {
 /**
  * `--egress`: a person's answer to the question a live run is waiting on,
  * whether the executor may reach a host off the network allow-list
- * (D-NEW-an-unlisted-host-asks). Its own shape rather than a `--decide`: the
+ * (D-137). Its own shape rather than a `--decide`: the
  * question is not a finding of any review, and what it answers is the run
  * holding the call, not a later run.
  */
@@ -878,7 +878,7 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
 
 /**
  * `--egress`: the person's answer to the question a run of this ticket is
- * waiting on (D-NEW-an-unlisted-host-asks), written to the ticket's egress
+ * waiting on (D-137), written to the ticket's egress
  * record, which that run reads. The run does what the answer says — lets the
  * held call through and adds the host to the configuration, or refuses it —
  * so this writes the answer and nothing else.

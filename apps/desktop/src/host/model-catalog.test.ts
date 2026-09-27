@@ -333,7 +333,7 @@ describe("each model's name and effort levels, as its provider reports them", ()
   });
 });
 
-describe("OpenCode's catalog (D-NEW-opencode-is-a-provider)", () => {
+describe("OpenCode's catalog (D-134)", () => {
   it("opens one session under a home of its own, asks again while OpenCode has no catalogue yet, and lists what the session offers", async () => {
     const test = fixture(`
       if (message.method === 'initialize') reply({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } });

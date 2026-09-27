@@ -14,7 +14,7 @@ const scratch = scratchDirectories("perbo-runner-");
 const RUN_BEFORE = [{ started_at: "2026-01-01T00:00:00.000Z" }];
 
 /**
- * One run's egress questions (D-NEW-an-unlisted-host-asks): the first unlisted
+ * One run's egress questions (D-137): the first unlisted
  * host asks and the attempt waits on the answer; an allow is that host, on the
  * configuration and the live profile; a refusal closes the run's questions and
  * is remembered on the ticket; nobody answering within the window stops.

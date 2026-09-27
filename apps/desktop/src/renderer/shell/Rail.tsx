@@ -130,7 +130,7 @@ function HomeBadge({ tally }: { tally: Record<HomeTone, number> }) {
 /**
  * The rail: Create first (D-101), with planning's panes under it while a
  * piece of work is being planned — its contract the last of them
- * (D-NEW-basic-and-epic-flows) — then Home, Archive, and a settings icon
+ * (D-138) — then Home, Archive, and a settings icon
  * that grows upward into a pill of General, Usage and Connections. Outside
  * settings the pill opens on hover or focus; inside settings it stays open
  * and the tab you are on carries the bordered plate. It sits beneath the top
@@ -187,7 +187,7 @@ export function Rail({
   const visible = withoutDeleting(workspace, create.deleting);
   const tally = homeTally(visible, homeRows(visible).filter((row) => unseenAttention(visible, row)));
   // The planning whose panes sit under Create: the one open, which offers
-  // the panes `flowFor` says (D-NEW-basic-and-epic-flows).
+  // the panes `flowFor` says (D-138).
   const planning = route.page === "planning" ? route : null;
   // A repository's question page is Create's own page: Create is lit there,
   // and there is no planning, so no panes under it, until it is answered

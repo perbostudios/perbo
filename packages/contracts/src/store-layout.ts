@@ -72,7 +72,7 @@ export function attemptsPath(ticketId: string): StorePath {
 
 /**
  * One ticket's egress questions: each unlisted host a run put to a person and
- * the answer (D-NEW-an-unlisted-host-asks). The runner asks and waits on it,
+ * the answer (D-137). The runner asks and waits on it,
  * and `perbo verdict --egress` answers on it.
  */
 export function egressQuestionsPath(ticketId: string): StorePath {
@@ -112,7 +112,7 @@ export function driftPath(key: string): StorePath {
 
 /**
  * The answers the Architect offered to the findings a review routed to a
- * person, kept for that review (D-NEW-decision-options).
+ * person, kept for that review (D-135).
  */
 export function decisionOptionsPath(key: string): StorePath {
   return [TICKETS_DIR, `${key}.options.json`];

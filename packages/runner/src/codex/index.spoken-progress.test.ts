@@ -98,7 +98,7 @@ describe("the executor's words on Codex, as the run prints them", () => {
   );
 
   it(
-    "prints a command it runs whole, on one line (D-NEW-nothing-shown-is-cut)",
+    "prints a command it runs whole, on one line (D-133)",
     async () => {
       const command = `ls ${"a-directory-with-a-long-name/".repeat(12)}\nls the-second-line`;
       const f = fixture(

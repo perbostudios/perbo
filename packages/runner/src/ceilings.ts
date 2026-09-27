@@ -182,7 +182,7 @@ export class AttemptCeilings {
 
   /**
    * A call is held while a person is asked whether its host may be reached
-   * (D-NEW-an-unlisted-host-asks). The executor is waiting on the person, not
+   * (D-137). The executor is waiting on the person, not
    * hung, so the stall window does not run while any call is held; the wait
    * has its own bound, the same window, and ends the attempt as
    * `unlisted_egress_host` rather than `stalled`. The window starts again from

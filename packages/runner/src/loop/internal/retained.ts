@@ -25,7 +25,7 @@ import { branchLine } from "./relevel.js";
 
 /**
  * Publishing a branch a run retained without publishing
- * (D-NEW-publish-a-retained-branch-later).
+ * (D-136).
  *
  * A run that ended `approved` or `escalated` with publishing off left its
  * branch on this machine and opened nothing. A person's press publishes it

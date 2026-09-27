@@ -177,7 +177,7 @@ export function codexFileDecision(path: string, state: PreToolGuardState) {
  * own state: a tool item resets the stall window and is recorded (D-096), a
  * completed compaction asks for the brief again on the thread it happened on
  * (D-096), a command naming a host outside the allow-list stops the attempt
- * where nothing asks a person about it (D-NEW-an-unlisted-host-asks), and a
+ * where nothing asks a person about it (D-137), and a
  * capability the isolated session should not have stops it too. Built
  * apart from the session that delivers the notifications, so the wiring can be
  * driven without an app server.
@@ -190,7 +190,7 @@ export function codexNotificationHandler(attempt: {
   record: (item: CodexItem, threadId: string | null) => void;
   egress: Pick<EgressLog, "observe">;
   /**
-   * D-NEW-an-unlisted-host-asks: whether the approval path asks a person about
+   * D-137: whether the approval path asks a person about
    * an unlisted host. Where it does, the host is recorded here and the
    * approval holds the command; a command Codex ran without asking ran in the
    * read-only sandbox, whose network is off.
@@ -258,7 +258,7 @@ export function codexNotificationHandler(attempt: {
         stop("unlisted_egress_host", "Command requested a host outside the network allow-list");
       // On one line: a command's own newline would otherwise print a line
       // that reads as one of the run's stages. Whole, as the attempt's record
-      // keeps it (D-NEW-nothing-shown-is-cut); the Watch page lists no command.
+      // keeps it (D-133); the Watch page lists no command.
       if (method === "item/started")
         progress(
           `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type))}`,
@@ -413,7 +413,7 @@ export async function runCodexAgent(
   };
   let session: CodexExecutorSession | null = null;
   let stopped = false;
-  /** D-NEW-an-unlisted-host-asks: the gate that answers for an unlisted host, where the loop handed one. */
+  /** D-137: the gate that answers for an unlisted host, where the loop handed one. */
   const gate = request.egress ?? null;
   /** Aborts every question still waiting on a person once the attempt stops. */
   const waiting = new AbortController();
@@ -511,7 +511,7 @@ export async function runCodexAgent(
     return entry;
   };
   /**
-   * D-NEW-an-unlisted-host-asks: an approved command naming hosts off the
+   * D-137: an approved command naming hosts off the
    * list, held while each is settled through the gate with the stall window
    * held. An allow joins the attempt's list; a refusal declines the command
    * and tells the executor, on the thread that asked, what the gate said to;
@@ -744,7 +744,7 @@ export async function runCodexAgent(
           !denial &&
           !requestApproval.additionalPermissions &&
           !requestApproval.networkApprovalContext;
-        // D-NEW-an-unlisted-host-asks: a command the guard would admit that
+        // D-137: a command the guard would admit that
         // names a host off the list waits here for the gate.
         const unlisted =
           accepted && gate !== null && method === "item/commandExecution/requestApproval"

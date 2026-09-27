@@ -76,7 +76,7 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  *   decision page reads them back rather than spending again. Read and written
  *   only through `@perbo/planning`'s `decision-options-record.ts`, by
  *   `perbo options`; nothing gates on it
- *   ([D-NEW-decision-options](../../../../docs/11-open-decisions.md)).
+ *   ([D-135](../../../../docs/11-open-decisions.md)).
  */
 
 /** Lives beside the tickets and is not one; `listTickets` skips it by name. */

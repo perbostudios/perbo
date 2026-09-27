@@ -471,7 +471,7 @@ export async function discoverModels(
 /**
  * The models an OpenCode role can call, as OpenCode's ACP server offers them
  * to a session opened in a scratch directory, under the same home every role
- * runs in (D-NEW-opencode-is-a-provider): fresh directories, no project
+ * runs in (D-134): fresh directories, no project
  * configuration, OpenCode Zen's key where the app environment has one. Only
  * `initialize` and `session/new` are sent, so no turn starts. OpenCode reads
  * its catalogue as it starts and refuses a session asked for before it has, so

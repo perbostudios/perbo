@@ -10,7 +10,7 @@ import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo verdict <ticket> --egress <key> --allow|--refuse`
- * (D-NEW-an-unlisted-host-asks): a person's answer to the question a live run
+ * (D-137): a person's answer to the question a live run
  * is waiting on, written to the ticket's egress record that run reads, and
  * refused where nothing waits on it.
  */

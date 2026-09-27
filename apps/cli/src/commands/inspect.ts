@@ -1440,7 +1440,7 @@ export function renderInspect(
     for (const attempt of rungs) {
       const rung = attempt.ladder!;
       const counted = rung.kind === "resolve_conflict" ? " (conflict — not a remediation round)" : "";
-      // Whole (D-NEW-nothing-shown-is-cut): beside the round where it fits, under it where it does not.
+      // Whole (D-133): beside the round where it fits, under it where it does not.
       const said =
         `given ${rung.given.length}  closed ${rung.closed.length}  ` +
         (rung.open.length === 0 ? "all closed" : `open ${rung.open.length}`) +
@@ -1602,7 +1602,7 @@ export function renderInspect(
         const hang = `${margin}   `;
         const commandWidth = 28 - indent;
         const mark = CHECK_MARK[check.status] ?? "?";
-        // The command and the summary whole (D-NEW-nothing-shown-is-cut): the
+        // The command and the summary whole (D-133): the
         // summary right of the command where both fit the width, and under
         // the row, wrapped, where they do not.
         const command = (check.command ?? "").padEnd(commandWidth);
@@ -1771,7 +1771,7 @@ export function renderInspect(
           paint(`   ${attempt.denials.length} command(s) the executor did not get`, "dim"),
       );
       for (const denial of attempt.denials) {
-        // The refused target whole (D-NEW-nothing-shown-is-cut): beside the rule where it fits.
+        // The refused target whole (D-133): beside the rule where it fits.
         const rule = `    ${paint(pad(denial.rule, 24), "warn")} `;
         if (32 + denial.target.length <= WIDTH) lines.push(rule + paint(denial.target, "hi"));
         else lines.push(rule.trimEnd(), ...wrap(denial.target, 6).map((line) => paint(line, "hi")));

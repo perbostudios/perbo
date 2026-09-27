@@ -1838,7 +1838,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 });
 
 describe("a local run record that does not parse", () => {
-  it("names five of what it could not read, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names five of what it could not read, then how many more (D-133)", () => {
     const store = mkdtempSync(join(tmpdir(), "perbo-local-record-"));
     const path = localRunPath(store, "run_broken");
     mkdirSync(dirname(path), { recursive: true });

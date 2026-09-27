@@ -131,7 +131,7 @@ export class DriftReadings {
       { repo, key, kind: "drift", label: "Read the plan against the spec" },
       async (job, run) => {
         const models = this.deps.models(repo.id, key);
-        // Tried until it runs (D-NEW-basic-and-epic-flows): a command that
+        // Tried until it runs (D-138): a command that
         // exits with an error — no credential, the network, a crash — or
         // prints something that is not a verdict is run again after each of
         // the pauses, and fails the job only once every try has; a cancelled
@@ -159,7 +159,7 @@ export class DriftReadings {
         // redacted it before measuring it, and asked the model again for a
         // field that redaction lengthened past its length, so nothing here is
         // cut to fit: a word cut short is a sentence the person reads as
-        // something it did not say (D-NEW-nothing-shown-is-cut). This host's
+        // something it did not say (D-133). This host's
         // redaction knows credentials the CLI's environment may not hold, so
         // it can still empty a field outright (a heading that was only escape
         // codes) or lengthen it past what the field holds; a card with no
@@ -289,7 +289,7 @@ export class DriftReadings {
    * The state it is of is recorded as a reading asked for by a page is, where
    * no turn overlaps it, so a basic ticket's Confirm contract after the
    * problems are resolved compares the state it is at with this reading's and
-   * reads nothing again (D-NEW-basic-and-epic-flows).
+   * reads nothing again (D-138).
    *
    * Never over a reading already in flight for the planning — the pane asks for
    * one on arrival, and two would land on top of each other — but never lost
@@ -350,7 +350,7 @@ export class DriftReadings {
    * state, where the ticket has no record of the edits made to its plan since
    * it was drafted, and once a person has edited the plan by hand since then,
    * and that refusal is this request's, in the CLI's words
-   * (D-NEW-basic-and-epic-flows). Not a job: nothing runs but a write to the
+   * (D-138). Not a job: nothing runs but a write to the
    * record.
    */
   async dismiss(id: string): Promise<null> {

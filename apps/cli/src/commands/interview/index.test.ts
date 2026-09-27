@@ -149,7 +149,7 @@ describe("the line an interview is asked for by", () => {
     expect(() => interviewLine(["--provider", "gemini"])).toThrow(/claude or codex or opencode/);
     expect(() => interviewLine(["--approve"])).toThrow(UsageError);
     expect(() => interviewLine(["--spec"])).toThrow(/requires a value/);
-    // The three the interview runs on (D-NEW-opencode-is-a-provider).
+    // The three the interview runs on (D-134).
     expect([...INTERVIEW_PROVIDERS]).toEqual(["claude", "codex", "opencode"]);
   });
 
@@ -1201,7 +1201,7 @@ describe("the orientation", () => {
         "question, an option or your pick.",
     );
     // An overlong message is still handed back rather than cut
-    // (D-NEW-nothing-shown-is-cut), and the session is told so without a
+    // (D-133), and the session is told so without a
     // number of characters to write towards.
     expect(flat).toContain("A message longer than the chat holds is handed back to you to condense.");
     expect(flat).not.toMatch(/\d[\d,]* characters/);

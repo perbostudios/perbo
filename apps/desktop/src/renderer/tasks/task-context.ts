@@ -189,7 +189,7 @@ export function watchTranscript(
         ? { author: "Executor", label: "message", text: words }
         : { author: "Reviewer", label: "finding", text: words },
     );
-  // D-NEW-an-unlisted-host-asks: while the run waits on the person, the pause
+  // D-137: while the run waits on the person, the pause
   // is the last line, in the runner's own words and never an agent's.
   if (active !== undefined && isRun(active)) {
     const last = runnerStages(active.log).findLast(({ stage }) => stage.kind === "egress" || stage.kind === "egressSettled");
@@ -241,7 +241,7 @@ export function stageWords(stage: RunnerStage): string {
       return "Verifying closures";
     case "delivery":
       return "Opening the pull request";
-    // D-NEW-an-unlisted-host-asks: the pause, and how it ended.
+    // D-137: the pause, and how it ended.
     case "egress":
       return `Waiting on you: allow ${stage.host}?`;
     case "egressSettled":

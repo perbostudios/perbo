@@ -3349,7 +3349,7 @@ readline.createInterface({ input: process.stdin })
       throw new Error("The draft never landed");
     };
 
-    it("records a plan drafted from the spec as read by its drafting where the verdict admission wrote holds (D-NEW-basic-and-epic-flows)", async () => {
+    it("records a plan drafted from the spec as read by its drafting where the verdict admission wrote holds (D-138)", async () => {
       // A plan just drafted agrees with its spec by construction (D-128): it is
       // recorded as read at the state it landed at, so its first confirm reads
       // nothing, and no reading runs for it here.
@@ -3449,7 +3449,7 @@ readline.createInterface({ input: process.stdin })
       // What a save under the title it read announces, which a respaced one
       // matches: every save that lands has the drafts list read again, since
       // the contract tab holds by the spec's sections
-      // (D-NEW-basic-and-epic-flows).
+      // (D-138).
       const unchanged = listed();
       await saveSpec(service, { kind: "specSave", id, repoId, title: read.title, sections: read.sections });
       const respaced = listed();
@@ -5328,7 +5328,7 @@ readline.createInterface({ input: process.stdin })
     expect(job.result).toEqual(verdict([finding]));
   });
 
-  it("records the state the asker read at once the reading lands of it, and nothing for an asker with none (D-NEW-basic-and-epic-flows)", async () => {
+  it("records the state the asker read at once the reading lands of it, and nothing for an asker with none (D-138)", async () => {
     const { service, repo } = canned();
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
@@ -5349,7 +5349,7 @@ readline.createInterface({ input: process.stdin })
     expect(drifts[0]).toEqual([
       "drift", "PRB-1", "--provider", settings.draftingProvider, "--model", settings.executorModel, "--json",
     ]);
-    // Tried until it runs (D-NEW-basic-and-epic-flows): once, and three times more.
+    // Tried until it runs (D-138): once, and three times more.
     expect(drifts).toHaveLength(4);
     expect(job.state).toBe("failed");
   });
@@ -5573,7 +5573,7 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "driftDismiss", id });
     expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
     // Open again: approving is refused, in one sentence, before anything
-    // starts (D-NEW-basic-and-epic-flows).
+    // starts (D-138).
     await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
     const detail = await service.detail(registered.id, "PRB-1");
@@ -5652,7 +5652,7 @@ readline.createInterface({ input: process.stdin })
     return { promise, release };
   }
 
-  it("records the state a re-read after an answer was of, so the confirm after it reads nothing again (D-NEW-basic-and-epic-flows)", async () => {
+  it("records the state a re-read after an answer was of, so the confirm after it reads nothing again (D-138)", async () => {
     const root = scratchDirectory("perbo-drift-");
     let reply: unknown = verdict([finding]);
     const { service, repo, drifts } = canned(() => reply, fakeAnswering(root));
@@ -6183,7 +6183,7 @@ readline.createInterface({ input: process.stdin })
  * from, which mints a second ticket beside the stopped one, or it is deleted
  * whole (D-129).
  */
-describe("dismissing the problems after a hand edit (D-NEW-basic-and-epic-flows)", () => {
+describe("dismissing the problems after a hand edit (D-138)", () => {
   /**
    * PRB-1 drafted from a spec, as `admit --from-spec` records it, with the
    * verdict it holds at the state it is at and a planning over it: every
@@ -6445,7 +6445,7 @@ describe("a stopped run's ticket", () => {
     expect(minted.admission.spec.path).toBe(spec);
   });
 
-  it("records a basic plan drafted again as read by its drafting, and a criterion edited after it is what the confirm's reading judges (D-NEW-basic-and-epic-flows)", async () => {
+  it("records a basic plan drafted again as read by its drafting, and a criterion edited after it is what the confirm's reading judges (D-138)", async () => {
     let repo = "";
     // What each reading was handed: the criteria in the contract as `perbo
     // drift` reads them, off the ticket store at the moment it is asked.
@@ -7065,7 +7065,7 @@ describe("what the host lets a person archive", () => {
 describe("usage: who is connected, and why a provider has no windows", () => {
   /**
    * Claude Code and Codex signed in, and an OpenCode 2 installed, which is
-   * connected with no sign-in (D-NEW-opencode-is-a-provider). Answered here
+   * connected with no sign-in (D-134). Answered here
    * rather than by whatever `opencode` the machine has, so the row reads the
    * same on every machine.
    */
@@ -7223,7 +7223,7 @@ describe("deleting a filed ticket", () => {
 });
 
 /**
- * D-NEW-publish-a-retained-branch-later: the merge press on a ticket whose run
+ * D-136: the merge press on a ticket whose run
  * retained its branch. The host runs the CLI's own delivery of it as a job,
  * argv and never a shell string, under a run's configuration with publishing
  * on and a person merging, then opens the pull request the CLI recorded. The

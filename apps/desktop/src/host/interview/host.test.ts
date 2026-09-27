@@ -560,7 +560,7 @@ describe("stopping", () => {
 });
 
 /**
- * Nothing the chat shows is cut (D-NEW-nothing-shown-is-cut): the session's own
+ * Nothing the chat shows is cut (D-133): the session's own
  * words that run past what the record holds are asked for again, condensed,
  * and the host's own notes carry what they quote whole.
  */

@@ -39,7 +39,7 @@ import { UsageError } from "../../usage-error.js";
 
 /**
  * The interview on OpenCode: the person's session over `opencode acp`
- * (D-102, D-NEW-opencode-is-a-provider).
+ * (D-102, D-134).
  *
  * OpenCode runs its own reads, commands and file changes under the chat's
  * permission rules, which ask this client about every command, every file

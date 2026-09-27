@@ -17,7 +17,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("the name asked for on the first screen (D-NEW-nothing-shown-is-cut)", () => {
+describe("the name asked for on the first screen (D-133)", () => {
   it("is held to what a name holds where it is typed, and saved without a refusal", async () => {
     const sent: Request[] = [];
     vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {

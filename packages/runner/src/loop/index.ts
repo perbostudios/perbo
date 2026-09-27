@@ -325,7 +325,7 @@ async function runLockedTicket(
   });
 
   /**
-   * D-NEW-an-unlisted-host-asks: the run's one question about the network,
+   * D-137: the run's one question about the network,
    * the refusals remembered on the ticket, and the hosts a person allowed.
    */
   const egressQuestions = new RunEgressQuestions({

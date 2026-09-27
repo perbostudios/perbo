@@ -15,7 +15,7 @@ const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * An unlisted host on a call the guard holds, under Claude Code
- * (D-NEW-an-unlisted-host-asks).
+ * (D-137).
  *
  * The attempt does not stop: the write guard's hook holds the call before it
  * runs, the runner asks the gate with the host and the whole command, and the
@@ -177,7 +177,7 @@ describe("a question nobody answers", () => {
 
 /**
  * What is put to the person is the runner's own redacted record of the call,
- * never the hook's ask file (D-NEW-an-unlisted-host-asks).
+ * never the hook's ask file (D-137).
  */
 describe("what the runner asks about", () => {
   it(

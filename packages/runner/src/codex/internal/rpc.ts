@@ -171,7 +171,7 @@ export class CodexExecutorSession {
      * The runner's answer to an approval request. A promise holds the request
      * until it settles — the command waits, and the rest of the session goes
      * on — which is how a call naming an unlisted host waits for a person
-     * (D-NEW-an-unlisted-host-asks).
+     * (D-137).
      */
     approve: (method: string, params: unknown) => boolean | Promise<boolean>;
     codexHome?: string;

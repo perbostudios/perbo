@@ -437,7 +437,7 @@ export function InterviewDock({
             ref={box}
             aria-label="Message the chat"
             value={text}
-            // Held to what a turn carries where it is typed, never cut after (D-NEW-nothing-shown-is-cut).
+            // Held to what a turn carries where it is typed, never cut after (D-133).
             maxLength={TYPED_TEXT_MAX_CHARS}
             disabled={id === null}
             onChange={(event) => setText(event.target.value)}
@@ -837,7 +837,7 @@ export function QuestionCard({
   /**
    * The room a part's own words have: what a turn carries, less what the
    * rest of the group's answer already takes, so the answer typed in is never
-   * refused when it goes down as one turn (D-NEW-nothing-shown-is-cut).
+   * refused when it goes down as one turn (D-133).
    */
   const roomFor = (index: number): number =>
     Math.max(
@@ -1213,7 +1213,7 @@ export function Line({
  * colour. A note is words and never a press: drafting and confirming are the
  * panes' own. A note about a tool's output says what happened in its one
  * sentence, and the output is behind the `i` after it, whole, as the run's
- * ending card and a refused call's reason are (D-NEW-nothing-shown-is-cut).
+ * ending card and a refused call's reason are (D-133).
  */
 export function NoteLine({ line }: { line: Extract<InterviewEntry["line"], { kind: "note" }> }) {
   return (

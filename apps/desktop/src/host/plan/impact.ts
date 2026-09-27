@@ -49,7 +49,7 @@ export interface ContractImpactDeps {
  *
  * How many paths it found outside the scope is written on the session, since
  * a flat plan offers the Impact pane only where there are some, and the rail
- * that offers it reads no report (D-NEW-basic-and-epic-flows).
+ * that offers it reads no report (D-138).
  */
 export async function impactView(deps: ImpactDeps, id: string): Promise<ImpactView> {
   const session = deps.editing.read(id);

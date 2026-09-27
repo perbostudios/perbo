@@ -18,7 +18,7 @@ afterEach(() => {
 
 /**
  * An unlisted host on a command Codex asks approval for
- * (D-NEW-an-unlisted-host-asks): the approval is held while the gate is
+ * (D-137): the approval is held while the gate is
  * asked, accepted on an allow, declined on a refusal with the executor told
  * why on its own thread, and the attempt ends `unlisted_egress_host` only where
  * nobody answers.

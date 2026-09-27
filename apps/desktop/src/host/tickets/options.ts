@@ -23,7 +23,7 @@ export function decisionOptionsArgs(key: string, findings: readonly string[], pr
 
 /**
  * The Architect's answers to the findings a ticket's last review left for a
- * person (D-NEW-decision-options), as `perbo options` prints them: the answers
+ * person (D-135), as `perbo options` prints them: the answers
  * kept beside the ticket for that review, and a model asked only for a finding
  * not yet answered there.
  *
@@ -33,14 +33,14 @@ export function decisionOptionsArgs(key: string, findings: readonly string[], pr
  * person's credential reaches the command through the environment it inherits
  * and is written nowhere.
  *
- * Tried until it runs, as a reading is (D-NEW-basic-and-epic-flows): a command
+ * Tried until it runs, as a reading is (D-138): a command
  * that exits with an error or prints something that is not the answers is run
  * again after each pause, and the last failure is what the card says.
  *
  * Each answer is redacted again with what this host's environment knows and
  * flattened onto its line, as the drift reading is: an answer that redaction
  * lengthens past what one may hold, or empties, fails the asking rather than
- * being cut or dropped (D-NEW-nothing-shown-is-cut).
+ * being cut or dropped (D-133).
  */
 export async function decisionOptions(
   deps: DecisionOptionsDeps,

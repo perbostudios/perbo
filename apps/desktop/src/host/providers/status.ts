@@ -91,7 +91,7 @@ export async function probeProviders(
 }
 
 /**
- * OpenCode, as every role Perbo runs on it sees it (D-NEW-opencode-is-a-provider).
+ * OpenCode, as every role Perbo runs on it sees it (D-134).
  *
  * There is no sign-in to offer: each role runs OpenCode under a home of
  * Perbo's own making, where a login the person made would never be read, and

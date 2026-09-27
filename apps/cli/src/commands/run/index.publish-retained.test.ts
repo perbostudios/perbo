@@ -16,7 +16,7 @@ import { UsageError } from "../../usage-error.js";
 
 /**
  * `perbo run --ticket <KEY> --publish-retained` at the command line
- * (D-NEW-publish-a-retained-branch-later).
+ * (D-136).
  *
  * PRB-8's path: a run with publishing off ends approved at `pr_open`, its
  * branch retained on this machine and no pull request. The command pushes that

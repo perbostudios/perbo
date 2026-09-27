@@ -18,7 +18,7 @@ const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The one write of an allowed host into `.perbo/config.json`
- * (D-NEW-an-unlisted-host-asks): a plain host name or nothing (ADR-0023), the
+ * (D-137): a plain host name or nothing (ADR-0023), the
  * rest of the file kept as it was.
  */
 describe("adding a host to network_allow_list", () => {

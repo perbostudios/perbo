@@ -26,7 +26,7 @@ describe("each role's effort in the run configuration", () => {
   });
 });
 
-describe("OpenCode as the run's executor and reviewer (D-NEW-opencode-is-a-provider)", () => {
+describe("OpenCode as the run's executor and reviewer (D-134)", () => {
   it("runs `opencode` on OpenCode Zen's Claude Opus 5 where the configuration names neither", () => {
     expect(TicketRunConfigSchema.parse({ ...base, agent_provider: "opencode-cli" })).toMatchObject({
       agent_binary: "opencode",
