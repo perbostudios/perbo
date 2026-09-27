@@ -7,6 +7,24 @@ import type { Ticket } from "./ticket.js";
  */
 export const gateClosedNote = (outcome: string): string => `the gate closed: ${outcome}`;
 
+/** The row a run that delivered writes: the approval, and that a person merges. */
+export const APPROVED_NOTE = "approved; a human merges it";
+
+/** The row a run that did not complete writes, naming its outcome. */
+export const incompleteNote = (outcome: string): string => `the attempt did not complete: ${outcome}`;
+
+/**
+ * The outcome a ticket's row records its run ending on — `APPROVED_NOTE`, a
+ * `gateClosedNote` or an `incompleteNote` — or null where the row is not a
+ * run's end. The desktop says each in its own words from this.
+ */
+export function runEndedOn(note: string): string | null {
+  if (note === APPROVED_NOTE) return "approved";
+  const head = [gateClosedNote(""), incompleteNote("")].find((prefix) => note.startsWith(prefix));
+  const outcome = head === undefined ? "" : note.slice(head.length);
+  return /^[a-z_]+$/.test(outcome) ? outcome : null;
+}
+
 /** The branch a ticket's last run retained, or why there is none to publish. */
 export type RetainedBranch =
   | { branch: string; outcome: "approved" | "escalated"; refusal: null }

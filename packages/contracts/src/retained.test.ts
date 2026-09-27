@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gateClosedNote, retainedBranch } from "./retained.js";
+import { APPROVED_NOTE, gateClosedNote, incompleteNote, retainedBranch, runEndedOn } from "./retained.js";
 import type { Ticket } from "./ticket.js";
 
 /**
@@ -77,5 +77,15 @@ describe("a retained branch to publish", () => {
     expect(retainedBranch(ended("pr_open", "approved", { branch: null })).refusal).toBe(
       "PRB-8 records no branch, so its run retained nothing to publish",
     );
+  });
+});
+
+describe("the outcome a ticket's row records its run ending on", () => {
+  it("reads each run-ending row the CLI writes, and nothing else", () => {
+    expect(runEndedOn(APPROVED_NOTE)).toBe("approved");
+    expect(runEndedOn(gateClosedNote("remediation_stalled"))).toBe("remediation_stalled");
+    expect(runEndedOn(incompleteNote("no_changes"))).toBe("no_changes");
+    expect(runEndedOn("run started against plan_0e106f5ed0ddb333")).toBeNull();
+    expect(runEndedOn(incompleteNote("the review did not complete"))).toBeNull();
   });
 });

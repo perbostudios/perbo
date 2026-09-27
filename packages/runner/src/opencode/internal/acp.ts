@@ -10,6 +10,7 @@ import {
   OPENCODE_API_KEY_ENV,
   OPENCODE_SESSION_ATTEMPTS,
   OPENCODE_SESSION_RETRY_MS,
+  awaitOpenCodeModel,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -296,13 +297,21 @@ export class OpenCodeExecutorSession {
    *
    * OpenCode loads its model catalogue as it starts, and a session asked for
    * before the catalogue has arrived is refused; it is asked again
-   * (`OPENCODE_SESSION_ATTEMPTS`, `OPENCODE_SESSION_RETRY_MS` apart).
+   * (`OPENCODE_SESSION_ATTEMPTS`, `OPENCODE_SESSION_RETRY_MS` apart). And the
+   * catalogue a directory's first session sees is the one every later session
+   * there sees, so the worktree's session is opened only once a session in a
+   * directory of this process's own offers `model` (`awaitOpenCodeModel`).
    */
   async open(cwd: string, model: string): Promise<OpenedSession> {
     await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: "perbo_executor", version: "0.1.0" },
+    });
+    await awaitOpenCodeModel({
+      model,
+      scratch: () => mkdtempSync(join(this.root, "catalogue-")),
+      request: (method, params) => this.request(method, params),
     });
     let opened: unknown;
     for (let attempt = 0; ; attempt += 1) {

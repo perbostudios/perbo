@@ -251,6 +251,35 @@ describe("the OpenCode executor", () => {
   );
 
   it(
+    "opens its session in the worktree only once OpenCode's catalogue offers the model, however its first snapshot came out",
+    async () => {
+      const { fake, worktree, run } = attempt({ staleSnapshots: 1, turns: [{ steps: [{ say: "Done." }] }] });
+      const result = await run;
+      expect(result.termination).toEqual({ reason: "completed", detail: "" });
+      const opened = fake
+        .received()
+        .filter((line) => line["method"] === "session/new")
+        .map((line) => (line["params"] as { cwd: string }).cwd);
+      // A stale snapshot, a settled one, then the worktree's own session.
+      expect(opened).toHaveLength(3);
+      expect(opened.slice(0, 2).every((cwd) => cwd !== worktree)).toBe(true);
+      expect(opened[2]).toBe(worktree);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ends a model OpenCode never offers as transport_unavailable, which a later attempt can clear",
+    async () => {
+      const { run } = attempt({ staleSnapshots: 99, turns: [{ steps: [] }] }, { model: "opencode/big-pickle" });
+      const result = await run;
+      expect(result.termination.reason).toBe("transport_unavailable");
+      expect(result.termination.detail).toContain("model not found");
+    },
+    60_000,
+  );
+
+  it(
     "refuses a session that loaded an agent definition of its own",
     async () => {
       const { run } = attempt({ modes: ["build", "plan", "repository-agent"], turns: [{ steps: [] }] });

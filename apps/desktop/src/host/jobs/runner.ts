@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EXIT_CODES, isRunVerdict } from "@perbo/contracts";
 import { busyMessage, inTheWay, isLive, journal } from "../../shared/jobs.js";
-import { logTail, redact, requireSuccess } from "../process.js";
+import { LOG_TAIL_CHARS, logTail, redact, requireSuccess } from "../process.js";
 import type { Cli } from "../cli.js";
 import type { Changes } from "../changes.js";
 import type { ContractEditing, EditingOwner } from "../../shared/contract-editing.js";
@@ -17,6 +17,25 @@ export interface InvokeOptions {
    * completing, paused for them, and not a failure.
    */
   verdict?: boolean;
+  /**
+   * `perbo run --json`: the log is what the run printed on stderr as it went,
+   * the same log it showed while it was live, and its result on stdout is the
+   * job's `result` alone, so a long result never pushes the agents' words out
+   * of the log's tail.
+   */
+  progressLog?: boolean;
+}
+/**
+ * Another command's log: its stderr, then its stdout, each cut to its own
+ * tail, so neither pushes the other out of the log. Stdout takes at most half
+ * the log, and stderr whatever stdout leaves.
+ */
+function commandLog(result: ProcessResult): string {
+  const stdout = redact(result.stdout);
+  const out = stdout.trim() === "" ? "" : logTail(stdout, LOG_TAIL_CHARS / 2);
+  const stderr = redact(result.stderr);
+  const err = logTail(stderr, out === "" ? LOG_TAIL_CHARS : LOG_TAIL_CHARS - out.length - 1);
+  return [err, out].filter(Boolean).join("\n");
 }
 /** What a running job is given: its cancellation, and the CLI in its own repository. */
 export interface JobContext {
@@ -225,7 +244,7 @@ export class JobRunner {
   /**
    * One invocation of the CLI for a job: its output becomes the job's log as it
    * arrives, persisted no more often than the interval, and its stdout the
-   * job's result where it is JSON. A run that exits on a verdict for the person
+   * job's result where it is JSON, whatever the exit. A run that exits on a verdict for the person
    * completes with that outcome on the job, and every other non-zero exit is
    * the job failing.
    */
@@ -249,7 +268,7 @@ export class JobRunner {
         this.deps.progressed(job);
       },
     });
-    job.log = logTail(redact([result.stderr, result.stdout].filter(Boolean).join("\n")));
+    job.log = options.progressLog === true ? logTail(redact(result.stderr)) : commandLog(result);
     const parsed = ((): unknown => {
       if (!result.stdout.trim()) return undefined;
       try {
@@ -266,8 +285,8 @@ export class JobRunner {
       isRunVerdict(outcome)
         ? outcome
         : null;
-    if (verdict === null) requireSuccess(result);
     if (parsed !== undefined) job.result = parsed;
+    if (verdict === null) requireSuccess(result);
     if (verdict !== null) job.outcome = verdict;
     return result;
   }

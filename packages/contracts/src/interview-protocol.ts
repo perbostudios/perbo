@@ -268,3 +268,48 @@ export function answersGroup(group: InterviewQuestionGroup, text: string): boole
     return line.startsWith(prefix) && line.slice(prefix.length).trim().length > 0;
   });
 }
+
+/**
+ * What a turn that answers this group said to each of its parts, in the order
+ * they were read, or null where the turn is not the group's answer
+ * ({@link answersGroup}): the turn whole for a single part, and each lettered
+ * line past its letter for more than one.
+ */
+export function groupAnswers(group: InterviewQuestionGroup, text: string): string[] | null {
+  if (!answersGroup(group, text)) return null;
+  if (group.parts.length === 1) return [text.trim()];
+  return text
+    .trim()
+    .split("\n")
+    .map((line, index) => line.trim().slice(`${PART_LETTERS[index] ?? index + 1})`.length).trim());
+}
+
+/** A question as {@link sameQuestion} reads it: its words, and the labels of the answers it offers. */
+export interface QuestionPut {
+  question: string;
+  options: readonly { label: string }[];
+}
+
+/**
+ * Whether two parts put the same question to the person: the same words once
+ * trimmed, offering the same answers, by their labels trimmed and in any order.
+ *
+ * What an option's detail says, which option is recommended, the group's title
+ * and which group the part sits in are not the question. A session asking again
+ * words those differently from one breath to the next, and the person would be
+ * answering the thing they have already answered. A question reworded, or one
+ * offering an answer it did not offer before, is a new question.
+ *
+ * Both ends read it: the interview refuses a call that puts a question again,
+ * and the desktop host settles an asking that repeats one rather than putting a
+ * second card up for it, so a second copy of the rule would let the two
+ * disagree about what the person has already been asked.
+ */
+export function sameQuestion(left: QuestionPut, right: QuestionPut): boolean {
+  if (left.question.trim() !== right.question.trim()) return false;
+  const labels = (part: QuestionPut): string[] =>
+    [...new Set(part.options.map((option) => option.label.trim()))].sort();
+  const ours = labels(left);
+  const theirs = labels(right);
+  return ours.length === theirs.length && ours.every((label, index) => label === theirs[index]);
+}

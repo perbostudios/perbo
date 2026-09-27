@@ -71,10 +71,10 @@ function writeVerification(
 
 describe("the remediation a re-run continues", () => {
   it("has nothing to continue where no review is on record", () => {
-    expect(remediationToContinue({ bundles: store(), ticket_id: TICKET, decided: [] })).toBeNull();
+    expect(remediationToContinue({ bundles: store(), ticket_id: TICKET, decided: [], history: [] })).toBeNull();
   });
 
-  it("takes the last verification's open set and the commit it judged", () => {
+  it("continues what the verifications left open, from the commit the last one judged", () => {
     const bundles = store();
     const open = finding({ key: "a".repeat(64) });
     const closed = finding({ key: "b".repeat(64) });
@@ -89,7 +89,7 @@ describe("the remediation a re-run continues", () => {
       "2026-08-27T01:00:00.000Z",
     );
 
-    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [] });
+    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] });
 
     expect(continuing?.findings.map((entry) => entry.key)).toEqual([open.key]);
     expect(continuing?.head_commit).toBe("fed4321");
@@ -103,7 +103,7 @@ describe("the remediation a re-run continues", () => {
       "2026-08-27T00:00:00.000Z",
     );
 
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [] })?.head_commit).toBe("def5678");
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] })?.head_commit).toBe("def5678");
   });
 
   it("refuses a verification that never recorded what was still open", () => {
@@ -115,7 +115,7 @@ describe("the remediation a re-run continues", () => {
     );
     writeVerification(bundles, { head_commit: "fed4321" }, "2026-08-27T01:00:00.000Z");
 
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [] })).toBeNull();
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] })).toBeNull();
   });
 });
 
@@ -136,7 +136,7 @@ describe("the delivery a person's answers take without a round", () => {
     decided_at: at,
   });
   const delivery = (bundles: BundleStore, at: string) =>
-    decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [answer(at)] });
+    decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [answer(at)], history: [] });
 
   it("counts a finding the executor closed, as a verification recorded it, beside the answered one", () => {
     const bundles = store();
@@ -160,7 +160,7 @@ describe("the delivery a person's answers take without a round", () => {
     );
   });
 
-  it("reads the last verification's open set, and a finding no verification was given as open", () => {
+  it("reads each finding's status off the last verification given it, and a finding no verification was given as open", () => {
     const bundles = store();
     const declined = finding({ key: "e".repeat(64) });
     writeReview(
@@ -205,7 +205,7 @@ describe("the delivery a person's answers take without a round", () => {
     );
     const at = "2026-08-27T02:00:00.000Z";
     const both = [answer(at), { ...answer(at), finding_key: remediable.key }];
-    expect(decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: both })).toBeNull();
+    expect(decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: both, history: [] })).toBeNull();
   });
 
   it("delivers nothing where no standing finding was answered by a person", () => {
@@ -243,6 +243,7 @@ describe("the delivery a person's answers take without a round", () => {
         ticket_id: TICKET,
         repository_id: "repo_fixture",
         decided: [{ ...answer("2026-08-27T02:00:00.000Z"), review_id }],
+        history: [],
       });
     expect(named("rev_0000000000000001")).toBeNull();
     expect(named("rev_0000000000000002")?.decided).toHaveLength(1);
@@ -259,11 +260,11 @@ describe("the delivery a person's answers take without a round", () => {
       { findings_given: forPerson.key, findings_open: "", head_commit: "fed4321" },
       "2026-08-27T02:00:00.000Z",
     );
-    const again = decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed] });
+    const again = decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed], history: [] });
     expect(again?.head_commit).toBe("fed4321");
     expect(again?.decided).toEqual([handed]);
     expect(again?.review.findings[0]).toMatchObject({ status: "resolved", outcome: "fixed" });
-    expect(judgedOnRecord({ bundles, ticket_id: TICKET })?.head_commit).toBe("fed4321");
+    expect(judgedOnRecord({ bundles, ticket_id: TICKET, history: [] })?.head_commit).toBe("fed4321");
   });
 
   it("does not hand a finding a round verified closed to the executor again", () => {
@@ -281,9 +282,9 @@ describe("the delivery a person's answers take without a round", () => {
       "2026-08-27T02:00:00.000Z",
     );
     const shipped = { ...answer("2026-08-27T03:00:00.000Z"), finding_key: other.key };
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [handed, shipped] })).toBeNull();
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [handed, shipped], history: [] })).toBeNull();
     expect(
-      decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed, shipped] })
+      decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed, shipped], history: [] })
         ?.decided.map((row) => row.choice),
     ).toEqual(["approach", "ship_as_is"]);
   });
@@ -316,7 +317,7 @@ describe("the delivery a person's answers take without a round", () => {
         }),
         "2026-08-27T00:00:00.000Z",
       );
-      const input = { bundles, ticket_id: TICKET, decided: [handed] };
+      const input = { bundles, ticket_id: TICKET, decided: [handed], history: [] };
       return {
         continuing: remediationToContinue(input),
         delivered: decidedDelivery({ ...input, repository_id: "repo_fixture" }),

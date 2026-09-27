@@ -207,6 +207,64 @@ describe("the stopped page", () => {
     expect(carryOn().title).not.toMatch(/meet again/);
   });
 
+  /**
+   * The ticket's last run closed the gate on `outcome` with a review on
+   * record that asks the person nothing — `review` shapes it, null for none
+   * readable — and the declines its attempts record.
+   */
+  function closedGate(
+    outcome: string,
+    review: { decision: string } | null,
+    declines: readonly string[] = [],
+  ): { workspace: Snapshot; detail: Detail } {
+    const run = stopped({ state: "completed", outcome: outcome as Job["outcome"], error: null });
+    const template = sample.detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
+    for (const attempt of run.detail.attempts) {
+      attempt.review = null;
+      attempt.declines = [];
+    }
+    const last = run.detail.attempts.at(-1)!;
+    if (review !== null) last.review = { ...template!, ...review, findings: [] } as AttemptView["review"];
+    last.declines = declines;
+    run.detail.ticket = {
+      ...run.detail.ticket,
+      state: "changes_requested",
+      history: [
+        ...run.detail.ticket.history,
+        { at: "2026-09-08T04:20:00.000Z", from: "independent_review", to: "changes_requested", note: `the gate closed: ${outcome}` },
+      ],
+    };
+    return run;
+  }
+
+  it("lands a run that closed the gate with nothing left to ask here, saying how it ended in Perbo's words", () => {
+    mount(closedGate("remediation_stalled", { decision: "remediable" }));
+    expect(page()).toBeTruthy();
+    expect(reasons()).toEqual([
+      "The refinement stalled: a round closed none of the findings it was given.",
+    ]);
+    expect(behind()[0]).toMatch(/Nothing on its record is left for you to answer/);
+    expect(wheel()).not.toBe("decisions required");
+    expect(carryOn().title).toMatch(/for the reason listed/);
+  });
+
+  it("says a run escalated on the executor's declines only where an attempt records them", () => {
+    mount(closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]));
+    expect(reasons()).toEqual(["The executor declined the findings left open, saying no practice determines them."]);
+    expect(behind()[0]).toMatch(/perbo principle add/);
+    expect(behind()[0]).not.toMatch(/Nothing on its record is left for you to answer/);
+    cleanup();
+    // An incomplete review that escalated with every finding the executor's: nothing was declined.
+    mount(closedGate("escalated", { decision: "incomplete" }));
+    expect(reasons()).toEqual(["The review escalated the run, and put nothing on its record to you."]);
+    expect(behind()[0]).not.toMatch(/declined/);
+  });
+
+  it("says the review could not be read where no review is on record, rather than that nothing is asked", () => {
+    mount(closedGate("remediation_stalled", null));
+    expect(reasons()).toEqual(["The run's review could not be read, so nothing on it can be put to you."]);
+  });
+
   it("has no way to the contract, and the paused loop beside Continue at the right", () => {
     mount(stopped({ state: "cancelled" }));
     const footer = page().querySelector(".stopped-actions")!;
@@ -250,5 +308,50 @@ describe("the stopped page", () => {
     expect(document.querySelectorAll(".stage-labels .complete")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "View the paused loop" }));
     expect(wheel()).toBe("review");
+  });
+});
+
+/**
+ * Plan it again's confirmation in the words of the stop it follows: the
+ * branch the runs left named where the records name one, and Continue the
+ * task named as the way to keep the work only where it is offered.
+ */
+describe("Plan it again's confirmation", () => {
+  beforeEach(() => {
+    // jsdom has no <dialog> implementation; the confirmation only needs open and close.
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) { this.setAttribute("open", ""); };
+      HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) { this.removeAttribute("open"); };
+    }
+  });
+  const asked = async (): Promise<string | null | undefined> => {
+    fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
+    return (await screen.findByRole("dialog", { name: "Plan it again" })).querySelector("p")?.textContent;
+  };
+
+  it("does not offer Continue the task as the way to keep the work after a stop it cannot carry on from", async () => {
+    mount(stopped({ state: "failed", error: "the whole run log" }, { termination: "stalled", reviewDecision: null, review: null }));
+    expect(carryOn().disabled).toBe(true);
+    expect(await asked()).toBe(
+      "Plan “Retire the legacy CSV importer” again? The work its runs built will no longer be accessible in Perbo " +
+        "and remains only as the branch retry-activation-email in git. Its ticket, contract and plan, every attempt " +
+        "it recorded and the evidence those attempts sealed are discarded. The spec is kept and planned again, and " +
+        "nothing the runs built is carried into the new plan.",
+    );
+  });
+
+  it("says the work stays on any branch the run left where no branch is recorded", async () => {
+    const run = stopped({ state: "cancelled" });
+    run.detail.ticket = { ...run.detail.ticket, delivery: { ...run.detail.ticket.delivery, branch: null } };
+    const summary = await sampleBridge.request({ kind: "taskSummary", repoId: sample.repoId, key: "PRB-415" });
+    client.setQueryData(["summary", sample.repoId, "PRB-415"], { ...summary, branch: null });
+    mount(run);
+    expect(carryOn().disabled).toBe(false);
+    expect(await asked()).toBe(
+      "Plan “Retire the legacy CSV importer” again? The work its runs built will no longer be accessible in Perbo " +
+        "and remains only in git, on any branch the run left. Its ticket, contract and plan, every attempt it " +
+        "recorded and the evidence those attempts sealed are discarded. The spec is kept and planned again, and " +
+        "nothing the runs built is carried into the new plan. Continue the task keeps that work instead.",
+    );
   });
 });

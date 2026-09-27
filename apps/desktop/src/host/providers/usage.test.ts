@@ -5,7 +5,7 @@ import { createScratch } from "@perbo/test-support";
 import { usageReport, type UsageDeps } from "./usage.js";
 import { attemptsPath } from "../repository/layout.js";
 import { currentMonth } from "../records.js";
-import { SettingsSchema } from "../../shared/protocol.js";
+import { ANTHROPIC_API_ABOUT, SettingsSchema } from "../../shared/protocol.js";
 import type { Provider } from "../../shared/protocol.js";
 import type { RegisteredRepository } from "../profile/store.js";
 import type { Ticket } from "@perbo/contracts";
@@ -72,6 +72,18 @@ describe("usageReport", () => {
     const claude = report.providers.find((row) => row.id === "claude");
     expect(claude?.role).toBe("default executor · default reviewer");
     expect(report.providers.find((row) => row.id === "codex")?.role).toBeNull();
+  });
+
+  it("marks the API row as an API key, saying what it is, and the CLIs as CLIs", async () => {
+    const report = await usageReport(deps(repository()));
+    expect(report.providers.map((row) => [row.id, row.connection])).toEqual([
+      ["claude", "cli"],
+      ["codex", "cli"],
+      ["opencode", "cli"],
+      ["anthropic", "api"],
+    ]);
+    expect(report.providers.find((row) => row.id === "anthropic")?.about).toBe(ANTHROPIC_API_ABOUT);
+    expect(report.providers.filter((row) => row.connection === "cli").every((row) => row.about === null)).toBe(true);
   });
 
   it("asks each provider for its own plan only where it is signed in", async () => {

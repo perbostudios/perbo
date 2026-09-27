@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
-import { readStage, runnerProgress, runnerStages, runnerTally, WHEEL_STEPS, wheelStep } from "./runner-progress.js";
+import { readStage, runnerProgress, runnerStages, runnerTally, spokenByAttempt, WHEEL_STEPS, wheelStep } from "./runner-progress.js";
 
 describe("readStage", () => {
   it("reads each stage the runner announces, and only the number or name the line states", () => {
@@ -166,5 +166,29 @@ describe("runnerTally", () => {
     expect(runnerTally("  executing\n")).toBeNull();
     // Not a stage either.
     expect(readStage(tallyLine(tally(2)))).toBeNull();
+  });
+});
+
+describe("spokenByAttempt", () => {
+  it("files each turn under the attempt it was said in, and the turns before the first start the log holds apart", () => {
+    const log = [
+      `  ${spokenLine("reviewer", "The end of an attempt whose start was cut.")}`,
+      "  remediation round 1 of at most 6",
+      `  ${spokenLine("executor", "Refining.")}`,
+      "  review round 1",
+      `  ${spokenLine("reviewer", "Still open.")}`,
+      "  resolving the base conflict on 2 file(s)",
+      `  ${spokenLine("executor", "executing")}`,
+      "  executing",
+      `  ${spokenLine("executor", "Starting over.")}`,
+    ].join("\n");
+    const words = (turns: { words: string }[]): string[] => turns.map(({ words }) => words);
+    const { before, attempts } = spokenByAttempt(log);
+    expect(words(before)).toEqual(["The end of an attempt whose start was cut."]);
+    expect(attempts.map(({ start, said }) => [start, words(said)])).toEqual([
+      [{ kind: "remediation", round: 1 }, ["Refining.", "Still open."]],
+      [{ kind: "conflict" }, ["executing"]],
+      [{ kind: "executing" }, ["Starting over."]],
+    ]);
   });
 });

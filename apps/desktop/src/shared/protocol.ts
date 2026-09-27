@@ -679,10 +679,28 @@ export const EditingSessionSchema = z.strictObject({
    * The askings put while {@link asking} stood, by the `asked` entry each
    * arrived on, in the order they arrived (D-117). The group a person is
    * answering is never replaced: a later asking waits here and is put, from
-   * its first group, once nothing ahead of it is left to answer. Empty whenever
-   * nothing is being asked.
+   * its first group the person has not already answered ({@link answers}), once
+   * nothing ahead of it is left to answer. Empty whenever nothing is being
+   * asked.
    */
   askingNext: z.array(z.number().int().min(1)).default([]),
+  /**
+   * What the person answered each of the interview's own questions with, in
+   * the order they answered them (D-117). An asking that puts one of them
+   * again is settled from here rather than put in front of them a second time:
+   * they have answered it, and a second answer can only disagree with the
+   * first. A question is the same one by its words and the labels it offers
+   * (`sameQuestion`), so both are kept with the answer.
+   */
+  answers: z
+    .array(
+      z.strictObject({
+        question: z.string().min(1),
+        labels: z.array(z.string().min(1)),
+        answer: z.string(),
+      }),
+    )
+    .default([]),
   /**
    * How many nodes the plan this session drafted has, zero for a flat plan or
    * for no plan at all.
@@ -1503,6 +1521,15 @@ export interface TaskRow {
   repoId: string;
   repository: string;
   ticket: Ticket;
+  /**
+   * How many questions the ticket's record puts to the person, as its decision
+   * card asks them (`decisionQuestions`): read for every ticket in
+   * `changes_requested`, and 0 where its review cannot be read, since nothing
+   * on the record can then be put to them. A ticket with none is not paused for
+   * them but stopped (`ticketRun`), and its stopped page says why. Absent for
+   * every other state, which the host does not count.
+   */
+  questions?: number;
 }
 /** Whether the machine is being held awake for a live run (S6F, Away from keyboard). */
 export interface PowerState {
@@ -1660,6 +1687,12 @@ export interface AttemptView {
   }[];
   checks: { name: string; status: string; detail: string }[];
   verification: unknown;
+  /**
+   * The findings this attempt's executor declined as having no determinable
+   * practice (D-065), by key, as `perbo inspect` reads them. Absent where the
+   * records it was read from do not say.
+   */
+  declines?: readonly string[];
   bundles: RunBundle[];
 }
 export interface Detail {
@@ -1737,10 +1770,25 @@ export interface UsageWindow {
   usedPercent: number;
   resetsAt: string | null;
 }
+/**
+ * What the Anthropic API row is, said before how its key is supplied: a
+ * person reading it beside Claude Code's row takes it for the same connection
+ * otherwise.
+ */
+export const ANTHROPIC_API_ABOUT =
+  "A direct Anthropic API key, offered for the reviewer only and billed per token under the per-token cost caps, separate from the Claude Code login the executor, reviewer and Architect run on.";
 export interface UsageProvider {
   id: "claude" | "codex" | "opencode" | "anthropic";
   name: string;
   role: string | null;
+  /**
+   * How it is reached: a CLI on this machine, whose sign-in is probed, or an
+   * API key in the app's environment, which nothing probes, so it carries no
+   * connection dot.
+   */
+  connection: "cli" | "api";
+  /** What an API row is, where it is one; null for a CLI. */
+  about: string | null;
   /** Signed in on this machine, whether or not the provider reports a window. */
   connected: boolean;
   plan: string | null;

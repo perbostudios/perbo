@@ -55,8 +55,10 @@ describe("the opencode-cli reviewer transport", () => {
       expect(started.argv).toEqual(["acp"]);
       expect(started.env["OPENCODE_DISABLE_PROJECT_CONFIG"]).toBe("1");
       expect(JSON.parse(started.env["OPENCODE_CONFIG_CONTENT"]!).permission["*"]).toBe("deny");
-      // One session, both turns in it, the model asked for selected.
-      expect(lines.filter((line) => line["method"] === "session/new")).toHaveLength(1);
+      // One scratch session for the catalogue, deleted, then the review's
+      // own, both turns in it, the model asked for selected.
+      expect(lines.filter((line) => line["method"] === "session/new")).toHaveLength(2);
+      expect(lines.filter((line) => line["method"] === "session/delete")).toHaveLength(1);
       expect(lines.filter((line) => line["method"] === "session/prompt")).toHaveLength(2);
       expect(model.provider).toBe("opencode-cli");
       expect(model.unreported_cost_basis).toBe("unavailable");
@@ -113,6 +115,24 @@ describe("the opencode-cli reviewer transport", () => {
       await expect(
         openCodeCliModel({ submitSchema, binary: other.binary, modelId: "opencode/big-pickle" }).turn(request()),
       ).rejects.toThrow("instead of registered opencode/big-pickle");
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the review's session and OpenCode's catalogue", () => {
+  it(
+    "opens the review's session only once a scratch session's catalogue offers the model, so a stale first snapshot cannot refuse it",
+    async () => {
+      const fake = fakeOpenCodeReviewer([{ text: verdict }], { staleSnapshots: 1 });
+      const turn = await openCodeCliModel({ submitSchema, binary: fake.binary, modelId: "opencode/big-pickle" }).turn(request());
+      expect(turn.toolCalls.map((call) => call.name)).toEqual(["submit_review"]);
+      const { lines } = logOf(fake.log);
+      const opened = lines.filter((line) => line["method"] === "session/new").map((line) => (line["params"] as { cwd: string }).cwd);
+      expect(opened).toHaveLength(3);
+      expect(opened[0]).toContain("catalogue-");
+      expect(opened[1]).toContain("catalogue-");
+      expect(opened[2]!.endsWith("/scratch")).toBe(true);
     },
     SPAWN_TEST_TIMEOUT_MS,
   );

@@ -878,9 +878,19 @@ function readWords(words: Word[], context: Context, expand: number[]): Analysis 
     }
     // The line from this word on, with the program's directory dropped, is one
     // command the segment runs — `env sudo rm -r x` is `env …`, then `sudo …`,
-    // then `rm …`, and a list entry is matched against each of them.
+    // then `rm …`, and a list entry is matched against each of them. A
+    // redirect's descriptor and target are the shell's, not words the program
+    // is given, so `git branch -a 2>/dev/null` runs `git branch -a`.
     invocations.push(
-      [basename(value), ...words.slice(i + 1).map((word) => word.raw)].join(" ").trim(),
+      [
+        basename(value),
+        ...words
+          .slice(i + 1)
+          .filter((word) => word.redirect !== true)
+          .map((word) => word.raw),
+      ]
+        .join(" ")
+        .trim(),
     );
     const program = basename(value);
     // `date -us …` sets the clock as `date --set …` does, and a list entry reads

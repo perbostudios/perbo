@@ -22,8 +22,8 @@ import {
 } from "./tickets/work.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
-import { objectsPath } from "./repository/layout.js";
-import { findingsOnRecord } from "./records.js";
+import { objectsPath, verdictsPath } from "./repository/layout.js";
+import { reviewOnRecord } from "./records.js";
 import { forgetCalledOff, recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
@@ -940,6 +940,17 @@ async function replan(
   // is what the confirm's reading judges (D-138).
   const drafted = draftedReading((id) => m.registry.lookup(id), m.editing.read(opened.id));
   if (drafted !== null) m.editing.recordRead(opened.id, drafted);
+  // Landed where the plan is ready to confirm, its Graph for an epic and its
+  // contract for a basic ticket, with the contract a tab from the start:
+  // every way back into this planning opens it there (D-138). Where that
+  // cannot be recorded the planning still stands, and the page that asked
+  // opens it by this reply all the same.
+  try {
+    const { ticket: landed } = await m.tickets.detail(repo.id, job.resultKey);
+    m.editing.landDrafted(opened.id, specTexts(() => repo), landed.updated_at);
+  } catch {
+    // The planning reopens where the person is next on it instead.
+  }
   return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
 }
 
@@ -1009,7 +1020,12 @@ function loop(
         // carries the same words to the executor.
         const ticket = await m.tickets.ticket(repo, request.key);
         assertDecidable(
-          findingsOnRecord(await m.tickets.bundles(repo), ticket.ticket_id, objectsPath(repo)),
+          reviewOnRecord({
+            bundles: await m.tickets.bundles(repo),
+            ticket,
+            objectsDirectory: objectsPath(repo),
+            verdictsPath: verdictsPath(repo),
+          }),
           request.decisions,
         );
         const author = m.profile.state.settings.name || "Local user";
@@ -1039,8 +1055,9 @@ function loop(
         m.drift.forget(repo.id, request.key, null);
       }
       if (run.signal.aborted) return;
-      // A run that ends on a verdict for the person completes, paused for them.
-      await run.invoke(runArgs(request.key, path, resumeFrom), { verdict: true });
+      // A run that ends on a verdict for the person completes, paused for them,
+      // and its log is what it printed as it went, its result kept apart.
+      await run.invoke(runArgs(request.key, path, resumeFrom), { verdict: true, progressLog: true });
     },
   );
   // A filed ticket whose loop starts again is back on Home, and stays there

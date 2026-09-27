@@ -5,7 +5,9 @@ import {
   LEAVE_IT_TO_THE_INTERVIEW,
   PART_LETTERS,
   answersGroup,
+  groupAnswers,
   planNodes,
+  sameQuestion,
   standingGlob,
   type StandingProhibitedEntry,
 } from "@perbo/contracts/browser";
@@ -386,6 +388,32 @@ export function readingState(
 }
 
 /**
+ * The state a person reaches a planning's contract at: the spec's sections,
+ * as the drafts list fingerprints them, the plan as its ticket last moved
+ * (`ticketMoved`, the ticket's `updated_at`), and the scope the planning
+ * holds. While it is the state recorded as they last reached the contract,
+ * nothing has changed since and the contract is still a tab to go back to
+ * (D-138).
+ */
+export function contractStateOf(
+  draft: Pick<OpenDraft, "spec" | "scope">,
+  ticketMoved: string | null,
+): string {
+  return fingerprint(
+    JSON.stringify([draft.spec, ticketMoved, [...draft.scope.paths].sort(), [...draft.scope.prohibited].sort()]),
+  );
+}
+
+/**
+ * The pane a plan Plan it again drafted lands on (D-138,
+ * D-129): its Graph for an epic, and its contract for a basic ticket, whose
+ * plan is its contract.
+ */
+export function draftedPane(nodes: number): "graph" | "contract" {
+  return nodes > 0 ? "graph" : "contract";
+}
+
+/**
  * {@link readingState} of a planning as its record holds it now: the spec's
  * fingerprint as the drafts list carries it, and the plan the session holds.
  * The state a host records a reading it asked for itself at — a re-read owed
@@ -467,6 +495,13 @@ export class ContractEditing {
     const record = this.io.records().find((entry) => entry.id === id);
     if (!record) throw new Error("This editing session is no longer available. Open the task again.");
     const session = EditingSessionSchema.parse(structuredClone(record));
+    // A planning with no ticket yet has no models of its own: nothing offers
+    // a choice before its contract, so its models are the defaults for new
+    // tasks as they are now (D-093), and a change under Connections reaches
+    // the next chat started, the draft and the ticket it admits; a chat
+    // already running keeps the model and provider it started with.
+    if (session.key === null)
+      session.form.models = TaskModelsSchema.strip().parse(this.io.defaults(session.repoId, null));
     const failure = this.unsettled.get(id);
     if (failure) {
       session.phase = "outcome-unknown";
@@ -689,10 +724,15 @@ export class ContractEditing {
    * arrived. The group a person is answering is never replaced: they may have
    * picked and typed on it, and the session asking again — often as it reads
    * the answer to the group before — does not unask it.
+   *
+   * A group the person has already answered is not put again ({@link putFrom}):
+   * a session that asks the same questions twice, in one breath or after the
+   * answers, is settled with the answers already given, so each question has a
+   * card once and each answer is sent once.
    */
   beginAsking(id: string, entry: number): void {
     this.update(id, (session) => {
-      if (standingAsked(session) === null) session.asking = { entry, answered: 0 };
+      if (standingAsked(session) === null) putFrom(session, entry, 0);
       else session.askingNext = [...session.askingNext, entry];
     });
   }
@@ -715,14 +755,40 @@ export class ContractEditing {
       const standing = standingAsked(session);
       if (standing === null) return;
       const group = standing.line.groups[standing.asking.answered];
-      if (group === undefined || !answersGroup(group, text)) {
+      const answers = group === undefined ? null : groupAnswers(group, text);
+      if (group === undefined || answers === null) {
         session.asking = null;
         session.askingNext = [];
         return;
       }
-      const answered = standing.asking.answered + 1;
-      if (answered < standing.line.groups.length) session.asking = { entry: standing.asking.entry, answered };
-      else putNextAsking(session);
+      // The interview's own questions only: a problem between the plan and
+      // the spec is the host's, and is put again for as long as it is open.
+      if (standing.line.drift === undefined)
+        group.parts.forEach((part, index) =>
+          session.answers.push({
+            question: part.question,
+            labels: part.options.map((option) => option.label),
+            answer: answers[index]!,
+          }),
+        );
+      putFrom(session, standing.asking.entry, standing.asking.answered + 1);
+    });
+  }
+
+  /**
+   * End the interview's own asking where its session has gone on without it:
+   * a turn that wrote the spec and put no question of its own has finished
+   * with whatever it asked before, and a card left up for that would hold
+   * Generate plan back for questions nobody is waiting on. Every asking waiting
+   * behind it goes too. The lines stay in the conversation to be read. Only
+   * ever called on a planning with no plan yet, which is when the spec is
+   * handed over, so what stands is the interview's own: a problem between the
+   * plan and the spec needs a plan to be read against.
+   */
+  leaveAsking(id: string): void {
+    this.update(id, (session) => {
+      session.asking = null;
+      session.askingNext = [];
     });
   }
 
@@ -779,7 +845,16 @@ export class ContractEditing {
       // scope, and a session carrying a scope the contract does not is a
       // planning the contract page reads as having unsaved paths — which
       // blocks approving it and points at an editor this planning never used.
-      session.form = { ...session.form, draft: contractDraft(detail), editing: null, newPath: null };
+      session.form = {
+        ...session.form,
+        // The ticket's own models from here on, as it was admitted with them:
+        // not the defaults as they are when it is found, which a later write
+        // from this planning would put over the ticket's.
+        models: TaskModelsSchema.strip().parse(this.io.defaults(session.repoId, detail.ticket.key)),
+        draft: contractDraft(detail),
+        editing: null,
+        newPath: null,
+      };
       // Not this planning's ticket to have made: whether it was is what lets a
       // planning's own discard take its ticket with it, and a planning that
       // finds a ticket already drafted from its spec — one the command line
@@ -883,6 +958,26 @@ export class ContractEditing {
     return this.update(id, (next) => {
       next.lastPane = "contract";
       next.confirmed = state;
+    });
+  }
+
+  /**
+   * A plan Plan it again drafted, landed where it is ready to confirm
+   * (D-138, D-129): the pane it lands on is where the
+   * planning reopens, by whichever way it is reached, and its contract is a
+   * tab from the start, reached at the state the plan was drafted at, because
+   * the plan it replaces was approved from the same spec. `spec` reads the
+   * spec as the host's drafts list does, and `ticketMoved` is the drafted
+   * ticket's `updated_at`. No revision moves, as {@link visit} writes a pane,
+   * and a discarded planning records nothing.
+   */
+  landDrafted(id: string, spec: SpecReader, ticketMoved: string | null): EditingSession {
+    const session = this.read(id);
+    if (session.phase === "discarded") return session;
+    const listed = openDrafts([session], spec)[0]!;
+    return this.update(id, (next) => {
+      next.lastPane = draftedPane(session.nodes);
+      next.confirmed = contractStateOf(listed, ticketMoved);
     });
   }
 
@@ -1326,13 +1421,27 @@ export class ContractEditing {
               // Admitted by this planning only where it held no ticket before:
               // a session that started over on one it was opened with did not
               // make that ticket, however much of it the re-draft replaced.
-              if (next.key === null) next.admitted = true;
+              const first = next.key === null;
+              if (first) next.admitted = true;
               next.key = detail.ticket.key;
               next.digest = detail.digest;
               // Whether this plan has a graph, for the rail that cannot read a
               // contract from where it is drawn.
               next.nodes = planNodes(detail.contract).length;
-              next.form = { ...next.form, draft: contractDraft(detail), editing: null, newPath: null };
+              next.form = {
+                ...next.form,
+                // A planning that held no ticket read the defaults as they are
+                // now; from here the models are the ticket's own, the ones it
+                // was admitted with, so the next write from this planning
+                // carries those rather than whatever the defaults became
+                // while the draft ran.
+                ...(first
+                  ? { models: TaskModelsSchema.strip().parse(this.io.defaults(session.repoId, detail.ticket.key)) }
+                  : {}),
+                draft: contractDraft(detail),
+                editing: null,
+                newPath: null,
+              };
               // A plan drafted afresh has had no impact check: the last one
               // was of the plan it replaces. It counts as satisfying the spec
               // the model drafted it from: its reading is the one its drafting
@@ -1422,8 +1531,42 @@ function standingAsked(
 /** Put the first asking waiting behind the one in front, or nothing where none waits. */
 function putNextAsking(session: EditingSession): void {
   const [next, ...rest] = session.askingNext;
-  session.asking = next === undefined ? null : { entry: next, answered: 0 };
   session.askingNext = rest;
+  if (next === undefined) session.asking = null;
+  else putFrom(session, next, 0);
+}
+
+/**
+ * Put this asking from its group `from` on, passing over every group whose
+ * questions the person has all answered already ({@link sameQuestion}), and
+ * on to the asking waiting behind it where none is left.
+ *
+ * Only the interview's own askings come through here: a problem between the
+ * plan and the spec is put by {@link ContractEditing.putProblem} and never
+ * waits, and is one group, so its answer leaves nothing of it to put.
+ */
+function putFrom(session: EditingSession, entry: number, from: number): void {
+  const line = session.conversation.find((each) => each.n === entry)?.line;
+  if (line?.kind === "asked") {
+    const open = line.groups.findIndex((group, index) => index >= from && !answeredAlready(session, group));
+    if (open >= 0) {
+      session.asking = { entry, answered: open };
+      return;
+    }
+  }
+  putNextAsking(session);
+}
+
+/** Whether the person has already answered every question this group puts. */
+function answeredAlready(
+  session: EditingSession,
+  group: Extract<InterviewEntry["line"], { kind: "asked" }>["groups"][number],
+): boolean {
+  return group.parts.every((part) =>
+    session.answers.some((given) =>
+      sameQuestion(part, { question: given.question, options: given.labels.map((label) => ({ label })) }),
+    ),
+  );
 }
 
 export { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, answersGroup };

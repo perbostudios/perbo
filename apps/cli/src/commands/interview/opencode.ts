@@ -23,6 +23,7 @@ import {
   OPENCODE_BUILTIN_MODES,
   OPENCODE_SESSION_ATTEMPTS,
   OPENCODE_SESSION_RETRY_MS,
+  awaitOpenCodeModel,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -473,6 +474,15 @@ class AcpClient {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: "perbo_interview", version: "0.1.0" },
     });
+    // The chat's session sees the catalogue snapshot its checkout's first
+    // session took, so a model it names is waited for in a scratch session's
+    // snapshot first (`awaitOpenCodeModel`).
+    if (session.model !== null)
+      await awaitOpenCodeModel({
+        model: session.model,
+        scratch: () => mkdtempSync(join(this.root, "catalogue-")),
+        request: (method, params) => this.request(method, params),
+      });
     const opened = z
       .object({
         sessionId: z.string().optional(),

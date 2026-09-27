@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { EFFORT_LEVELS, effortFits } from "./effort.js";
 import {
+  awaitOpenCodeModel,
+  OPENCODE_SESSION_ATTEMPTS,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -81,5 +83,46 @@ describe("how every role starts OpenCode (D-134)", () => {
   it("takes no effort level", () => {
     expect(EFFORT_LEVELS["opencode-cli"]).toEqual([]);
     expect(effortFits("opencode-cli", "low")).toBe(false);
+  });
+});
+
+describe("waiting until OpenCode offers a model", () => {
+  /** An ACP server whose first `snapshots` sessions lack `model`, as one opened before OpenCode's catalogue settles does. */
+  const server = (stale: number, model = "opencode/longcat") => {
+    const calls: Array<[string, unknown]> = [];
+    let opened = 0;
+    return {
+      calls,
+      request: async (method: string, params: unknown) => {
+        calls.push([method, params]);
+        if (method === "session/delete") return {};
+        opened += 1;
+        const offered = opened > stale ? [{ value: model }, { value: "opencode/other" }] : [{ value: "opencode/other" }];
+        return { sessionId: `s${opened}`, configOptions: [{ id: "model", options: offered }] };
+      },
+    };
+  };
+  let directory = 0;
+  const scratch = () => `/scratch/${(directory += 1)}`;
+  const wait = async () => undefined;
+
+  it("opens sessions in fresh directories until one offers the model, deleting each", async () => {
+    const acp = server(1);
+    await awaitOpenCodeModel({ model: "opencode/longcat", scratch, request: acp.request, wait });
+    const opened = acp.calls.filter(([method]) => method === "session/new").map(([, params]) => (params as { cwd: string }).cwd);
+    expect(opened).toHaveLength(2);
+    expect(new Set(opened).size).toBe(2);
+    expect(acp.calls.filter(([method]) => method === "session/delete").map(([, params]) => params)).toEqual([
+      { sessionId: "s1" },
+      { sessionId: "s2" },
+    ]);
+  });
+
+  it("says the model was not found once every snapshot has lacked it", async () => {
+    const acp = server(99);
+    await expect(awaitOpenCodeModel({ model: "opencode/longcat", scratch, request: acp.request, wait })).rejects.toThrow(
+      `OpenCode did not offer opencode/longcat in ${OPENCODE_SESSION_ATTEMPTS} catalogues: model not found`,
+    );
+    expect(acp.calls.filter(([method]) => method === "session/new")).toHaveLength(OPENCODE_SESSION_ATTEMPTS);
   });
 });

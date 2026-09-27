@@ -49,6 +49,7 @@ import {
   type Grammar,
 } from "../../command-line/grammar.js";
 import { edit, type EditInput } from "../edit/index.js";
+import { askingRecord, type AskingRecord } from "./asking.js";
 import { withoutNextStep } from "../../next-step.js";
 import { carryDrift, driftKeyFor, type DriftKey } from "../../store/drift.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
@@ -195,6 +196,12 @@ export const INTERVIEW_TOOL_NAMES = [
  * nothing but the listed read-only shapes runs, and that what this reading
  * cannot vouch for does not run.
  *
+ * `git branch` lists branches and, given other words, changes one; the
+ * runner's guard, which judges every command before this list is read,
+ * refuses each form that changes a branch (`git_branch_write`), so what this
+ * entry admits is the listing — `git branch -a -v`, `--list <pattern>`,
+ * `--show-current`.
+ *
  * The runner's own list is wider — it belongs to an executor that has to build
  * and test what it wrote — and the deny-list below is shared with it, because
  * the acts it refuses are refused here for the same reasons.
@@ -217,6 +224,7 @@ export const INTERVIEW_READ_ONLY_COMMANDS = [
   "Bash(git show:*)",
   "Bash(git ls-files:*)",
   "Bash(git blame:*)",
+  "Bash(git branch:*)",
 ] as const;
 
 /**
@@ -1315,6 +1323,8 @@ export interface InterviewContext {
    */
   beforePlanEdit: () => void;
   planMoved: () => void;
+  /** What this session has put to the person and what they answered, so a question is put once. */
+  asking: AskingRecord;
 }
 
 export interface InterviewTool<Input extends z.ZodType = z.ZodType> {
@@ -1712,7 +1722,8 @@ const askOptions = tool({
     "group at a time. Every part needs at least two options, and one of them may be marked as your " +
     "recommendation. They can always answer in their own words instead, or leave the choice to you. " +
     "Their answers come back as their next turn, in the options' own words. This asks and returns: " +
-    "it does not wait.",
+    "it does not wait. Put each question once: a call repeating one still waiting on an answer, or " +
+    "one already answered, is refused and asks nothing.",
   // The bound belongs in the shape as well as in `input`: on Codex the shape is
   // the whole of what the model is told, and a schema saying the array is
   // unbounded asks it to spend a turn being refused.
@@ -1720,7 +1731,10 @@ const askOptions = tool({
   input: z.strictObject({
     groups: z.array(InterviewQuestionGroupSchema).min(1).max(MAX_QUESTION_GROUPS),
   }),
-  run: async (input) => {
+  run: async (input, context) => {
+    const repeated = context.asking.repeats(input.groups);
+    if (repeated !== null) return said(repeated, true);
+    context.asking.asked(input.groups);
     const parts = input.groups.reduce((count, group) => count + group.parts.length, 0);
     return {
       ...said(
@@ -2048,6 +2062,7 @@ export async function interview(
     spec,
     specWrittenThisTurn: permission.specWrittenThisTurn,
     beforePlanEdit: () => look(),
+    asking: askingRecord(),
     planMoved: () => {
       if (carry === null) return;
       carry.moved = true;
@@ -2190,7 +2205,10 @@ export async function interview(
       }
       return decided;
     },
-    turns: answering(turnsAsText(context.turns), () => {
+    turns: answering(turnsAsText(context.turns), (turn) => {
+      // Read against what was asked before the session has it, so a question
+      // it puts again while it reads the answer is known to be answered.
+      toolContext.asking.heard(turn);
       // The spec as this turn found it, which is what an edit made during the
       // turn is measured against. Taken as the turn is pulled, and again when
       // a turn ends (below), because a queued turn is pulled while the one
@@ -2409,16 +2427,16 @@ function isSymlink(path: string): boolean {
 }
 
 /**
- * The person's turns, with `began` run before each is handed on, so the
+ * The person's turns, with `began` run on each before it is handed on, so the
  * readings the turn's own writes are measured against are taken before it can
  * make them.
  */
 async function* answering(
   turns: AsyncGenerator<string>,
-  began: () => void,
+  began: (turn: string) => void,
 ): AsyncGenerator<string> {
   for await (const turn of turns) {
-    began();
+    began(turn);
     yield turn;
   }
 }

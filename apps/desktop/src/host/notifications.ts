@@ -1,6 +1,6 @@
-import { isEarlyStop, readAttempts } from "./records.js";
+import { isEarlyStop, questionsOnFiles, readAttempts } from "./records.js";
 import { runnerProgress } from "../shared/runner-progress.js";
-import { attemptsPath } from "./repository/layout.js";
+import { attemptsPath, objectsPath, verdictsPath } from "./repository/layout.js";
 import type { HostIO } from "./service.js";
 import type { TicketReads } from "./tickets/reads.js";
 import type { RegisteredRepository } from "./profile/store.js";
@@ -11,7 +11,7 @@ export interface NoticeDeps {
   io: HostIO;
   settings(): Settings;
   repositories(): readonly RegisteredRepository[];
-  tickets: Pick<TicketReads, "list">;
+  tickets: Pick<TicketReads, "list" | "bundles">;
 }
 
 /**
@@ -63,6 +63,17 @@ export class Notices {
     const reason = readAttempts(
       attemptsPath(repo, ticket.ticket_id),
     ).attempts.at(-1)?.termination?.reason;
+    // A decision only where the record puts a question to the person, as
+    // Home's colour and the loop page read it; otherwise the loop stopped.
+    const waiting = ticket.state === "changes_requested";
+    const asked = waiting
+      ? questionsOnFiles({
+          bundles: await this.deps.tickets.bundles(repo),
+          ticket,
+          objectsDirectory: objectsPath(repo),
+          verdictsPath: verdictsPath(repo),
+        })?.length ?? 0
+      : 0;
     if (on.ceiling && isEarlyStop(reason))
       this.notify(
         reason === "stalled"
@@ -73,10 +84,15 @@ export class Notices {
               "open the task to see what it had done and recover."
           : "The loop stopped and nothing was lost. Open the task to raise the ceiling or recover.",
       );
-    else if (on.decision && ticket.state === "changes_requested")
+    else if (on.decision && waiting && asked > 0)
       this.notify(
         `${ticket.key} needs a decision`,
         "The loop is paused until you answer.",
+      );
+    else if (on.review && waiting && asked === 0 && job.state === "completed")
+      this.notify(
+        `${ticket.key} · the loop stopped`,
+        "Nothing is left for you to answer. Open the task to see why it stopped.",
       );
     else if (
       on.review &&

@@ -391,6 +391,158 @@ describe("questions asked while others stand (D-117)", () => {
   });
 });
 
+describe("a session asking what it has already asked (D-117)", () => {
+  const option = (label: string) => ({ label, detail: null, recommended: false });
+  const part = (question: string, ...labels: string[]) => ({ question, options: labels.map(option) });
+  const FLAP = part("What makes the bird flap?", "Space, click or tap", "Space only");
+  const BEST = part("Should the best score be remembered?", "Best score for this page only", "Kept across visits");
+  const HARDER = part("Does it get harder as you go?", "Fixed difficulty", "Speeds up");
+  const LOOK = part("How should it look?", "Pixel-art sprites drawn in code", "Simple drawn shapes");
+  const SOUND = part("Should it have sound?", "Simple beeps generated in code", "Silent");
+  /** What the person picks, question by question. */
+  const PICKS: Record<string, string> = {
+    [FLAP.question]: "Space, click or tap",
+    [BEST.question]: "Best score for this page only",
+    [HARDER.question]: "Fixed difficulty",
+    [LOOK.question]: "Pixel-art sprites drawn in code",
+    [SOUND.question]: "Simple beeps generated in code",
+  };
+  const EVERYTHING = [
+    { title: "Controls and scoring", parts: [FLAP, BEST] },
+    { title: "Difficulty", parts: [HARDER] },
+    { title: "Look and sound", parts: [LOOK, SOUND] },
+  ];
+  const tool = (detail: string) => ({ type: "tool", tool: "ask_options", ok: true, detail });
+  const said = (text: string) => ({
+    type: "message",
+    message: { type: "assistant", message: { content: [{ type: "text", text }] } },
+  });
+
+  /** A planning started from its first turn, with the person answering whatever card stands, as they would. */
+  async function planning() {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    await w.interviews.turn(id, "i want a flappybird game");
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    /** Every card the person was shown, by its asking's entry and group. */
+    const shown: string[] = [];
+    /** Answer the card in front of the person, as its bar sends it. */
+    const answerTheCard = async (): Promise<void> => {
+      const asking = w.editing.read(id).asking;
+      expect(asking, "a card to answer").not.toBeNull();
+      const line = w.conversation(id).find((entry) => entry.n === asking!.entry)!.line;
+      if (line.kind !== "asked") throw new Error("the asking stands on a line that asks nothing");
+      const group = line.groups[asking!.answered]!;
+      shown.push(`${asking!.entry}:${asking!.answered}`);
+      const picks = group.parts.map((each) => PICKS[each.question]!);
+      await w.interviews.turn(
+        id,
+        picks.length === 1 ? picks[0]! : picks.map((pick, index) => `${"abc"[index]}) ${pick}`).join("\n"),
+      );
+    };
+    /** The spec written by the session, as its write is admitted and lands. */
+    const writeSpec = (): void => {
+      appendFileSync(
+        join(repo.path, "specs", w.editing.read(id).specSlug!, "spec.md"),
+        "\n## Outcome\n\nA bird flaps through pipes.\n",
+      );
+      child.say({ type: "wrote_spec" });
+    };
+    /** The turns the person's session was sent, in order. */
+    const sent = (): string[] =>
+      child.written.map((line) => (JSON.parse(line) as { text: string }).text);
+    return { w, id, child, shown, answerTheCard, writeSpec, sent };
+  }
+
+  it("puts one card for questions asked twice and again after they were answered, sends each answer once, and asks nothing once the spec is written", async () => {
+    const { w, id, child, shown, answerTheCard, writeSpec, sent } = await planning();
+    // The planning's own record, in order: the questions put twice in one
+    // turn, the session owning up to it, and the turn over.
+    child.say(tool("Asked 5 questions in 3 groups."));
+    child.say({ type: "asked", groups: EVERYTHING });
+    child.say(tool("Asked 5 questions in 3 groups."));
+    child.say({ type: "asked", groups: EVERYTHING });
+    child.say(said("I asked those questions twice by mistake, so please answer just one set."));
+    child.say({ type: "idle", turns: 1 });
+    const [first, twice] = w.conversation(id).filter((entry) => entry.line.kind === "asked").map((entry) => entry.n);
+    await answerTheCard();
+    child.say({ type: "idle", turns: 1 });
+    await answerTheCard();
+    // Asked again as it reads the answer: one question the person has just
+    // answered, and two still waiting on them.
+    child.say(tool("Asked 3 questions in 2 groups."));
+    child.say({ type: "asked", groups: EVERYTHING.slice(1) });
+    child.say(said("I still need to know how it should look and whether it has sound."));
+    child.say({ type: "idle", turns: 1 });
+    const again = w.conversation(id).filter((entry) => entry.line.kind === "asked").at(-1)!.n;
+    await answerTheCard();
+    writeSpec();
+    child.say({ type: "idle", turns: 1 });
+
+    expect(shown).toEqual([`${first}:0`, `${first}:1`, `${first}:2`]);
+    expect(sent()).toEqual([
+      "i want a flappybird game",
+      "a) Space, click or tap\nb) Best score for this page only",
+      "Fixed difficulty",
+      "a) Pixel-art sprites drawn in code\nb) Simple beeps generated in code",
+    ]);
+    // No card was ever put for the asking that repeated one: not pushed to the
+    // dock, and not left on the record.
+    const pushedEntries = w.told.flatMap((change) =>
+      change?.kind === "interview" && change.asking !== null ? [change.asking.entry] : [],
+    );
+    expect(new Set(pushedEntries)).toEqual(new Set([first]));
+    expect([twice, again].every((entry) => entry! > first!)).toBe(true);
+    expect(
+      w.conversation(id).some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC),
+    ).toBe(true);
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).askingNext).toEqual([]);
+    expect(w.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toBeNull();
+  });
+
+  it("takes down what it asked before once a turn writes the spec and asks nothing, and only then", async () => {
+    // Answered in part, and then the spec written without the rest: the
+    // session has gone on, and a card left for the rest would hold Generate
+    // plan back for questions nobody is waiting on.
+    const left = await planning();
+    left.child.say({ type: "asked", groups: EVERYTHING.slice(1) });
+    left.child.say({ type: "idle", turns: 1 });
+    const asked = left.w.conversation(left.id).find((entry) => entry.line.kind === "asked")!.n;
+    await left.answerTheCard();
+    expect(left.w.editing.read(left.id).asking).toEqual({ entry: asked, answered: 1 });
+    left.writeSpec();
+    left.child.say({ type: "idle", turns: 1 });
+    expect(left.w.editing.read(left.id).asking).toBeNull();
+    expect(left.w.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toBeNull();
+
+    // A turn that ends without writing the spec leaves the card up: the
+    // session is still waiting on the answer.
+    const waiting = await planning();
+    waiting.child.say({ type: "asked", groups: EVERYTHING.slice(1) });
+    waiting.child.say({ type: "idle", turns: 1 });
+    await waiting.answerTheCard();
+    waiting.child.say(said("Thanks."));
+    waiting.child.say({ type: "idle", turns: 1 });
+    expect(waiting.w.editing.read(waiting.id).asking).not.toBeNull();
+
+    // And one that writes the spec and asks in the same turn is asking now.
+    const asking = await planning();
+    asking.writeSpec();
+    asking.child.say({ type: "asked", groups: EVERYTHING.slice(1) });
+    asking.child.say({ type: "idle", turns: 1 });
+    expect(
+      asking.w.conversation(asking.id).some(
+        (entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC,
+      ),
+    ).toBe(true);
+    expect(asking.w.editing.read(asking.id).asking).not.toBeNull();
+  });
+});
+
 describe("a turn's ending", () => {
   const said = (text: string) => ({
     type: "message",

@@ -8,6 +8,8 @@ import {
   decidable,
   decisionChoicesFor,
   hasAcceptanceCriteria,
+  loopOnRecord,
+  NOTHING_TRIED,
   routedToPerson,
   type Finding,
   type PlanContract,
@@ -102,6 +104,13 @@ export async function options(
   const review = reviewed?.review ?? null;
   if (reviewed === undefined || review === null)
     throw new UsageError(`${key} has no review on record, so it has no findings to offer answers to`);
+  // What the loop has done on that review, which says who each finding is asked of.
+  const loop =
+    loopOnRecord({
+      review_id: review.review_id,
+      bundles: report.attempts.flatMap((attempt) => attempt.bundles),
+      history: ticket.history,
+    })?.loop ?? NOTHING_TRIED;
 
   const findings: Finding[] = [...new Set(input.findings)].map((wanted) => {
     const finding = review.findings.find((entry) => entry.key === wanted);
@@ -110,11 +119,11 @@ export async function options(
         `${wanted.slice(0, 12)} is not a finding of ${key}'s last review (${review.review_id}); ` +
           "`perbo inspect` lists its findings",
       );
-    if (finding.status !== "open" || !(routedToPerson(finding) || finding.closure === "human"))
+    if (finding.status !== "open" || !(routedToPerson(finding, loop) || finding.closure === "human"))
       throw new UsageError(
         `${wanted.slice(0, 12)} (${finding.rule_id}) is not a finding the review left for a person to answer`,
       );
-    if (decidable(review) && routedToPerson(finding) && !decisionChoicesFor(finding.rule_id).includes("approach"))
+    if (decidable(review, loop) && routedToPerson(finding, loop) && !decisionChoicesFor(finding.rule_id).includes("approach"))
       throw new UsageError(
         `${wanted.slice(0, 12)} (${finding.rule_id}) is never handed to the executor, so its only answer is ` +
           "to ship the change as it is, and there is no principle to offer",

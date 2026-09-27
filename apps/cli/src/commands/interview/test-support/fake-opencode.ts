@@ -24,7 +24,9 @@ export type OpenCodeStep =
   | { kind: "command"; command: string }
   | { kind: "call"; tool: string; input: Record<string, unknown> }
   /** A call through the tool server without the process's token. */
-  | { kind: "tokenless" };
+  | { kind: "tokenless" }
+  /** The turn ends here; the next goes on from the step after it. */
+  | { kind: "await" };
 
 /** What one step that asked for something was answered with. */
 export interface OpenCodeAnswer {
@@ -49,6 +51,10 @@ export interface FakeOpenCode {
     listed: string[];
     prompts: string[];
     resumed: string | null;
+    /** The scratch directories a catalogue snapshot was asked for in, in order. */
+    scratch: string[];
+    /** Every model the chat's own session refused as not found. */
+    modelRefused: string[];
   };
 }
 
@@ -60,6 +66,12 @@ export function fakeOpenCode(options: {
   refuseResumes?: number;
   /** The primary agents a session reports as its modes; OpenCode's own two where omitted. */
   modes?: readonly string[];
+  /**
+   * How many directories' catalogue snapshots lack the chat's model, as a
+   * snapshot taken before OpenCode's plugins settle does; a model a
+   * directory's snapshot lacks is refused `model not found` there.
+   */
+  staleSnapshots?: number;
 }): FakeOpenCode {
   mkdirSync(options.root, { recursive: true });
   const binary = join(options.root, "opencode");
@@ -74,7 +86,15 @@ const log = ${JSON.stringify(log)};
 const steps = ${JSON.stringify(options.steps)};
 const sessionId = ${JSON.stringify(options.sessionId)};
 let refuseResumes = ${JSON.stringify(options.refuseResumes ?? 0)};
-const configOptions = [{ id: 'mode', currentValue: 'build', options: ${JSON.stringify(options.modes ?? ["build", "plan"])}.map((value) => ({ value, name: value })) }];
+const modeOption = { id: 'mode', currentValue: 'build', options: ${JSON.stringify(options.modes ?? ["build", "plan"])}.map((value) => ({ value, name: value })) };
+const staleSnapshots = ${JSON.stringify(options.staleSnapshots ?? 0)};
+const snapshots = new Map(); let staleSession = false; let scratchSessions = 0;
+const configOptionsFor = (directory) => {
+  if (!snapshots.has(directory)) snapshots.set(directory, snapshots.size < staleSnapshots);
+  const models = snapshots.get(directory) ? ['opencode/stale-only'] : ['opencode/big-pickle', 'opencode/claude-opus-5'];
+  return [{ id: 'model', currentValue: models[0], options: models.map((value) => ({ value, name: value })) }, modeOption];
+};
+let connected = false;
 // OpenCode 2 writes its database under opencode/ in its data directory as it starts.
 if (process.env.XDG_DATA_HOME) { mkdirSync(require('node:path').join(process.env.XDG_DATA_HOME, 'opencode'), { recursive: true }); writeFileSync(require('node:path').join(process.env.XDG_DATA_HOME, 'opencode', 'opencode.db'), ''); }
 const note = (entry) => appendFileSync(log, JSON.stringify(entry) + '\n');
@@ -89,7 +109,8 @@ const mcp = async (method, params, token) => {
   return { status: response.status, body: response.status === 200 ? await response.json() : null };
 };
 const connect = async () => {
-  if (!server) return;
+  if (!server || connected) return;
+  connected = true;
   await mcp('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'fake', version: '0' } });
   const listed = await mcp('tools/list', {});
   note({ listed: listed.body.result.tools.map((tool) => tool.name) });
@@ -102,6 +123,7 @@ async function play(id) {
   while (cursor < steps.length) {
     const step = steps[cursor++];
     const callId = 'call-' + cursor;
+    if (step.kind === 'await') break;
     if (step.kind === 'say') { update({ sessionUpdate: 'agent_message_chunk', messageId: 'msg-' + cursor, content: { type: 'text', text: step.text } }); continue; }
     if (step.kind === 'call' || step.kind === 'tokenless') {
       update({ sessionUpdate: 'tool_call', toolCallId: callId, title: 'perbo_interview_' + (step.tool || 'x'), kind: 'other', status: 'pending', rawInput: {} });
@@ -128,9 +150,12 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
   const m = JSON.parse(line);
   if (m.method === undefined && waiting.has(m.id)) { const done = waiting.get(m.id); waiting.delete(m.id); done(m.result); return; }
   if (m.method === 'initialize') send({ id: m.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
-  if (m.method === 'session/new') { cwd = m.params.cwd; await connect(); send({ id: m.id, result: { sessionId, configOptions } }); }
+  if (m.method === 'session/new' && m.params.cwd.includes('catalogue-')) { note({ scratch: m.params.cwd }); send({ id: m.id, result: { sessionId: 'scratch-' + (++scratchSessions), configOptions: configOptionsFor(m.params.cwd) } }); return; }
+  if (m.method === 'session/delete') { note({ deleted: m.params.sessionId }); send({ id: m.id, result: {} }); return; }
+  if (m.method === 'session/new') { cwd = m.params.cwd; const configOptions = configOptionsFor(cwd); staleSession = configOptions[0].options.length === 1; await connect(); send({ id: m.id, result: { sessionId, configOptions } }); }
   if (m.method === 'session/resume' && refuseResumes > 0) { refuseResumes -= 1; note({ resumeRefused: m.params.sessionId }); send({ id: m.id, error: { code: -32603, message: 'Internal error: Internal service failure' } }); return; }
-  if (m.method === 'session/resume') { cwd = m.params.cwd; note({ resumed: m.params.sessionId }); await connect(); send({ id: m.id, result: { configOptions } }); }
+  if (m.method === 'session/resume') { cwd = m.params.cwd; note({ resumed: m.params.sessionId }); const configOptions = configOptionsFor(cwd); staleSession = configOptions[0].options.length === 1; await connect(); send({ id: m.id, result: { configOptions } }); }
+  if (m.method === 'session/set_config_option' && staleSession) { note({ modelRefused: m.params.value }); send({ id: m.id, error: { code: -32602, message: 'Invalid params: model not found: ' + m.params.value } }); return; }
   if (m.method === 'session/set_config_option') send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: m.params.value }] } });
   if (m.method === 'session/prompt') { note({ prompt: m.params.prompt[0].text }); void play(m.id); }
 });
@@ -160,6 +185,8 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
         listed: (all.find((entry) => "listed" in entry)?.["listed"] as string[] | undefined) ?? [],
         prompts: all.flatMap((entry) => ("prompt" in entry ? [entry["prompt"] as string] : [])),
         resumed: (all.find((entry) => "resumed" in entry)?.["resumed"] as string | undefined) ?? null,
+        scratch: all.flatMap((entry) => ("scratch" in entry ? [entry["scratch"] as string] : [])),
+        modelRefused: all.flatMap((entry) => ("modelRefused" in entry ? [entry["modelRefused"] as string] : [])),
       };
     },
   };

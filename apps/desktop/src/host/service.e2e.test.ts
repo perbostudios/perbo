@@ -1,4 +1,4 @@
-import { interviewSessionArgs, readingState, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
+import { contractStateOf, interviewSessionArgs, readingState, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -19,7 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
 import { EVERY_PROBLEM_RESOLVED, GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
-import { isLive, lane } from "../shared/jobs.js";
+import { isLive, lane, ticketRun } from "../shared/jobs.js";
 import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import type {
   Change,
@@ -152,6 +152,48 @@ describe("the spec a planning session holds", () => {
     };
     writeFileSync(at, JSON.stringify(ticket));
   }
+
+  it("takes the ticket's own models as it finds the plan drafted from its spec", async () => {
+    // A ticket admitted on models of its own; the planning that wrote the spec
+    // finds it, and from then on writes with the ticket's models rather than
+    // the defaults it read while it held no ticket (D-093).
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
+    await saveSpec(service, { kind: "specSave", id: session.id, repoId: registered.id, title: "A light colour mode", sections });
+    const own = {
+      executorProvider: "claude-cli" as const,
+      executorModel: "claude-sonnet-5",
+      reviewerProvider: "claude-cli" as const,
+      reviewerModel: "claude-sonnet-5",
+      draftingProvider: "claude-cli" as const,
+      architectProvider: null,
+      architectModel: null,
+      executorSkills: [],
+      executorEffort: null,
+      reviewerEffort: null,
+    };
+    await finished(
+      service,
+      (
+        await service.request({
+          kind: "admit",
+          repoId: registered.id,
+          draft: {
+            outcome: "New users receive an activation email",
+            criteria: [{ text: "A signup queues one email", assertion: "signup.test.ts", kind: "test" }],
+            paths: ["packages/auth/**"],
+            prohibited: [],
+          },
+          models: own,
+        })
+      ).id,
+    );
+    recordSpecPath(repo, "specs/a-light-colour-mode/spec.md");
+    const found = await service.request({ kind: "editingOpen", target: { kind: "session", id: session.id } });
+    expect(found.key).toBe("PRB-1");
+    expect(found.form.models).toMatchObject({ executorModel: "claude-sonnet-5", reviewerModel: "claude-sonnet-5" });
+  });
 
   it("refuses a recorded spec path that climbs out of the spec folder", async () => {
     // The path reaches this from an admission record, which is a file in the
@@ -1344,6 +1386,103 @@ describe("the graph while the work runs", () => {
     expect(decided.criteria.every((criterion) => criterion.finding === null)).toBe(true);
   });
 
+  it("counts on Home, and takes an answer to, only what a stalled refinement left open (D-132)", async () => {
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const digest = (await service.detail(repoId, "PRB-1")).digest;
+    const [stuck, alsoStuck, closed] = ["7", "8", "9"].map((digit) => digit.repeat(64)) as [string, string, string];
+    const toExecutor = (key: string) => ({
+      key,
+      rule_id: "verification.execution_missing",
+      criterion_id: "ac_1",
+      status: "open",
+      routing: "remediable",
+      closure: "executor",
+      statement: `${key.slice(0, 1)} has no execution result.`,
+    });
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [],
+      review: {
+        createdAt: "2026-09-27T12:48:05.305Z",
+        body: JSON.stringify({ review_id: "rev_one", decision: "remediable", findings: [stuck, alsoStuck, closed].map(toExecutor) }),
+      },
+    });
+    // PRB-15's rounds: the first closed one finding, the second none.
+    const manifests = join(repo, ".perbo", "bundles", "bundles");
+    for (const [at, round] of [
+      { given: [stuck, alsoStuck, closed], open: [stuck, alsoStuck], createdAt: "2026-09-27T12:51:23.001Z" },
+      { given: [stuck, alsoStuck], open: [stuck, alsoStuck], createdAt: "2026-09-27T12:53:03.509Z" },
+    ].entries())
+      writeFileSync(
+        join(manifests, `bundle_00000000000000d${at}.json`),
+        JSON.stringify({
+          bundle_id: `bundle_00000000000000d${at}`,
+          kind: "review",
+          created_at: round.createdAt,
+          subject_id: `cv_att_000000000000000${at + 3}`,
+          ticket_id: ticketId,
+          inputs: { findings_given: round.given.join(","), findings_open: round.open.join(",") },
+          artifacts: [],
+        }),
+      );
+    const ticketPath = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ended = (note: string) => {
+      const ticket = JSON.parse(readFileSync(ticketPath, "utf8")) as { state: string; history: unknown[] };
+      writeFileSync(
+        ticketPath,
+        JSON.stringify({
+          ...ticket,
+          state: "changes_requested",
+          history: [...ticket.history, { at: "2026-09-27T12:53:04.517Z", from: ticket.state, to: "changes_requested", note }],
+        }),
+      );
+    };
+    const row = async () =>
+      (await service.snapshot()).tasks.find((task) => task.repoId === repoId && task.ticket.key === "PRB-1")!;
+    const decide = async (decisions: { findingKey: string; choice: "approach" | "ship_as_is"; answer: string }[]) =>
+      finished(
+        service,
+        (await service.request({ kind: "decide", repoId, key: "PRB-1", digest, answer: "Answers.", decisions })).id,
+      );
+
+    // While the executor is still trying them, nothing is the person's.
+    ended("the gate closed: changes_requested");
+    expect((await row()).questions).toBe(0);
+    const early = await decide([{ findingKey: stuck, choice: "ship_as_is", answer: "Ship it." }]);
+    expect(early.state).toBe("failed");
+    expect(early.error).toContain("not one the review routed to you");
+
+    // Once a run ended stalled, what the rounds left open is.
+    ended("the gate closed: remediation_stalled");
+    expect((await row()).questions).toBe(2);
+    const closedOne = await decide([{ findingKey: closed, choice: "ship_as_is", answer: "Ship it." }]);
+    expect(closedOne.state).toBe("failed");
+    expect(closedOne.error).toContain("not one the review routed to you");
+    expect(calls).toEqual([]);
+    const answered = await decide([
+      { findingKey: stuck, choice: "ship_as_is", answer: "Ship it." },
+      { findingKey: alsoStuck, choice: "approach", answer: "Assert it in a real browser." },
+    ]);
+    expect(answered.state).toBe("completed");
+    expect(calls.map((call) => call[0])).toEqual(["verdict", "verdict", "principle", "run"]);
+
+    // With no review to read, nothing on the record can be put to the person:
+    // 0, which reads as a stop, as the ticket's own page reads it.
+    rmSync(join(manifests, "bundle_00000000000000ab.json"));
+    const unread = await row();
+    expect(unread.ticket.state).toBe("changes_requested");
+    expect(unread.questions).toBe(0);
+    expect(ticketRun(await service.snapshot(), unread)).toMatchObject({ paused: false, stoppedShort: true });
+  });
+
   it("records none of a person's answers where one of them is not one the loop acts on", async () => {
     const calls: string[][] = [];
     const runner: typeof runProcess = async (binary, args, options) => {
@@ -1986,6 +2125,7 @@ describe("desktop bridge against the actual bundled CLI", () => {
     // The review the loop reads, routing the one finding each decision answers to a person.
     const body = Buffer.from(
       JSON.stringify({
+        review_id: "rev_one",
         findings: [
           { key: "a".repeat(64), rule_id: "product.retry", status: "open", routing: "escalates", statement: "Keep the retry button?" },
         ],
@@ -2860,6 +3000,54 @@ readline.createInterface({ input: process.stdin })
       options.modelCatalog = asked;
       expect(await startedOn(service, repoId, id, fake.argv)).toBe("claude-opus-5-5");
       expect(asked).not.toHaveBeenCalled();
+    });
+
+    it("is the Architect model chosen under Connections, for a planning opened before it was chosen", async () => {
+      const { service, repoId, id } = await writing();
+      await service.request({
+        kind: "saveSettings",
+        settings: {
+          ...(await service.snapshot()).settings,
+          draftingProvider: "claude-cli",
+          architectProvider: "claude-cli",
+          architectModel: "claude-fable-5-1",
+        },
+      });
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      expect((await service.request({ kind: "editingRead", id })).interviewModel).toBe("claude-fable-5-1");
+      await service.request({ kind: "interviewStop", id });
+    });
+
+    it("starts on the model and the provider of one set of defaults, whatever changes while the catalog is read", async () => {
+      // A planning with no ticket reads the defaults as they are now; the
+      // person moves them to Codex while the chat's catalog is being read.
+      // The service the catalog read reaches, once it is made.
+      const late: { service: DesktopService | null } = { service: null };
+      const made = await writing(undefined, {
+        modelCatalog: async (provider) => {
+          await late.service!.request({
+            kind: "saveSettings",
+            settings: {
+              ...(await late.service!.snapshot()).settings,
+              executorProvider: "codex-cli",
+              executorModel: "gpt-5.6-terra",
+              draftingProvider: "codex-cli",
+            },
+          });
+          return offering(["claude-opus-5-5"])(provider);
+        },
+      });
+      late.service = made.service;
+      const service = made.service;
+      await service.request({ kind: "interviewStart", repoId: made.repoId, id: made.id });
+      await running(service, made.id);
+      const started = await service.request({ kind: "editingRead", id: made.id });
+      expect({ model: started.interviewModel, provider: started.interviewProvider }).toEqual({
+        model: "claude-opus-5-5",
+        provider: "claude",
+      });
+      await service.request({ kind: "interviewStop", id: made.id });
     });
 
     it("keeps the planning's executor model where it drafts on Codex, and reads no catalog", async () => {
@@ -4655,7 +4843,33 @@ describe("UI v2 host behaviour", () => {
     setBattery(false);
     service.powerChanged();
     expect(holds.at(-1)).toEqual({ hold: true, displaySleep: false });
-    setTicketState(repo, "PRB-1", "changes_requested");
+    const { ticket_id } = setTicketState(repo, "PRB-1", "changes_requested");
+    // The review the run left, putting one question to the person: a
+    // decision is what the notice says only where there is one (D-132).
+    const review = Buffer.from(
+      JSON.stringify({
+        review_id: "rev_one",
+        decision: "escalate",
+        findings: [
+          { key: "a".repeat(64), rule_id: "product.retry", status: "open", routing: "escalates", statement: "Keep the retry button?" },
+        ],
+      }),
+    );
+    const reviewSha = createHash("sha256").update(review).digest("hex");
+    mkdirSync(join(repo, ".perbo", "bundles", "objects"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "bundles", "bundles"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "bundles", "objects", reviewSha), review);
+    writeFileSync(
+      join(repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ac.json"),
+      JSON.stringify({
+        bundle_id: "bundle_00000000000000ac",
+        kind: "review",
+        created_at: "2026-09-10T10:00:00.000Z",
+        subject_id: "rev_one",
+        ticket_id,
+        artifacts: [{ name: "review.json", sha256: reviewSha, bytes: review.length, retained: true }],
+      }),
+    );
     release();
     await finished(service, job.id);
     await vi.waitFor(() =>
@@ -4711,6 +4925,9 @@ describe("UI v2 host behaviour", () => {
     expect(ended.state).toBe(state);
     expect(ended.outcome).toBe(state === "completed" ? outcome : undefined);
     expect(ended.error === null).toBe(state === "completed");
+    // The log is what the run printed as it went; its result is the job's own.
+    expect(ended.log).toBe("  ceilings commands none\n  egress allow-list: registry.npmjs.org");
+    expect(ended.result).toMatchObject({ outcome });
   });
 
   it("opens the worktree on the branch a ticket already has, whatever its key would derive", async () => {
@@ -6426,6 +6643,13 @@ describe("a stopped run's ticket", () => {
     expect(opened.nodes).toBeGreaterThanOrEqual(0);
     const session = await made.service.request({ kind: "editingRead", id: opened.sessionId });
     expect(session.key).toBe("PRB-2");
+    // Landed where it is ready to confirm, a flat plan on its contract, which
+    // is where the planning reopens and a tab from the start, reached at the
+    // state it was drafted at (D-138).
+    const listed = (await made.service.request({ kind: "drafts" })).find((draft) => draft.id === opened.sessionId)!;
+    const row = (await made.service.snapshot()).tasks.find((task) => task.ticket.key === "PRB-2")!;
+    expect(listed.lastPane).toBe("contract");
+    expect(listed.confirmed).toBe(contractStateOf(listed, row.ticket.updated_at));
     // The stopped ticket is gone, and everything recorded after its contract
     // with it; another ticket's evidence was never asked about.
     for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json"])
@@ -6443,6 +6667,28 @@ describe("a stopped run's ticket", () => {
     ) as { state: string; admission: { spec: { path: string } } };
     expect(minted.state).toBe("plan_review");
     expect(minted.admission.spec.path).toBe(spec);
+  });
+
+  it("opens the planning over the plan drafted again where its landing cannot be recorded", async () => {
+    let repo = "";
+    const made = await stopped(drafting(() => repo));
+    repo = made.repo;
+    const { ContractEditing } = await import("../shared/contract-editing.js");
+    const refused = vi.spyOn(ContractEditing.prototype, "landDrafted").mockImplementation(() => {
+      throw new Error("the profile could not be written");
+    });
+    // The planning stands and the reply names it, so the page lands on it.
+    let asked = 0;
+    const opened = await made.service
+      .request({ kind: "replan", repoId: made.repoId, key: "PRB-1" })
+      .finally(() => {
+        asked = refused.mock.calls.length;
+        refused.mockRestore();
+      });
+    expect(asked).toBe(1);
+    expect(opened).toMatchObject({ key: "PRB-2", nodes: 0 });
+    const session = await made.service.request({ kind: "editingRead", id: opened.sessionId });
+    expect(session).toMatchObject({ key: "PRB-2", phase: "editing", lastPane: null, confirmed: null });
   });
 
   it("records a basic plan drafted again as read by its drafting, and a criterion edited after it is what the confirm's reading judges (D-138)", async () => {
@@ -7117,6 +7363,8 @@ describe("usage: who is connected, and why a provider has no windows", () => {
       id: "opencode",
       name: "OpenCode",
       role: null,
+      connection: "cli",
+      about: null,
       connected: true,
       plan: null,
       windows: null,
@@ -7301,5 +7549,149 @@ describe("the merge press on a retained branch", () => {
     expect(job.state).toBe("failed");
     expect(job.error).toBe(refusal);
     expect(opened).toEqual([]);
+  });
+});
+
+/**
+ * The defaults for new tasks chosen under Connections are what a new planning
+ * drafts with and what the ticket it admits runs on, whatever model the
+ * repository's `.perbo/config.json` names: that file's `model` is what a run
+ * takes where the person chose nothing (D-093).
+ */
+describe("the defaults for new tasks", () => {
+  it("reach a planning opened before they changed, and the ticket it admits, over the repository's own model", async () => {
+    let repo = "";
+    const asked: string[][] = [];
+    const made = fixture(drafting(() => repo, asked));
+    repo = made.repo;
+    const { service } = made;
+    mkdirSync(join(repo, ".perbo"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ agent_binary: "claude", model: "claude-opus-5", reviewer_provider: "claude-cli" }));
+    // A planning opened on the defaults as they were, before the person
+    // changed them under Connections.
+    const registered = await service.registerRepository(repo);
+    const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
+    expect(opened.form.models).toMatchObject({ executorModel: "claude-opus-5", architectModel: null });
+    const settings = (await service.snapshot()).settings;
+    await service.request({
+      kind: "saveSettings",
+      settings: {
+        ...settings,
+        executorProvider: "claude-cli",
+        executorModel: "claude-opus-5-5",
+        reviewerProvider: "claude-cli",
+        reviewerModel: "claude-opus-5-5",
+        draftingProvider: "claude-cli",
+        architectProvider: "claude-cli",
+        architectModel: "claude-fable-5-1",
+      },
+    });
+    const session = await service.request({ kind: "editingRead", id: opened.id });
+    expect(session.form.models).toMatchObject({ executorModel: "claude-opus-5-5", reviewerModel: "claude-opus-5-5", architectModel: "claude-fable-5-1" });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "Activation email",
+      sections: {
+        outcome: "New users receive an activation email within a minute.",
+        requirements: "- A signup queues exactly one email.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+    });
+    const before = await service.request({ kind: "editingRead", id: session.id });
+    const submitted = await service.request({
+      kind: "editingSubmit",
+      id: session.id,
+      revision: before.revision,
+      operationId: randomUUID(),
+      intent: "generate",
+    });
+    await finished(service, submitted.operation!.jobId!);
+    let key: string | null = null;
+    for (let count = 0; count < 300 && key === null; count++) {
+      key = (await service.request({ kind: "editingRead", id: session.id })).key;
+      if (key === null) await delay(10);
+    }
+    expect(key).not.toBeNull();
+    // Drafted with the person's executor model, not the repository's.
+    expect(asked[0]).toContain("claude-opus-5-5");
+    // And the ticket the contract page reads its models from carries them.
+    expect((await service.snapshot()).taskModels?.[`${registered.id}:${key}`]).toMatchObject({
+      executorModel: "claude-opus-5-5",
+      reviewerModel: "claude-opus-5-5",
+      architectModel: "claude-fable-5-1",
+    });
+    // Once there is a ticket, the models are the ticket's own: a later change
+    // of the defaults reaches neither it nor the planning over it.
+    await service.request({
+      kind: "saveSettings",
+      settings: { ...(await service.snapshot()).settings, executorModel: "claude-sonnet-5", reviewerModel: "claude-sonnet-5" },
+    });
+    expect((await service.request({ kind: "editingRead", id: opened.id })).form.models.executorModel).toBe("claude-opus-5-5");
+    expect((await service.snapshot()).taskModels?.[`${registered.id}:${key}`]?.executorModel).toBe("claude-opus-5-5");
+  });
+
+  it("leave the ticket on the models it was admitted with when they change while the draft runs", async () => {
+    let repo = "";
+    const late: { service: DesktopService | null } = { service: null };
+    const draft = drafting(() => repo);
+    // The person changes the defaults under Connections while the plan is
+    // being drafted: after the press, before the ticket is read back.
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "admit" && args.includes("--from-spec"))
+        await late.service!.request({
+          kind: "saveSettings",
+          settings: { ...(await late.service!.snapshot()).settings, executorModel: "claude-sonnet-5", reviewerModel: "claude-sonnet-5" },
+        });
+      return draft(binary, args, options);
+    };
+    const made = fixture(runs);
+    repo = made.repo;
+    late.service = made.service;
+    const service = made.service;
+    await service.request({
+      kind: "saveSettings",
+      settings: { ...(await service.snapshot()).settings, executorProvider: "claude-cli", executorModel: "claude-opus-5-5", reviewerProvider: "claude-cli", reviewerModel: "claude-opus-5-5", draftingProvider: "claude-cli" },
+    });
+    const registered = await service.registerRepository(repo);
+    const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: opened.id,
+      repoId: registered.id,
+      title: "Activation email",
+      sections: { outcome: "New users receive an activation email within a minute.", requirements: "- A signup queues exactly one email.", no_gos: "", rabbit_holes: "", notes: "" },
+    });
+    const before = await service.request({ kind: "editingRead", id: opened.id });
+    const submitted = await service.request({ kind: "editingSubmit", id: opened.id, revision: before.revision, operationId: randomUUID(), intent: "generate" });
+    await finished(service, submitted.operation!.jobId!);
+    let drafted = await service.request({ kind: "editingRead", id: opened.id });
+    for (let count = 0; count < 300 && !drafted.operation?.reconciled; count++) {
+      await delay(10);
+      drafted = await service.request({ kind: "editingRead", id: opened.id });
+    }
+    const key = drafted.key!;
+    expect((await service.snapshot()).settings.executorModel, "the defaults did change").toBe("claude-sonnet-5");
+    expect(drafted.form.models.executorModel, "the planning holds the ticket's models").toBe("claude-opus-5-5");
+    // The next write from the planning — its contract opened and a criterion
+    // changed and written in — carries them, so the ticket keeps what it was
+    // admitted with.
+    drafted = await service.request({ kind: "editingOpen", target: { kind: "session", id: opened.id } });
+    const saved = await service.request({
+      kind: "editingSave",
+      id: opened.id,
+      revision: drafted.revision,
+      repoId: registered.id,
+      form: { ...drafted.form, draft: { ...drafted.form.draft, outcome: "New users receive one activation email within a minute." } },
+    });
+    const compiled = await service.request({ kind: "editingSubmit", id: opened.id, revision: saved.revision, operationId: randomUUID(), intent: "compile" });
+    await finished(service, compiled.operation!.jobId!);
+    expect((await service.snapshot()).taskModels?.[`${registered.id}:${key}`]).toMatchObject({
+      executorModel: "claude-opus-5-5",
+      reviewerModel: "claude-opus-5-5",
+    });
   });
 });

@@ -15,6 +15,7 @@ import {
   listBundles,
   readAttempts,
   readLatestDraftEdit,
+  questionsOnFiles,
   summariseTicket,
   type StoredAttempt,
 } from "./records.js";
@@ -348,5 +349,103 @@ describe("the edit the chat cards", () => {
     expect(edit.after).toHaveLength(240);
     expect(edit.before.every((key) => key.length <= 200)).toBe(true);
     expect(() => InterviewEditSchema.parse(edit)).not.toThrow();
+  });
+});
+
+/**
+ * D-132: what Home counts the questions of and a decision is checked against,
+ * read from the files the loop and `perbo verdict` wrote — PRB-15's shape: a
+ * review that routed its findings to the executor, a round that closed one,
+ * one that closed none, and the row the run wrote as it ended stalled.
+ */
+describe("a ticket's last review on record, and the questions it puts to the person", () => {
+  const [open, alsoOpen, closed] = ["a", "b", "c"].map((digit) => digit.repeat(64));
+  function recorded(note: string | null) {
+    const root = scratchDirectory();
+    const objects = join(root, "objects");
+    mkdirSync(objects, { recursive: true });
+    const finding = (key: string) => ({
+      key,
+      rule_id: "verification.execution_missing",
+      status: "open",
+      routing: "remediable",
+      closure: "executor",
+      statement: `Finding ${key.slice(0, 1)}.`,
+      blocking_reason: "",
+    });
+    const body = JSON.stringify({ review_id: "rev_ae72ea99e02fe90f", decision: "remediable", findings: [open, alsoOpen, closed].map((key) => finding(key!)) });
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    writeFileSync(join(objects, sha256), body);
+    const manifest = (subject_id: string, created_at: string, inputs: Record<string, string>, artifacts: unknown[] = []) =>
+      ({ bundle_id: `bundle_${subject_id}`, kind: "review", subject_id, ticket_id: "ticket_1", created_at, inputs, artifacts }) as never;
+    const bundles = [
+      manifest("rev_ae72ea99e02fe90f", "2026-09-27T12:48:05.305Z", {}, [
+        { name: "review.json", sha256, bytes: Buffer.byteLength(body), retained: true },
+      ]),
+      manifest("cv_att_1", "2026-09-27T12:51:23.001Z", {
+        findings_given: [open, alsoOpen, closed].join(","),
+        findings_open: [open, alsoOpen].join(","),
+      }),
+      manifest("cv_att_2", "2026-09-27T12:53:03.509Z", {
+        findings_given: [open, alsoOpen].join(","),
+        findings_open: [open, alsoOpen].join(","),
+      }),
+    ];
+    const history = [
+      { at: "2026-09-27T12:39:04.011Z", from: "ready", to: "provisioning", note: "run started against plan_0e106f5ed0ddb333" },
+      ...(note === null ? [] : [{ at: "2026-09-27T12:53:04.517Z", from: "independent_review", to: "changes_requested", note }]),
+    ];
+    const verdictsPath = join(root, "verdicts.json");
+    return { bundles, objects, verdictsPath, ticket: { ticket_id: "ticket_1", history } as unknown as Ticket };
+  }
+  const asked = (input: ReturnType<typeof recorded>) =>
+    questionsOnFiles({
+      bundles: input.bundles,
+      ticket: input.ticket,
+      objectsDirectory: input.objects,
+      verdictsPath: input.verdictsPath,
+    }) ?? [];
+
+  it("says nothing either way where no review can be read, rather than that nothing is asked", () => {
+    const unreadable = recorded("the gate closed: remediation_stalled");
+    const withoutReview = { ...unreadable, bundles: unreadable.bundles.slice(1) };
+    expect(
+      questionsOnFiles({
+        bundles: withoutReview.bundles,
+        ticket: withoutReview.ticket,
+        objectsDirectory: withoutReview.objects,
+        verdictsPath: withoutReview.verdictsPath,
+      }),
+    ).toBeNull();
+  });
+
+  it("asks each finding the stalled refinement left open, with the three answers, and not the one it closed", () => {
+    const questions = asked(recorded("the gate closed: remediation_stalled"));
+    expect(questions.map((question) => [question.id, question.choices])).toEqual([
+      [open, ["approach", "let_it_decide", "ship_as_is"]],
+      [alsoOpen, ["approach", "let_it_decide", "ship_as_is"]],
+    ]);
+  });
+
+  it("asks nothing while the executor is still trying them, and nothing an answer already shipped", () => {
+    expect(asked(recorded(null))).toEqual([]);
+    expect(asked(recorded("the gate closed: changes_requested"))).toEqual([]);
+    const shipped = recorded("the gate closed: remediation_exhausted");
+    writeFileSync(
+      shipped.verdictsPath,
+      JSON.stringify({
+        verdicts: [
+          {
+            review: { ticket_id: "ticket_1", reference: "PRB-15" },
+            finding_key: open,
+            decision: "decide",
+            choice: "ship_as_is",
+            decided_at: "2026-09-27T13:00:00.000Z",
+            superseded_at: null,
+          },
+        ],
+      }),
+    );
+    expect(asked(shipped).map((question) => question.id)).toEqual([alsoOpen]);
   });
 });

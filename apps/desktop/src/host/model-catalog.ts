@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -12,10 +13,8 @@ import { z } from "zod";
 import {
   DEFAULT_ENV_ALLOW_LIST,
   EFFORT_LEVELS,
-  OPENCODE_ACP_ARGV,
   OPENCODE_API_KEY_ENV,
-  OPENCODE_SESSION_ATTEMPTS,
-  OPENCODE_SESSION_RETRY_MS,
+  OPENCODE_SERVE_ARGV,
   opencodeConfig,
   opencodeEnvironment,
   scrubEnvironment,
@@ -65,16 +64,6 @@ const CodexPage = z.object({
     )
     .max(1000),
   nextCursor: z.string().nullable().optional(),
-});
-/** What `session/new` answers on OpenCode's ACP server: the session's options, the model among them. */
-const OpenCodeSession = z.object({
-  configOptions: z.array(
-    z.object({
-      id: z.string(),
-      currentValue: z.unknown().optional(),
-      options: z.array(z.object({ value: z.string(), name: z.string() })).max(1000).optional(),
-    }),
-  ),
 });
 const ApiPage = z.object({
   data: z
@@ -468,14 +457,79 @@ export async function discoverModels(
   });
 }
 
+/** One model as OpenCode's served model list reports it. */
+const OpenCodeServedModel = z.object({
+  id: z.string(),
+  providerID: z.string(),
+  name: z.string(),
+  /** Absent or null where OpenCode reports no price: such a model is never counted free. */
+  cost: z.array(z.object({ input: z.number(), output: z.number() }).loose()).max(20).nullish(),
+});
+const OpenCodeServed = <T extends z.ZodType>(data: T) => z.object({ data });
 /**
- * The models an OpenCode role can call, as OpenCode's ACP server offers them
- * to a session opened in a scratch directory, under the same home every role
- * runs in (D-134): fresh directories, no project
- * configuration, OpenCode Zen's key where the app environment has one. Only
- * `initialize` and `session/new` are sent, so no turn starts. OpenCode reads
- * its catalogue as it starts and refuses a session asked for before it has, so
- * `session/new` is asked again, `OPENCODE_SESSION_ATTEMPTS` times at most.
+ * The model list, each entry read on its own: one OpenCode reports in a shape
+ * this reader does not know is left out, rather than failing the whole list.
+ */
+const OpenCodeModelList = OpenCodeServed(
+  z
+    .array(z.unknown())
+    .max(5000)
+    .transform((entries) =>
+      entries.flatMap((entry) => {
+        const model = OpenCodeServedModel.safeParse(entry);
+        return model.success ? [model.data] : [];
+      }),
+    ),
+);
+const OpenCodeProviderList = OpenCodeServed(
+  z.array(z.object({ id: z.string(), integrationID: z.string().optional() }).loose()).max(1000),
+);
+const OpenCodeIntegrationList = OpenCodeServed(
+  z.array(z.object({ id: z.string(), connections: z.array(z.unknown()) }).loose()).max(1000),
+);
+const OpenCodeDefault = OpenCodeServed(z.object({ id: z.string(), providerID: z.string() }).loose().nullish());
+
+/** How long apart two readings of OpenCode's model list are, to see it has settled. */
+const OPENCODE_SETTLE_MS = 500;
+
+/**
+ * The models OpenCode reports that a person can run right now: every model it
+ * lists whose price it reports as nothing, input and output alike, and every
+ * model of a provider whose integration it reports a connection for. A model
+ * OpenCode reports no price for is never counted free. Read from
+ * OpenCode's own reports and nothing else — never from a model's or a
+ * provider's name — so a model behind a key nobody set is not offered.
+ */
+export function runnableOpenCodeModels(reported: {
+  models: readonly z.infer<typeof OpenCodeServedModel>[];
+  providers: readonly { id: string; integrationID?: string | undefined }[];
+  integrations: readonly { id: string; connections: readonly unknown[] }[];
+}): z.infer<typeof OpenCodeServedModel>[] {
+  const connected = new Set(reported.integrations.filter((each) => each.connections.length > 0).map((each) => each.id));
+  const integrationOf = new Map(reported.providers.map((each) => [each.id, each.integrationID ?? each.id]));
+  return reported.models.filter(
+    (model) =>
+      (model.cost != null && model.cost.length > 0 && model.cost.every((cost) => cost.input === 0 && cost.output === 0)) ||
+      connected.has(integrationOf.get(model.providerID) ?? model.providerID),
+  );
+}
+
+/**
+ * The models an OpenCode role can run, under the same home every role runs in
+ * (D-134): fresh directories, no project
+ * configuration, OpenCode Zen's key where the app environment has one and no
+ * other credential of the person's.
+ *
+ * ACP's `session/new` offers every model OpenCode's catalogue holds, a price
+ * behind a missing key included, and says nothing of which can run; measured
+ * on 2.0.14, a Zen model with a price and no key is offered and then refused
+ * at the turn. So this asks OpenCode's own server instead
+ * (`OPENCODE_SERVE_ARGV`): which integrations it reports connected, which
+ * provider each model belongs to, and each model's price, reading the model
+ * list until two readings agree, since OpenCode says the list may precede its
+ * plugins settling. Only reads are sent; the password is minted here, sent
+ * only to the loopback address the server names, and the server ends with
+ * this process's hold on its stdin.
  */
 async function openCodeModels(options: {
   binary: string;
@@ -486,56 +540,133 @@ async function openCodeModels(options: {
   const home = join(options.scratch, "opencode");
   for (const directory of ["config", "data", "state", "cache"])
     mkdirSync(join(home, directory), { recursive: true, mode: 0o700 });
+  const password = randomBytes(24).toString("base64url");
   const { env } = scrubEnvironment({
     base: options.base,
     allow: [...DEFAULT_ENV_ALLOW_LIST, OPENCODE_API_KEY_ENV],
-    extra: { ...opencodeEnvironment(home, opencodeConfig("reviewer")), NO_COLOR: "1" },
+    extra: { ...opencodeEnvironment(home, opencodeConfig("reviewer")), NO_COLOR: "1", OPENCODE_PASSWORD: password },
   });
-  const ask = (id: number) => ({
-    jsonrpc: "2.0",
-    id,
-    method: "session/new",
-    params: { cwd: options.scratch, mcpServers: [] },
-  });
-  let id = 1;
-  return metadataProcess({
-    binary: options.binary,
+  const child = spawn(options.binary, [...OPENCODE_SERVE_ARGV], {
     cwd: options.scratch,
     env,
-    timeoutMs: options.timeoutMs,
-    args: OPENCODE_ACP_ARGV,
-    initial: {
-      jsonrpc: "2.0",
-      id,
-      method: "initialize",
-      params: {
-        protocolVersion: 1,
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        clientInfo: { name: "perbo_models", version: "0.1.0" },
-      },
-    },
-    receive: (message, send) => {
-      if (message.id !== id) return;
-      if (id === 1) {
-        if (message.error) throw new Error("OpenCode refused the catalog request");
-        send(ask(++id));
-        return;
-      }
-      if (message.error) {
-        if (id > OPENCODE_SESSION_ATTEMPTS) throw new Error("OpenCode catalog request failed");
-        const next = ++id;
-        setTimeout(() => send(ask(next)), OPENCODE_SESSION_RETRY_MS);
-        return;
-      }
-      const model = OpenCodeSession.parse(message.result).configOptions.find((option) => option.id === "model");
-      return (model?.options ?? []).map((choice) => ({
-        id: choice.value,
-        // OpenCode names a choice `provider/Model name`; the provider is in the id.
-        label: choice.name.includes("/") ? choice.name.slice(choice.name.indexOf("/") + 1) : choice.name,
-        description: choice.value,
-        isDefault: choice.value === model?.currentValue,
-        efforts: [],
-      }));
-    },
+    shell: false,
+    stdio: ["pipe", "pipe", "ignore"],
+    detached: process.platform !== "win32",
   });
+  const deadline = Date.now() + options.timeoutMs;
+  /** Signal the server's process group, as the ACP transports' `close()` does. */
+  const signal = (name: NodeJS.Signals): void => {
+    if (child.pid === undefined) return;
+    try {
+      if (process.platform === "win32") child.kill(name);
+      else process.kill(-child.pid, name);
+    } catch {
+      /* Already gone. */
+    }
+  };
+  /** Its stdin closed and SIGTERM, then SIGKILL where it is still there 1.5 s later. */
+  const stop = (): void => {
+    child.stdin.end();
+    signal("SIGTERM");
+    const force = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
+    }, 1_500);
+    force.unref();
+    child.once("exit", () => clearTimeout(force));
+  };
+  try {
+    const address = await new Promise<string>((resolve, reject) => {
+      let buffer = "";
+      const timer = setTimeout(
+        () => reject(new Error("OpenCode did not start in time. Check it is installed and refresh.")),
+        options.timeoutMs,
+      );
+      child.once("error", () => {
+        clearTimeout(timer);
+        reject(new Error("OpenCode is unavailable. Install OpenCode 2 and refresh."));
+      });
+      child.once("exit", () => {
+        clearTimeout(timer);
+        reject(new Error("OpenCode stopped before it reported its models. Update it and refresh."));
+      });
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        buffer += chunk;
+        const newline = buffer.indexOf("\n");
+        if (newline === -1) {
+          if (buffer.length > limit) reject(new Error("OpenCode's answer exceeded the output limit."));
+          return;
+        }
+        clearTimeout(timer);
+        try {
+          resolve(z.object({ url: z.string() }).parse(JSON.parse(buffer.slice(0, newline))).url);
+        } catch {
+          reject(new Error("OpenCode did not name its server. Update it and refresh."));
+        }
+      });
+    });
+    const url = new URL(address);
+    // The password goes to the loopback address this process's server named, and nowhere else.
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))
+      throw new Error("OpenCode named a server that is not on this machine.");
+    const authorization = "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
+    const read = async <T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>> => {
+      const target = new URL(path, url);
+      target.searchParams.set("directory", options.scratch);
+      let response: Response;
+      let body: string;
+      // The request and its body both, since a body can stall after its headers.
+      try {
+        response = await fetch(target, {
+          headers: { authorization },
+          redirect: "error",
+          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+        });
+        body = await response.text();
+      } catch (error) {
+        // A timeout or a server gone mid-read, each said in one sentence the picker can show.
+        const name = error instanceof Error ? error.name : "";
+        throw new Error(
+          name === "TimeoutError" || name === "AbortError"
+            ? "OpenCode did not report its models in time. Refresh to ask again."
+            : "OpenCode stopped before it reported its models. Update it and refresh.",
+          { cause: error },
+        );
+      }
+      if (!response.ok) throw new Error(`OpenCode answered ${path} with HTTP ${response.status}.`);
+      if (body.length > limit) throw new Error("OpenCode's answer exceeded the output limit.");
+      return schema.parse(JSON.parse(body));
+    };
+    const integrations = (await read("/api/integration", OpenCodeIntegrationList)).data;
+    let models = (await read("/api/model", OpenCodeModelList)).data;
+    for (;;) {
+      if (Date.now() + OPENCODE_SETTLE_MS > deadline)
+        throw new Error("OpenCode's model list did not settle in time. Refresh.");
+      await new Promise((resolve) => setTimeout(resolve, OPENCODE_SETTLE_MS));
+      const again = (await read("/api/model", OpenCodeModelList)).data;
+      // Two readings that agree, an empty list included, are settled.
+      const same =
+        again.length === models.length &&
+        again.every((model, at) => model.providerID === models[at]!.providerID && model.id === models[at]!.id);
+      models = again;
+      if (same) break;
+    }
+    const providers = (await read("/api/provider", OpenCodeProviderList)).data;
+    const preferred = (await read("/api/model/default", OpenCodeDefault)).data;
+    const runnable = runnableOpenCodeModels({ models, providers, integrations });
+    if (runnable.length === 0)
+      throw new Error(
+        "OpenCode reports no model you can run now — none of its free models is listed and no provider is connected; " +
+          `set ${OPENCODE_API_KEY_ENV} in the app environment for OpenCode Zen and refresh.`,
+      );
+    return runnable.map((model) => ({
+      id: `${model.providerID}/${model.id}`,
+      label: model.name,
+      description: `${model.providerID}/${model.id}`,
+      isDefault: preferred?.providerID === model.providerID && preferred.id === model.id,
+      efforts: [],
+    }));
+  } finally {
+    stop();
+  }
 }

@@ -7,6 +7,7 @@ import type { EditingSession, Job } from "../shared/protocol.js";
 import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
 import { unseenAttention } from "../renderer/tasks/ticket-workspace.js";
 import { calledOffEntry } from "../shared/archive.js";
+import { contractStateOf } from "../shared/contract-editing.js";
 
 /**
  * Deleting a piece of work from the sample host refuses where the host's
@@ -704,4 +705,11 @@ it("plans a stopped ticket again while another ticket's run is under way, as the
   expect(onBoard("PRB-415")).toBe(false);
   expect(opened.key).not.toBe("PRB-415");
   expect(onBoard(opened.key)).toBe(true);
+  // Landed where it is ready to confirm, as the host lands it: a flat plan on
+  // its contract, which is where the planning reopens and a tab from the start.
+  const snapshot = await sampleBridge.request({ kind: "snapshot" });
+  const listed = snapshot.drafts!.find((draft) => draft.id === opened.sessionId)!;
+  const row = snapshot.tasks.find((task) => task.ticket.key === opened.key)!;
+  expect(listed.lastPane).toBe("contract");
+  expect(listed.confirmed).toBe(contractStateOf(listed, row.ticket.updated_at));
 });

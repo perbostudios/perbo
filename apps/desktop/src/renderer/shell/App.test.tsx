@@ -20,7 +20,15 @@ import { bridge } from "../workspace/index.js";
 import { setPlatformForTests } from "../../shared/shortcuts.js";
 import { resetRailSize } from "./rail-size.js";
 import { resetLabel } from "../settings/UsagePage.js";
-import type { Change, ReplyMap, Request, Snapshot, TaskRow } from "../../shared/protocol.js";
+import { ANTHROPIC_API_ABOUT, type Change, type ReplyMap, type Request, type Snapshot, type TaskRow } from "../../shared/protocol.js";
+
+
+/** Plan it again on the stopped page, and its confirmation's Plan it again. */
+async function planItAgain(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
+  const asking = await screen.findByRole("dialog", { name: "Plan it again" });
+  fireEvent.click(within(asking).getByRole("button", { name: "Plan it again" }));
+}
 
 let client: QueryClient;
 beforeEach(() => {
@@ -250,14 +258,14 @@ describe("UI v2", () => {
           readAt: new Date().toISOString(),
           ledger: { month: "2026-09", spentMicros: 2_140_000, pricedAttempts: 3, unpricedAttempts: 1, ticketsRun: 2, ticketsMerged: 1, stoppedShort: 1, averageMergedMicros: null },
           providers: [
-            { id: "claude", name: "Claude Code", role: "default executor", connected: true, plan: "Max", detail: "Read from Claude Code.", windows: [
+            { id: "claude", name: "Claude Code", role: "default executor", connection: "cli", about: null, connected: true, plan: "Max", detail: "Read from Claude Code.", windows: [
               { label: "5-hour limit", usedPercent: 9, resetsAt: new Date(Date.now() + 225 * 60_000).toISOString() },
               { label: "Weekly · all models", usedPercent: 37, resetsAt: weekly.toISOString() },
               { label: "Weekly · Fable", usedPercent: 36, resetsAt: weekly.toISOString() },
             ] },
-            { id: "codex", name: "Codex", role: "default reviewer", connected: true, plan: "Pro", windows: [{ label: "5-hour limit", usedPercent: 82, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }], detail: "Read from the Codex app-server." },
-            { id: "opencode", name: "OpenCode", role: null, connected: true, plan: null, windows: null, detail: "OpenCode reports what each run cost; it reports no plan window." },
-            { id: "anthropic", name: "Anthropic API", role: null, connected: false, plan: null, windows: null, detail: "No API key in the app environment." },
+            { id: "codex", name: "Codex", role: "default reviewer", connection: "cli", about: null, connected: true, plan: "Pro", windows: [{ label: "5-hour limit", usedPercent: 82, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }], detail: "Read from the Codex app-server." },
+            { id: "opencode", name: "OpenCode", role: null, connection: "cli", about: null, connected: true, plan: null, windows: null, detail: "OpenCode reports what each run cost; it reports no plan window." },
+            { id: "anthropic", name: "Anthropic API", role: null, connection: "api", about: ANTHROPIC_API_ABOUT, connected: false, plan: null, windows: null, detail: "No API key in the app environment." },
           ],
           notes: ["webstore · PRB-2: The attempts record could not be read."],
         } as ReplyMap[T["kind"]];
@@ -283,7 +291,10 @@ describe("UI v2", () => {
       `Weekly · Fable${weeklyReset}36% used`,
     ]);
     expect(claude.querySelector(".connection-dot")?.classList.contains("disconnected")).toBe(false);
-    expect(screen.getByText("Anthropic API").closest("section")!.querySelector(".connection-dot")?.classList.contains("disconnected")).toBe(true);
+    // Nothing probes an API key, so its row carries no dot and says what it is.
+    const api = screen.getByText("Anthropic API").closest("section")!;
+    expect(api.querySelector(".connection-dot")).toBeNull();
+    expect(within(api).getByText(ANTHROPIC_API_ABOUT)).toBeTruthy();
     // OpenCode reports no plan window: its card is connected, draws no meter
     // and says why, rather than reading as a provider that failed to answer.
     const opencode = screen.getByText("OpenCode").closest("section")!;
@@ -562,11 +573,15 @@ describe("UI v2", () => {
     location.hash = ["task", repoId, "PRB-415"].join("/");
     mountFresh();
     await screen.findByRole("heading", { name: "The run was stopped" }, { timeout: 5000 });
-    fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
-    // Planning mode over the new plan, on the pane that holds it.
-    await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|criteria)$/), {
+    await planItAgain();
+    // Planning mode over the new plan, on the pane that holds it: the Graph
+    // of a plan divided into nodes, the contract of one left flat.
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|contract)$/), {
       timeout: 5000,
     });
+    const [, id, pane] = location.hash.split("/");
+    const drafted = (await sample.request({ kind: "drafts" })).find((draft) => draft.id === id)!;
+    expect(pane).toBe(drafted.nodes > 0 ? "graph" : "contract");
     const after = await sample.request({ kind: "snapshot" });
     // The stopped ticket is gone, and the new plan is the one row the spec has.
     expect(after.tasks.some((row) => row.ticket.key === "PRB-415")).toBe(false);
@@ -600,7 +615,7 @@ describe("UI v2", () => {
       location.hash = ["task", repoId, "PRB-415"].join("/");
       mount();
       await screen.findByRole("heading", { name: "The run was stopped" }, { timeout: 5000 });
-      fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
+      await planItAgain();
       expect(
         await screen.findByText("no spec at specs/retire-the-legacy-csv-importer/spec.md", {}, {
           timeout: 5000,
@@ -790,7 +805,7 @@ describe("usage: a signed-in provider that reports no window", () => {
           readAt: new Date().toISOString(),
           ledger: { month: "2026-09", spentMicros: 0, pricedAttempts: 0, unpricedAttempts: 0, ticketsRun: 0, ticketsMerged: 0, stoppedShort: 0, averageMergedMicros: null },
           providers: [
-            { id: "claude", name: "Claude Code", role: null, connected: true, plan: null, windows: null, detail: "This Claude Code does not report its limits without an inference turn. Update it to see them." },
+            { id: "claude", name: "Claude Code", role: null, connection: "cli", about: null, connected: true, plan: null, windows: null, detail: "This Claude Code does not report its limits without an inference turn. Update it to see them." },
           ],
           notes: [] as string[],
         } as ReplyMap[T["kind"]];

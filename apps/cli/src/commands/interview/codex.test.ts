@@ -738,7 +738,7 @@ describe("the interview's rules over the app server's approvals", () => {
     ]);
     expect(server.answers().map((answer) => answer.decision)).toEqual([
       "approved",
-      '{"denied":{"rejection":"pnpm install is not one of the read-only shapes this session may run: Bash(ls:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(wc:*), Bash(rg:*), Bash(grep:*), Bash(find:*), Bash(file:*), Bash(cd:*), Bash(pwd), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(git blame:*)"}}',
+      '{"denied":{"rejection":"pnpm install is not one of the read-only shapes this session may run: Bash(ls:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(wc:*), Bash(rg:*), Bash(grep:*), Bash(find:*), Bash(file:*), Bash(cd:*), Bash(pwd), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(git blame:*), Bash(git branch:*)"}}',
       "approved",
       expect.stringContaining("packages/queue/send.ts") as unknown as string,
     ]);

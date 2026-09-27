@@ -5,7 +5,7 @@ import { attemptsPath } from "../repository/layout.js";
 import { noWindows, type claudeUsage, type codexUsage, type ProviderUsage } from "../usage-probe.js";
 import type { TicketReads } from "../tickets/reads.js";
 import type { RegisteredRepository } from "../profile/store.js";
-import type { Provider, Settings, UsageReport } from "../../shared/protocol.js";
+import { ANTHROPIC_API_ABOUT, type Provider, type Settings, type UsageReport } from "../../shared/protocol.js";
 import type { Ticket } from "@perbo/contracts";
 
 export interface UsageDeps {
@@ -61,12 +61,14 @@ export async function usageReport(deps: UsageDeps): Promise<UsageReport> {
     readAt: new Date().toISOString(),
     ledger: ledgerFor(records, currentMonth()),
     providers: [
-      { id: "claude", name: "Claude Code", role: roleOf("claude-cli"), connected: signedIn("claude"), ...claude },
-      { id: "codex", name: "Codex", role: roleOf("codex-cli"), connected: signedIn("codex"), ...codex },
+      { id: "claude", name: "Claude Code", role: roleOf("claude-cli"), connection: "cli", about: null, connected: signedIn("claude"), ...claude },
+      { id: "codex", name: "Codex", role: roleOf("codex-cli"), connection: "cli", about: null, connected: signedIn("codex"), ...codex },
       {
         id: "opencode",
         name: "OpenCode",
         role: roleOf("opencode-cli"),
+        connection: "cli",
+        about: null,
         connected: signedIn("opencode"),
         plan: null,
         windows: null,
@@ -78,6 +80,8 @@ export async function usageReport(deps: UsageDeps): Promise<UsageReport> {
         id: "anthropic",
         name: "Anthropic API",
         role: roleOf("anthropic"),
+        connection: "api",
+        about: ANTHROPIC_API_ABOUT,
         connected: signedIn("anthropic"),
         plan: null,
         windows: null,

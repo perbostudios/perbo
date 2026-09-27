@@ -38,6 +38,7 @@ async function interview(
     data?: string;
     repo?: string;
     refuseResumes?: number;
+    staleSnapshots?: number;
   } = {},
 ) {
   const repo = extra.repo ?? repository(scratch);
@@ -46,6 +47,7 @@ async function interview(
     steps,
     sessionId: "ses-7",
     ...(extra.refuseResumes === undefined ? {} : { refuseResumes: extra.refuseResumes }),
+    ...(extra.staleSnapshots === undefined ? {} : { staleSnapshots: extra.staleSnapshots }),
   });
   const data = extra.data ?? join(mkdtempSync(join(scratch, "home-")), "data");
   const streams = recordStreams();
@@ -153,6 +155,18 @@ describe("the OpenCode the interview starts", () => {
       expect(fake.seen().prompts).toEqual([]);
     }
   }, SPAWN_TEST_TIMEOUT_MS);
+
+  it("opens the chat's session only once a scratch session's catalogue offers its model, opened or resumed", async () => {
+    for (const argv of [[], ["--session", "ses-7"]]) {
+      const { code, fake } = await interview([], { argv: ["--model", "opencode/big-pickle", ...argv], staleSnapshots: 1 });
+      expect(code, argv.join(" ")).toBe(EXIT_CODES.approve);
+      const seen = fake.seen();
+      // The first snapshot lacked the model, the second offered it, and the
+      // checkout's own session was opened after that and took it.
+      expect(seen.scratch).toHaveLength(2);
+      expect(seen.modelRefused).toEqual([]);
+    }
+  }, SPAWN_TEST_TIMEOUT_MS + OPENCODE_SESSION_RETRY_MS);
 
   it("continues a session through ACP's own resume", async () => {
     const { fake } = await interview([], { argv: ["--session", "ses-7"] });

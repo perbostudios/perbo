@@ -241,3 +241,21 @@ describe("the same environment reached through export/declare -x/typeset -x", ()
     expect(judge("declare GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch").decision).toBe("allowed");
   });
 });
+
+describe("the credential key however the line spells its place", () => {
+  for (const [command, key] of [
+    // `-f` is `--file`: its value is the file, and the key is the word after it.
+    ["git config -f x credential.helper y", "credential.helper"],
+    // The subcommand form names the key as its first operand.
+    ["git config set credential.helper x", "credential.helper"],
+    // The shell hands git the key without the quotes around the assignment.
+    ['git -c "credential.helper=x" fetch', "credential.helper"],
+  ] as const) {
+    it(`refuses \`${command}\` as a credential refusal`, () => {
+      const admission = judge(command);
+      expect(admission.decision).toBe("denied");
+      expect(admission.rule).toBe(ADMISSION_RULES.git_credential_config);
+      expect(admission.target).toBe(key);
+    });
+  }
+});

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   LEAVE_IT_TO_THE_INTERVIEW,
   answersGroup,
+  groupAnswers,
+  sameQuestion,
   type InterviewQuestionGroup,
 } from "./interview-protocol.js";
 
@@ -72,5 +74,47 @@ describe("answersGroup", () => {
     // asking ending is what puts an unclosed problem again.
     expect(answersGroup(ONE, "Leave the old node where it is for now.")).toBe(false);
     expect(answersGroup(ONE, "a) Delete it")).toBe(false);
+  });
+});
+
+describe("groupAnswers", () => {
+  it("reads each part's answer off the turn that answers the group, and nothing off one that does not", () => {
+    expect(groupAnswers(TWO, "a) Split at the read\nb) whatever proves the read is separate")).toEqual([
+      "Split at the read",
+      "whatever proves the read is separate",
+    ]);
+    expect(groupAnswers(ONE, "  Delete it ")).toEqual(["Delete it"]);
+    expect(groupAnswers(ONE, "Leave the old node where it is for now.")).toBeNull();
+    expect(groupAnswers(TWO, "a) Split at the read")).toBeNull();
+  });
+});
+
+describe("sameQuestion", () => {
+  const part = TWO.parts[0]!;
+  it("is the same question in other words around it: trimmed, its answers in another order, detailed or recommended otherwise", () => {
+    const again: InterviewQuestionGroup["parts"][number] = {
+      question: `  ${part.question} `,
+      options: [
+        { label: " Split at the write", detail: "the other end", recommended: true },
+        { label: "Split at the read ", detail: null, recommended: false },
+      ],
+    };
+    expect(sameQuestion(part, again)).toBe(true);
+  });
+
+  it("is a new question reworded, or offering an answer it did not offer before", () => {
+    expect(sameQuestion(part, { ...part, question: "Where should the split go?" })).toBe(false);
+    expect(
+      sameQuestion(part, {
+        ...part,
+        options: [...part.options, { label: "Split at both", detail: null, recommended: false }],
+      }),
+    ).toBe(false);
+    expect(
+      sameQuestion(part, {
+        ...part,
+        options: [part.options[0]!, { label: "Split at the queue", detail: null, recommended: false }],
+      }),
+    ).toBe(false);
   });
 });

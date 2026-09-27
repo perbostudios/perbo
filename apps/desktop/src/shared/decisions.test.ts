@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { FINDING_ROUTINGS } from "@perbo/contracts";
+import { beforeEach, describe, expect, it } from "vitest";
+import { FINDING_ROUTINGS, NOTHING_TRIED } from "@perbo/contracts";
 import { decisionQuestions, settledFindings } from "./decisions.js";
 
 /**
@@ -116,13 +116,29 @@ describe("the findings a person's answers and the rounds since have settled", ()
   const reviewed = {
     review: { review_id: "rev_0000000000000002", created_at: "2026-09-24T08:00:00.000Z" },
     verification: null,
-    bundles: [{ kind: "review", subject_id: "rev_0000000000000002", created_at: "2026-09-24T09:00:00.000Z" }],
+    bundles: [{ kind: "review", subject_id: "rev_0000000000000002", created_at: "2026-09-24T09:00:00.000Z", inputs: {} }],
   };
-  const verified = (given: string[], open: string[], deterministic_failure: string | null = null) => ({
-    review: null,
-    verification: { open_keys: open, per_finding: given.map((finding_key) => ({ finding_key })), deterministic_failure },
-    bundles: [],
+  // Each round's verification, recorded a minute after the one before, from
+  // just before the review: the loop reads the bundle, as this does.
+  let minute = 59;
+  beforeEach(() => {
+    minute = 59;
   });
+  const verified = (given: string[], open: string[], deterministic_failure: string | null = null) => {
+    const at = new Date(Date.parse("2026-09-24T08:00:00.000Z") + minute++ * 60_000).toISOString();
+    return {
+      review: null,
+      verification: { open_keys: open, per_finding: given.map((finding_key) => ({ finding_key })), deterministic_failure },
+      bundles: [
+        {
+          kind: "review",
+          subject_id: `cv_att_${minute}`,
+          created_at: at,
+          inputs: { findings_given: given.join(","), findings_open: open.join(",") },
+        },
+      ],
+    };
+  };
   const answer = (finding_key: string, over: Record<string, unknown> = {}) => ({
     review: { reference: "PRB-1" },
     finding_key,
@@ -133,7 +149,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     ...over,
   });
   const settled = (attempts: unknown[], verdicts: unknown[]) =>
-    [...settledFindings({ attempts: attempts as never, verdicts }).keys].sort();
+    [...settledFindings({ ticket: { history: [] }, attempts: attempts as never, verdicts }).keys].sort();
 
   it("counts a standing answer that shipped it as it is, taken after the review", () => {
     expect(
@@ -175,8 +191,11 @@ describe("the findings a person's answers and the rounds since have settled", ()
     ).toEqual([]);
   });
 
-  it("counts what a round since the review closed, by the last verification's open set", () => {
+  it("counts what a round since the review closed, by the last verification each finding was given", () => {
     expect(settled([verified(["x"], []), reviewed, verified(["a", "b"], ["b"]), verified(["b", "c"], ["c"])], [])).toEqual(["a", "b"]);
+    // A round scoped to one finding, as a person's answer scopes it after a
+    // stall, says nothing of the one it was not given: that stays open.
+    expect(settled([reviewed, verified(["a", "b"], ["a", "b"]), verified(["a"], [])], [])).toEqual(["a"]);
   });
 
   it("settles nothing where no review is on record", () => {
@@ -187,6 +206,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     const asked = decisionQuestions(review([finding({ key: "a" }), finding({ key: "b" })]), {
       keys: new Set(["a"]),
       refusal: null,
+      loop: NOTHING_TRIED,
     });
     expect(asked.map((question) => question.id)).toEqual(["b"]);
   });
@@ -196,7 +216,11 @@ describe("the findings a person's answers and the rounds since have settled", ()
       "remediation round 1 was given 1 scope finding(s) and widened the change set instead: " +
       "test/extra.test.ts were not in the change set it was asked to narrow. " +
       "The contract's writes are admitted only under: `src/**`.";
-    const standing = settledFindings({ attempts: [reviewed, verified(["a", "b"], ["a", "b"], refusal)] as never, verdicts: [] });
+    const standing = settledFindings({
+      ticket: { history: [] },
+      attempts: [reviewed, verified(["a", "b"], ["a", "b"], refusal)] as never,
+      verdicts: [],
+    });
     expect(standing.refusal).toEqual({ sentence: refusal, open: new Set(["a", "b"]) });
 
     const asked = decisionQuestions(
@@ -216,6 +240,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
 
   it("names no refusal where the last round's verification stopped on none", () => {
     const standing = settledFindings({
+      ticket: { history: [] },
       attempts: [reviewed, verified(["a"], ["a"], "scope: an earlier round's failure"), verified(["a"], ["a"], null)] as never,
       verdicts: [],
     });

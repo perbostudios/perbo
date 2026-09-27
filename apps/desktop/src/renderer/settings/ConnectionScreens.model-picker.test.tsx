@@ -152,6 +152,33 @@ describe("shared discovered model picker", () => {
       ).toBe(false),
     );
   });
+  it("says in one sentence that OpenCode offers nothing to run, rather than listing nothing", async () => {
+    const nothing =
+      "OpenCode reports no model you can run now — none of its free models is listed and no provider is connected; " +
+      "set OPENCODE_API_KEY in the app environment for OpenCode Zen and refresh.";
+    const original = bridge.request.bind(bridge);
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) =>
+      request.kind === "models" && request.provider === "opencode-cli"
+        ? Promise.reject(new Error(nothing))
+        : original(request)) as typeof bridge.request);
+    const connected = (id: Provider["id"], name: string): Provider => ({
+      id,
+      name,
+      installed: true,
+      authenticated: true,
+      detail: "",
+      loginCommand: "",
+      roles: ["Execution", "Independent review", "Planning"],
+    });
+    mount("claude-sonnet-5", "executor", [connected("claude", "Claude Code"), connected("opencode", "OpenCode")]);
+    fireEvent.click(screen.getByRole("button", { name: "Change executor model" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }).textContent).toContain("Sonnet 5"));
+    fireEvent.click(screen.getByRole("combobox", { name: "executor provider" }));
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode/ }));
+    await screen.findByText(nothing);
+    expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("combobox", { name: "Model" }).textContent).not.toContain("Sonnet 5");
+  });
 });
 describe("the picker's effort, its edges and its closed reading", () => {
   const open = async (role: "executor" | "reviewer" = "executor") => {

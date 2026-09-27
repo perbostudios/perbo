@@ -11,6 +11,7 @@ import {
   type NodeReview,
   type PlanContract,
   type ReviewArtifact,
+  type HistoryRow,
 } from "@perbo/contracts";
 import { cleanup, type Workspace } from "@perbo/workspace";
 import { PROMPT_VERSION } from "@perbo/review";
@@ -210,6 +211,12 @@ export interface TicketRunRequest {
    * was taken after; none reaches the executor or the reviewer.
    */
   decided?: readonly DecidedFinding[];
+  /**
+   * The ticket's rows, which say whether a run since its last review ended on
+   * `FINISHED_TRYING` and so put every finding it left open to the person
+   * (`loopOnReview`). None for a run with no ticket.
+   */
+  history?: readonly HistoryRow[];
   /** Injected by tests: a stand-in for the agent, the checks and the reviewer. */
   hooks?: Partial<LoopPorts>;
 }
@@ -341,6 +348,7 @@ async function runLockedTicket(
   let outcome: TicketRunResult["outcome"] = "terminated";
   let detail = "";
   const decided = args.decided ?? [];
+  const history = args.history ?? [];
   let decidedOn: DecidedFinding[] = [];
 
   // D-132: a delivery on a person's
@@ -354,6 +362,7 @@ async function runLockedTicket(
           ticket_id: contract.ticket_id,
           repository_id: contract.scope.repository_id,
           decided,
+          history,
         });
   const delivering =
     decidedNow !== null &&
@@ -382,7 +391,7 @@ async function runLockedTicket(
   const continuing =
     resumeSource !== null || config.relevel || delivering !== null
       ? null
-      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided });
+      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided, history });
   if (continuing !== null) {
     progress(
       `${config.ticket_key}'s last review left ${continuing.findings.length} finding(s) open on ` +
@@ -785,9 +794,9 @@ async function runLockedTicket(
     // as closed only where the run's verification closed it, which is an
     // approval; anything short of that leaves it open on the review.
     if (continuing !== null && state.finalReview === continuing.review) {
-      const decisions = decisionsOn(continuing.review, continuing.reviewed_at, decided);
+      const decisions = decisionsOn(continuing.review, continuing.reviewed_at, decided, continuing.loop);
       const handed = new Set(continuing.directions.map((direction) => direction.finding_key));
-      const owed = stillWithPerson(continuing.review, decisions, handed);
+      const owed = stillWithPerson(continuing.review, decisions, handed, continuing.loop);
       if (outcome === "approved" && owed.length > 0) {
         outcome = "escalated";
         detail =

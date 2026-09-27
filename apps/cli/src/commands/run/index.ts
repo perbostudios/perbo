@@ -1283,6 +1283,10 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
               contract.ticket_id,
             ),
           }),
+      // The ticket's rows, which say whether a run since its last review
+      // finished trying and so put what it left open to the person
+      // (`loopOnReview`).
+      ...(admitted === null ? {} : { history: readTicket(admitted.dir, admitted.key).history }),
       ...(options.hooks ? { hooks: options.hooks } : {}),
       ...(progress ? { onProgress: progress } : {}),
       // A run with no ticket has nowhere else to put the pull request: the
@@ -1465,6 +1469,7 @@ async function publishRetainedTicket(input: {
       // The answers a person gave, which the pull request lists as a
       // publishing run's does.
       decided: decidedFindings(readLocalVerdictsOrWarn(admitted.dir, streams).verdicts, contract.ticket_id),
+      history: readTicket(admitted.dir, admitted.key).history,
       // Written while the runner still holds the ticket's run lock, so no run
       // of the ticket starts between the pull request opening and the record
       // saying so.

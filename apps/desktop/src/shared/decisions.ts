@@ -1,6 +1,16 @@
 import { z } from "zod";
-import { answersReview, decidable, decisionChoicesFor, routedToPerson } from "@perbo/contracts/browser";
-import type { Finding, ReviewArtifact } from "@perbo/contracts";
+import {
+  answersReview,
+  decidable,
+  decisionChoicesFor,
+  loopOnRecord,
+  NOTHING_TRIED,
+  routedToPerson,
+  type HistoryRow,
+  type LoopOnReview,
+  type RecordedBundle,
+} from "@perbo/contracts/browser";
+import type { Finding, ReviewArtifact, Ticket } from "@perbo/contracts";
 import type { AttemptView, DecisionQuestion } from "./protocol.js";
 
 /**
@@ -22,7 +32,9 @@ import type { AttemptView, DecisionQuestion } from "./protocol.js";
  * `closure: "human"` stays in its own right: the reviewer naming a person as
  * the closer is a direct answer to this question, whatever the routing beside
  * it. `advisory` and `waived` are not here because neither closes a gate, and
- * `remediable` is not here because the executor is already answering it.
+ * `remediable` is here only once a run ended stalled or exhausted on the
+ * review (`routedToPerson`, from `settled.loop`): until then the executor is
+ * answering it, and after it every one a round did not close is the person's.
  *
  * A finding `routedToPerson` on a `decidable` review — the predicates `perbo
  * verdict --decide` and the loop read too — takes one of the answers that
@@ -51,17 +63,17 @@ export function decisionQuestions(
       })
     | null
     | undefined,
-  settled: SettledFindings = { keys: new Set(), refusal: null },
+  settled: SettledFindings = { keys: new Set(), refusal: null, loop: NOTHING_TRIED },
 ): DecisionQuestion[] {
-  const decides = (finding: Pick<Finding, "status" | "routing">): boolean =>
-    review != null && decidable(review) && routedToPerson(finding);
+  const decides = (finding: Pick<Finding, "key" | "status" | "routing">): boolean =>
+    review != null && decidable(review, settled.loop) && routedToPerson(finding, settled.loop);
   return (review?.findings ?? [])
     .filter(
       (finding) =>
         finding.status === "open" &&
         (decides(finding)
           ? !settled.keys.has(finding.key)
-          : routedToPerson(finding) || finding.closure === "human"),
+          : routedToPerson(finding, settled.loop) || finding.closure === "human"),
     )
     .map((finding) => ({
       id: finding.key,
@@ -94,7 +106,6 @@ const ShippedSchema = z.object({
 });
 const VerifiedSchema = z.object({
   open_keys: z.array(z.string()),
-  per_finding: z.array(z.object({ finding_key: z.string() })),
   deterministic_failure: z.string().nullable(),
 });
 
@@ -108,52 +119,89 @@ export interface SettledFindings {
    * stopped on none.
    */
   refusal: { sentence: string; open: ReadonlySet<string> } | null;
+  /** What the loop has done on the review (`loopOnRecord`), which says who each finding is asked of. */
+  loop: LoopOnReview;
 }
 
 /**
  * The findings of the ticket's last review that are settled without another
  * answer (D-132): shipped as it is by
- * a standing answer that answers that review, or closed by a round after it —
- * given to a verification and absent from the last one's open set. Which
- * answers answer the review is `answersReview`, the loop's rule, against the
- * review's own bundle — the one whose subject is its id — and the time it was
- * recorded, as the loop reads it. The review is immutable, so this is read
- * beside it, and so is the deterministic failure the last round since it was
- * refused on.
+ * a standing answer that answers that review, or closed by a round after it,
+ * as the loop reads the record (`loopOnRecord`) — which also says whether the
+ * loop has finished trying it. Which answers answer the review is
+ * `answersReview`, the loop's rule, against the review's own bundle — the one
+ * whose subject is its id — and the time it was recorded, as the loop reads
+ * it. The review is immutable, so this is read beside it, and so is the
+ * deterministic failure the last round since it was refused on.
  */
-export function settledFindings(detail: { attempts: readonly AttemptView[]; verdicts: readonly unknown[] }): SettledFindings {
-  const nothing: SettledFindings = { keys: new Set(), refusal: null };
+export function settledFindings(detail: {
+  ticket: Pick<Ticket, "history">;
+  attempts: readonly AttemptView[];
+  verdicts: readonly unknown[];
+}): SettledFindings {
   const at = detail.attempts.findLastIndex((attempt) => attempt.review !== null);
   const review = detail.attempts[at]?.review;
-  if (review === undefined || review === null) return nothing;
-  const recorded = detail.attempts[at]!.bundles.find(
-    (bundle) => bundle.kind === "review" && bundle.subject_id === review.review_id,
-  );
-  if (recorded === undefined) return nothing;
-  const shipped = detail.verdicts.flatMap((row) => {
+  if (review === undefined || review === null) return { keys: new Set(), refusal: null, loop: NOTHING_TRIED };
+  const verified = detail.attempts.slice(at + 1).flatMap((attempt) => {
+    const parsed = VerifiedSchema.safeParse(attempt.verification);
+    return parsed.success ? [parsed.data] : [];
+  });
+  return settledOnRecord({
+    review_id: review.review_id,
+    bundles: detail.attempts.flatMap((attempt) => attempt.bundles),
+    history: detail.ticket.history,
+    verdicts: detail.verdicts,
+    verification: verified.at(-1) ?? null,
+  });
+}
+
+/**
+ * `settledFindings` from the records themselves: the review's id, the
+ * ticket's bundles and rows, the verdicts record's rows, and the last closure
+ * verification since the review where it is read. The host reads Home's
+ * questions through this from the files the loop wrote, and the loop page
+ * through `settledFindings` from the report, so the two ask alike.
+ */
+export function settledOnRecord(input: {
+  review_id: string;
+  bundles: readonly RecordedBundle[];
+  history: readonly HistoryRow[];
+  verdicts: readonly unknown[];
+  verification: { open_keys: readonly string[]; deterministic_failure: string | null } | null;
+}): SettledFindings {
+  const onRecord = loopOnRecord({ review_id: input.review_id, bundles: input.bundles, history: input.history });
+  if (onRecord === null) return { keys: new Set(), refusal: null, loop: NOTHING_TRIED };
+  const shipped = input.verdicts.flatMap((row) => {
     const parsed = ShippedSchema.safeParse(row);
     if (!parsed.success) return [];
     const { review: named, finding_key, decided_at } = parsed.data;
     // A decision names a review by its id, or the ticket or its pull request.
     const review_id = named.reference.startsWith("rev_") ? named.reference : null;
-    return answersReview({ decided_at, review_id }, { review_id: recorded.subject_id, recorded_at: recorded.created_at })
+    return answersReview({ decided_at, review_id }, { review_id: input.review_id, recorded_at: onRecord.reviewed_at })
       ? [finding_key]
       : [];
   });
-  const verified = detail.attempts.slice(at + 1).flatMap((attempt) => {
-    const parsed = VerifiedSchema.safeParse(attempt.verification);
-    return parsed.success ? [parsed.data] : [];
-  });
-  const last = verified.at(-1);
-  const open = new Set(last?.open_keys ?? []);
-  const closed = verified
-    .flatMap((verification) => verification.per_finding.map((row) => row.finding_key))
-    .filter((key) => !open.has(key));
+  const last = input.verification;
   return {
-    keys: new Set([...shipped, ...closed]),
+    keys: new Set([...shipped, ...onRecord.loop.closed]),
     refusal:
-      last === undefined || last.deterministic_failure === null
+      last === null || last.deterministic_failure === null
         ? null
-        : { sentence: last.deterministic_failure, open },
+        : { sentence: last.deterministic_failure, open: new Set(last.open_keys) },
+    loop: onRecord.loop,
   };
+}
+
+/**
+ * The questions a ticket's record puts to the person: its last review's, as
+ * the decision card asks them. The card, the wheel, the page's title and
+ * Home's colour all read this, so a pause is never one with nothing to ask.
+ */
+export function questionsOnRecord(detail: {
+  ticket: Pick<Ticket, "history">;
+  attempts: readonly AttemptView[];
+  verdicts: readonly unknown[];
+}): DecisionQuestion[] {
+  const review = detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
+  return decisionQuestions(review, settledFindings(detail));
 }

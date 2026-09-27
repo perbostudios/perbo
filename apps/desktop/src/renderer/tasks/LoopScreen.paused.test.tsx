@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { egressQuestionLine, egressSettledLine } from "@perbo/contracts";
 import { sampleBridge } from "../../sample-host/bridge.js";
@@ -122,5 +122,190 @@ describe("a run waiting on the person's answer about a host", () => {
     );
     expect(screen.getByRole("heading", { name: "Running deterministic checks" })).toBeTruthy();
     expect(document.querySelector(".stage-labels .current")?.textContent).toBe("checks");
+  });
+});
+
+/**
+ * PRB-15 as the founder met it: the review routed eleven findings to the
+ * executor (`remediable`), the first refinement round closed eight, the second
+ * closed none, and the run ended `remediation_stalled` — a pause for the
+ * person. The findings the loop left open are theirs (D-132), so the card asks
+ * each with the three answers, and the Architect is asked about exactly them.
+ * A run that closed the gate with nothing left to ask is not a pause.
+ */
+describe("a refinement that stalled", () => {
+  const RULES = [
+    "verification.execution_missing",
+    "verification.containment_proxy",
+    "verification.tag_clear_nondiscriminating",
+    "verification.offline_load_not_blocked",
+    "verification.browser_execution_missing",
+    "verification.prompt_order_incomplete",
+    "verification.no_key_membership_missing",
+    "verification.containment_is_ancestry_only",
+    "criterion.not_met",
+    "sky.celestial_objects_occluded",
+    "verification.execution_missing_2",
+  ];
+  const KEYS = RULES.map((_rule, at) => at.toString(16).repeat(64));
+  const [FIRST, , , , FIFTH, , , , , , LAST] = KEYS;
+  const STILL_OPEN = [FIRST!, FIFTH!, LAST!];
+  const STALLED = "the gate closed: remediation_stalled";
+
+  /** PRB-15's detail: its review, its two verified rounds, and the row its run wrote. */
+  function stalledDetail(rounds: Array<{ given: string[]; open: string[] }>, note = STALLED): Detail {
+    const detail = structuredClone(sample.detail);
+    const template = detail.attempts[0]!;
+    const finding = template.review!.findings[0]!;
+    const review = {
+      ...template.review!,
+      review_id: "rev_ae72ea99e02fe90f",
+      decision: "remediable" as const,
+      findings: KEYS.map((key, at) => ({
+        ...finding,
+        key,
+        rule_id: RULES[at]!,
+        routing: "remediable" as const,
+        closure: "executor" as const,
+        blocking: false,
+        status: "open" as const,
+        statement: `Finding ${at + 1} of PRB-15's review.`,
+      })),
+    };
+    const bundle = (subject_id: string, created_at: string, inputs: Record<string, string>) =>
+      ({
+        bundle_id: `bundle_${subject_id}`,
+        kind: "review",
+        subject_id,
+        created_at,
+        inputs,
+        artifacts: [],
+        usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
+      }) as never;
+    detail.attempts = [
+      { ...template, id: "att_6431e1fd3c812114", round: 0, review, bundles: [bundle(review.review_id, "2026-09-27T12:48:05.305Z", {})] },
+      ...rounds.map(({ given, open }, at) => ({
+        ...template,
+        id: `att_round${at + 1}`,
+        round: at + 1,
+        review: null,
+        reviewDecision: null,
+        verification: {
+          all_closed: open.length === 0,
+          deterministic_failure: null,
+          open_keys: open,
+          per_finding: given.map((finding_key) => ({
+            finding_key,
+            status: open.includes(finding_key) ? "not_closed" : "closed",
+            pointer: "",
+          })),
+        },
+        bundles: [
+          bundle(`cv_att_round${at + 1}`, `2026-09-27T12:5${at + 1}:00.000Z`, {
+            findings_given: given.join(","),
+            findings_open: open.join(","),
+          }),
+        ],
+      })),
+    ];
+    detail.ticket.state = "changes_requested";
+    detail.ticket.history = [
+      ...detail.ticket.history,
+      { at: "2026-09-27T12:53:04.517Z", from: "independent_review", to: "changes_requested", note },
+    ];
+    detail.verdicts = [];
+    return detail;
+  }
+  /** The loop page over PRB-15's records, after its run completed with exit 2. */
+  function mountStalled(detail: Detail): TaskContext {
+    const workspace = structuredClone(sample.workspace);
+    workspace.refreshingRepos = [];
+    workspace.jobs = [
+      {
+        id: "run-15",
+        repoId: sample.repoId,
+        key: "PRB-412",
+        kind: "run",
+        label: "Run engineering loop",
+        state: "completed",
+        outcome: "remediation_stalled",
+        startedAt: "2026-09-27T12:39:04.011Z",
+        endedAt: "2026-09-27T12:53:05.000Z",
+        log: "",
+        error: null,
+        resultKey: null,
+        result: null,
+      },
+    ];
+    const context: TaskContext = { workspace, detail, repoId: sample.repoId, navigate: vi.fn(), show: vi.fn() };
+    render(
+      <QueryClientProvider client={client}>
+        <LoopScreen {...context} />
+      </QueryClientProvider>,
+    );
+    return context;
+  }
+  const PRB_15 = [
+    { given: KEYS, open: STILL_OPEN },
+    { given: STILL_OPEN, open: STILL_OPEN },
+  ];
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ["the three the rounds left open, as PRB-15's records hold them", PRB_15, STILL_OPEN],
+    ["all eleven, where no round closed any", [{ given: KEYS, open: KEYS }, { given: KEYS, open: KEYS }], KEYS],
+  ])("asks %s, each with the three answers, and asks the Architect about exactly them", (_case, rounds, asked) => {
+    const request = vi.spyOn(sampleBridge, "request").mockImplementation((async () => new Promise(() => undefined)) as never);
+    mountStalled(stalledDetail(rounds));
+    expect(screen.getByRole("heading", { name: "Paused for a decision" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+    expect(dialog.textContent).toContain(`1 of ${asked.length}`);
+    // The three answers: the person's approach, Let it decide, and Ship as it is.
+    expect(within(dialog).getByRole("textbox", { name: "Your approach" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Let it decide" })).toBeTruthy();
+    expect(within(dialog).getByRole("radio", { name: /^Ship as it is/ })).toBeTruthy();
+    const options = request.mock.calls.map(([call]) => call).filter((call) => call.kind === "decisionOptions");
+    expect(options).toEqual([{ kind: "decisionOptions", repoId: sample.repoId, key: "PRB-412", findings: asked }]);
+    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("decisions required");
+  });
+
+  it("puts the decision rightmost as the primary, with Review the result beside it", () => {
+    vi.spyOn(sampleBridge, "request").mockImplementation((async () => new Promise(() => undefined)) as never);
+    mountStalled(stalledDetail(PRB_15));
+    const row = [...document.querySelector(".loop-actions")!.querySelectorAll("button")];
+    expect(row.map((button) => button.textContent)).toEqual([
+      "Open worktree",
+      "Stop the loop",
+      "Watch what the agents are doing",
+      "Review the result",
+      "Answer",
+    ]);
+    expect(row.at(-1)!.className).toMatch(/primary/);
+    expect(row.filter((button) => /primary/.test(button.className))).toHaveLength(1);
+  });
+
+  it("says how every run ended in Perbo's words, never an outcome's name", () => {
+    vi.spyOn(sampleBridge, "request").mockImplementation((async () => new Promise(() => undefined)) as never);
+    mountStalled(stalledDetail(PRB_15));
+    const steps = [...screen.getByRole("region", { name: "Description of steps" }).children].map(
+      (step) => step.children[1]!.firstChild!.textContent ?? "",
+    );
+    expect(steps).toContain(
+      "The refinement stalled: a round closed none of the findings it was given.",
+    );
+    for (const step of steps) {
+      expect(step).not.toMatch(/^[a-z_]+$/);
+      expect(step).not.toMatch(/remediation_stalled|the gate closed/);
+    }
+  });
+
+  it("is not a pause where the rounds closed every finding and nothing is left to ask: it is a stop, and says why", () => {
+    const context = mountStalled(stalledDetail([{ given: KEYS, open: [] }]));
+    expect(screen.queryByRole("heading", { name: "Paused for a decision" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Decisions required" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Ready to recover this task" })).toBeTruthy();
+    expect(document.querySelector(".stage-labels .current")?.textContent).not.toBe("decisions required");
+    expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
+    expect(context.show).not.toHaveBeenCalled();
   });
 });

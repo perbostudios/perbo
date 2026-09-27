@@ -23,7 +23,8 @@ const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }
 require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   if (m.method === 'initialize') send({ id: m.id, result: { protocolVersion: 1 } });
-  if (m.method === 'session/new') send({ id: m.id, result: { sessionId: 's', configOptions: [] } });
+  if (m.method === 'session/new') send({ id: m.id, result: { sessionId: 's', configOptions: [{ id: 'model', options: [{ value: 'opencode/big-pickle' }, { value: 'opencode/nope' }] }] } });
+  if (m.method === 'session/delete') send({ id: m.id, result: {} });
   if (m.method === 'session/set_config_option') send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: m.params.value }] } });
   if (m.method === 'session/prompt') {
     if (${JSON.stringify(answer)} === 'refuses') { send({ id: m.id, error: { code: -32000, message: 'Model not found: opencode/nope' } }); return; }

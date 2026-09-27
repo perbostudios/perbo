@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DECISION_WORDS, LimitsTableSchema, type Finding, type PlanContract } from "@perbo/contracts";
+import { DECISION_WORDS, LimitsTableSchema, gateClosedNote, type Finding, type PlanContract } from "@perbo/contracts";
 import { scratchDirectories, type Repository } from "@perbo/test-support";
 import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../adapter.js";
@@ -125,7 +125,7 @@ const escalating = finding({
 const remediable = finding({ key: "4".repeat(64), rule_id: "test.missing_for_criterion" });
 
 /** A reviewer that records every call and states the commit it was handed. */
-const reviewer = (seen: unknown[], decision: "changes_requested" | "escalate", findings: Finding[]) =>
+const reviewer = (seen: unknown[], decision: "changes_requested" | "escalate" | "remediable", findings: Finding[]) =>
   (async (input: Record<string, unknown>) => {
     seen.push(input);
     return {
@@ -595,6 +595,128 @@ describe("a decided finding beside one the executor can close", () => {
     expect(second.detail).toContain(escalating.key);
     expect(second.decided).toEqual([]);
   }, 90_000);
+});
+
+/**
+ * D-132: a run that ended `remediation_stalled` has shown the executor cannot
+ * close what it left open, so those findings are the person's, and an answer
+ * to one continues the next run exactly as an answer to an escalated finding
+ * does: shipped as it is closes it, an approach runs one round scoped to it
+ * with the person's words.
+ */
+describe("the findings a stalled refinement left open", () => {
+  const [stuck, alsoStuck, closedEarly] = (
+    [
+      ["5", "verification.execution_missing", "No execution result establishes the browser assertions."],
+      ["6", "verification.containment_proxy", "The containment assertion checks DOM ancestry only."],
+      ["7", "criterion.not_met", "ac_22 is not met at 1280×800."],
+    ] as const
+  ).map(([digit, rule_id, statement]) => finding({ key: digit.repeat(64), rule_id, statement }));
+
+  /** Closes what `closes` names of what it is handed, and records every call. */
+  const verifier = (seen: string[][], closes: (round: number) => readonly string[]) =>
+    (async (input: { findings: Array<{ key: string }> }) => {
+      const keys = input.findings.map((entry) => entry.key);
+      seen.push(keys);
+      const closed = new Set(closes(seen.length));
+      const open = keys.filter((key) => !closed.has(key));
+      return {
+        prompt_version: "closure_verify_v1",
+        per_finding: keys.map((finding_key) => ({
+          finding_key,
+          status: closed.has(finding_key) ? "closed" : "not_closed",
+          pointer: "src/fix.ts",
+        })),
+        deterministic_failure: null,
+        all_closed: open.length === 0,
+        open_keys: open,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        cost_micros: 30,
+        cost_basis: "provider_list_estimate",
+      };
+    }) as never;
+
+  /** Run 1: the review routes three findings to the executor; round 1 closes one, round 2 none. */
+  async function stalled() {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    const verifications: string[][] = [];
+    const first = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: fixing().run as never,
+        review: reviewer([], "remediable", [stuck!, alsoStuck!, closedEarly!]),
+        verify: verifier(verifications, (round) => (round === 1 ? [closedEarly!.key] : [])),
+      },
+    });
+    expect(first.outcome).toBe("remediation_stalled");
+    expect(verifications).toHaveLength(2);
+    // The row the CLI writes on the ticket for that run.
+    const history = [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }];
+    return { contract, config, history };
+  }
+
+  it("runs one round scoped to the finding given an approach, ships the other, and delivers", async () => {
+    const { contract, config, history } = await stalled();
+    const agent = fixing();
+    const verifications: string[][] = [];
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [
+        decision(stuck!.key, DECISION_WORDS.ship_as_is),
+        decision(alsoStuck!.key, "Assert containment with bounding boxes, not ancestry.", new Date(), "approach"),
+      ],
+      hooks: { agent: agent.run as never, review: noModel.review, verify: verifier(verifications, () => [alsoStuck!.key]) },
+    });
+
+    expect(second.rounds.map((round) => round.kind)).toEqual(["remediate"]);
+    expect(agent.calls).toHaveLength(1);
+    expect(agent.calls[0]).toContain('<perbo:decisions trust="user">');
+    expect(agent.calls[0]).toContain("Assert containment with bounding boxes, not ancestry.");
+    expect(agent.calls[0]).not.toContain(stuck!.key);
+    expect(verifications).toEqual([[alsoStuck!.key]]);
+    expect(second.outcome).toBe("approved");
+    const status = (key: string) => second.final_review!.findings.find((row) => row.key === key)!.status;
+    expect([status(stuck!.key), status(alsoStuck!.key)]).toEqual(["waived", "resolved"]);
+    expect(second.decided.map((row) => [row.finding_key, row.choice])).toEqual([
+      [stuck!.key, "ship_as_is"],
+      [alsoStuck!.key, "approach"],
+    ]);
+  }, 120_000);
+
+  it("delivers without a round where every finding it left open is shipped as it is", async () => {
+    const { contract, config, history } = await stalled();
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [stuck!, alsoStuck!].map((entry) => decision(entry.key, DECISION_WORDS.ship_as_is)),
+      hooks: noModel,
+    });
+    expect(second.outcome).toBe("approved");
+    expect(second.rounds).toEqual([]);
+    expect(second.detail).toContain("nothing was executed or reviewed again");
+  }, 120_000);
+
+  it("keeps a finding with no answer with the person after the round the others' answers scoped", async () => {
+    const { contract, config, history } = await stalled();
+    const verifications: string[][] = [];
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [decision(alsoStuck!.key, "Assert with bounding boxes.", new Date(), "approach")],
+      hooks: { agent: fixing().run as never, review: noModel.review, verify: verifier(verifications, () => [alsoStuck!.key]) },
+    });
+    expect(verifications).toEqual([[alsoStuck!.key]]);
+    expect(second.outcome).toBe("escalated");
+    expect(second.detail).toContain(stuck!.key);
+  }, 120_000);
 });
 
 describe("an answer to a review that did not judge the whole change", () => {

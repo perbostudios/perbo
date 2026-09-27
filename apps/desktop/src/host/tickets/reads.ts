@@ -16,10 +16,10 @@ import { specFindings } from "../../shared/contract-editing.js";
 import { judgingChecks } from "../../shared/checks.js";
 import { DELETE_TICKET_GONE } from "../../shared/discard.js";
 import { redact, requireSuccess } from "../process.js";
-import { listBundles, readAttempts, readDraftEditRecordsOrNone, summariseTicket } from "../records.js";
+import { listBundles, questionsOnFiles, readAttempts, readDraftEditRecordsOrNone, summariseTicket } from "../records.js";
 import type { BundleManifest } from "../records.js";
 import { effectiveLimits } from "../repository/config.js";
-import { attemptsPath, bundlesPath, objectsPath, principlesPath, ticketPath } from "../repository/layout.js";
+import { attemptsPath, bundlesPath, objectsPath, principlesPath, ticketPath, verdictsPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
 import type { Cli } from "../cli.js";
 import type { RepositoryRegistry } from "../repository/registry.js";
@@ -85,6 +85,7 @@ export const ReportSchema = z
             .nullable(),
           checks: z.array(CheckSchema).nullable(),
           verification: z.unknown(),
+          declines: z.array(z.object({ finding_key: z.string() }).passthrough()).default([]),
           bundles: z.array(RunBundleSchema),
         })
         .passthrough(),
@@ -134,6 +135,7 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
         .join("\n\n"),
     })),
     verification: attempt.verification,
+    declines: attempt.declines.map((decline) => decline.finding_key),
     bundles: attempt.bundles,
   }));
 }
@@ -226,12 +228,18 @@ export class TicketReads {
         if (repository.error) throw new Error(repository.error);
         if (listing.status === "rejected") throw listing.reason;
         const list = listing.value;
+        // What a ticket waiting on the person asks them, as its decision card
+        // asks it, so Home is yellow only where there is a question.
+        const bundles = list.tickets.some((ticket) => ticket.state === "changes_requested")
+          ? await this.bundles(repo)
+          : [];
         return {
           repository,
           tasks: list.tickets.map((ticket) => ({
             repoId,
             repository: repo.name,
             ticket,
+            ...(ticket.state === "changes_requested" ? this.questionsOf(repo, ticket, bundles) : {}),
           })),
           errors: [],
         };
@@ -243,6 +251,21 @@ export class TicketReads {
         };
       }
     });
+  }
+
+  /**
+   * How many questions a ticket's record puts to the person
+   * (`TaskRow.questions`): none where its review cannot be read, since nothing
+   * on the record can then be put to them, as the ticket's own page reads it.
+   */
+  private questionsOf(repo: RegisteredRepository, ticket: Ticket, bundles: readonly BundleManifest[]): { questions: number } {
+    const asked = questionsOnFiles({
+      bundles,
+      ticket,
+      objectsDirectory: objectsPath(repo),
+      verdictsPath: verdictsPath(repo),
+    });
+    return { questions: asked?.length ?? 0 };
   }
 
   detail(repoId: string, key: string): Promise<Detail> {

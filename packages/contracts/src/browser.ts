@@ -16,9 +16,13 @@ export {
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
+  FINISHED_TRYING,
+  loopOnRecord,
+  loopOnReview,
+  NOTHING_TRIED,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
 export { EgressQuestionKeySchema, egressSettledLine, readEgressQuestion, readEgressSettled } from "./egress.js";
 export type { EgressQuestion, EgressSettlement } from "./egress.js";
 export { EFFORT_LABELS, EFFORT_LEVELS, EffortLevelSchema } from "./effort.js";
@@ -32,6 +36,7 @@ export type { GraphEdit } from "./graph-edit.js";
 export { CriterionIdSchema } from "./ids.js";
 export {
   answersGroup,
+  groupAnswers,
   INTERVIEW_SAID_MAX_CHARS,
   InterviewOptionSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
@@ -39,6 +44,7 @@ export {
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
   PART_LETTERS,
+  sameQuestion,
 } from "./interview-protocol.js";
 export { MaterializationEntrySchema } from "./materialisation-entry.js";
 export {
@@ -60,7 +66,7 @@ export {
   VERIFICATION_KINDS,
 } from "./plan.js";
 export type { AcceptanceCriterion, PlanContract, PlanNode, VerificationKind } from "./plan.js";
-export { gateClosedNote, retainedBranch } from "./retained.js";
+export { APPROVED_NOTE, gateClosedNote, incompleteNote, retainedBranch, runEndedOn } from "./retained.js";
 export type { RetainedBranch } from "./retained.js";
 export { isPlannedP3Path } from "./risk.js";
 export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";

@@ -153,7 +153,7 @@ export class DesktopService {
       io: options.io,
       settings: () => this.state.settings,
       repositories: () => this.registry.all(),
-      tickets: { list: (repo) => this.tickets.list(repo) },
+      tickets: { list: (repo) => this.tickets.list(repo), bundles: (repo) => this.tickets.bundles(repo) },
     });
     this.jobs = new JobRunner({
       profile: this.profile,
@@ -193,6 +193,7 @@ export class DesktopService {
         architectTitled: (id, title) => this.editing.architectTitled(id, title),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
+        leaveAsking: (id) => this.editing.leaveAsking(id),
         countNodes: (id, nodes, digest, plan) => this.editing.countNodes(id, nodes, digest, plan),
         adopt: (id, detail, nodes) => this.editing.adopt(id, detail, nodes),
       },

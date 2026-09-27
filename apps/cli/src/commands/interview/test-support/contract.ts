@@ -48,7 +48,12 @@ export type ContractStep =
   /** The session runs a command. */
   | { kind: "command"; command: string }
   /** One of the interview's own tools. */
-  | { kind: "call"; tool: string; input: Record<string, unknown> };
+  | { kind: "call"; tool: string; input: Record<string, unknown> }
+  /**
+   * The session's turn ends here, and the person's next turn arrives saying
+   * this: the steps after it are what the session does with it.
+   */
+  | { kind: "turn"; text: string };
 
 /** What one decision the transport asked for was answered with. */
 export interface ContractDecision {
@@ -967,6 +972,84 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         expect(result.decisions[0]?.result).toContain("No plan has been drafted");
         const told = events(result.streams).find((event) => event.type === "tool" && event.tool === "read_plan");
         expect(told?.type === "tool" ? told.ok : null).toBe(true);
+      });
+    });
+
+    describe("asking once (D-117)", () => {
+      const option = (label: string) => ({ label, detail: null, recommended: false });
+      const part = (question: string, ...labels: string[]) => ({ question, options: labels.map(option) });
+      const FLAP = part("What makes the bird flap?", "Space, click or tap", "Space only");
+      const BEST = part("Should the best score be remembered?", "Best score for this page only", "Kept across visits");
+      const HARDER = part("Does it get harder as you go?", "Fixed difficulty", "Speeds up");
+      const LOOK = part("How should it look?", "Pixel-art sprites drawn in code", "Simple drawn shapes");
+      const SOUND = part("Should it have sound?", "Simple beeps generated in code", "Silent");
+      const ask = (...groups: { title: string; parts: ReturnType<typeof part>[] }[]): ContractStep => ({
+        kind: "call",
+        tool: "ask_options",
+        input: { groups },
+      });
+      const EVERYTHING = ask(
+        { title: "Controls and scoring", parts: [FLAP, BEST] },
+        { title: "Difficulty", parts: [HARDER] },
+        { title: "Look and sound", parts: [LOOK, SOUND] },
+      );
+      const asked = (result: ContractRun) => events(result.streams).filter((event) => event.type === "asked");
+
+      it("refuses a second call putting the same questions in one turn, so they are put to the person once", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [EVERYTHING, EVERYTHING]);
+        expect(result.decisions.map((each) => each.isError)).toEqual([false, true]);
+        expect(result.decisions[1]?.result).toBe(
+          'Nothing was put to the person, since "What makes the bird flap?", "Should the best score be ' +
+            'remembered?", "Does it get harder as you go?", "How should it look?" and "Should it have ' +
+            'sound?" are already asked and waiting on their answer; wait for the answers to come as ' +
+            "their next turns rather than asking again.",
+        );
+        expect(asked(result)).toHaveLength(1);
+      });
+
+      it("refuses a question the person has answered, carrying their answer, beside the ones still waiting", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [
+          EVERYTHING,
+          { kind: "turn", text: "a) Space, click or tap\nb) Best score for this page only" },
+          { kind: "turn", text: "Fixed difficulty" },
+          ask({ title: "Difficulty", parts: [HARDER] }, { title: "Look and sound", parts: [LOOK, SOUND] }),
+        ]);
+        expect(result.decisions.map((each) => each.isError)).toEqual([false, true]);
+        expect(result.decisions[1]?.result).toBe(
+          'Nothing was put to the person, since "How should it look?" and "Should it have sound?" are ' +
+            'already asked and waiting on their answer and "Does it get harder as you go?" was already ' +
+            'answered "Fixed difficulty"; wait for the answers still to come as their next turns, and ' +
+            "take the ones given from the conversation, rather than asking again.",
+        );
+        expect(asked(result)).toHaveLength(1);
+      });
+
+      it("refuses a call that puts one question twice itself, so the person is not asked it twice", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [
+          ask({ title: "Difficulty", parts: [HARDER] }, { title: "Difficulty, again", parts: [HARDER, LOOK] }),
+        ]);
+        expect(result.decisions.map((each) => each.isError)).toEqual([true]);
+        expect(result.decisions[0]?.result).toBe(
+          'Nothing was put to the person, since "Does it get harder as you go?" is put more than once in ' +
+            "this call; ask again with each question once.",
+        );
+        expect(asked(result)).toHaveLength(0);
+      });
+
+      it("asks again what the person talked past, and asks what is new beside an answer given", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [
+          ask({ title: "Difficulty", parts: [HARDER] }),
+          { kind: "turn", text: "Let us talk about the pipes first" },
+          ask({ title: "Difficulty", parts: [HARDER] }),
+          { kind: "turn", text: "Fixed difficulty" },
+          ask({ title: "Look and sound", parts: [LOOK, SOUND] }),
+        ]);
+        expect(result.decisions.map((each) => each.isError)).toEqual([false, false, false]);
+        expect(asked(result)).toHaveLength(3);
       });
     });
 

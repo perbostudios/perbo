@@ -13,7 +13,7 @@ import {
   InterviewEntrySchema,
   TaskModelsSchema,
 } from "../../shared/protocol.js";
-import { interviewModelFor, type PromisePair } from "../../shared/contract-editing.js";
+import { interviewModelFor, type InterviewProviderName, type PromisePair } from "../../shared/contract-editing.js";
 import { interviewArgv, interviewProvider } from "./argv.js";
 import { relayed } from "./relay.js";
 import type { Cli } from "../cli.js";
@@ -100,6 +100,7 @@ export interface InterviewDeps {
     | "architectTitled"
     | "beginAsking"
     | "answerAsking"
+    | "leaveAsking"
     | "countNodes"
     | "adopt"
   >;
@@ -139,7 +140,7 @@ export class InterviewHost {
   private readonly deps: InterviewDeps;
   private readonly live = new Map<
     string,
-    { repoId: string; child: LineProcess; model: string; exited: Promise<void> }
+    { repoId: string; child: LineProcess; model: string; provider: InterviewProviderName; exited: Promise<void> }
   >();
   /**
    * The chats asked to start and not spawned yet, while the model they run on
@@ -244,6 +245,13 @@ export class InterviewHost {
    */
   private readonly afterTheNote = new Set<string>();
   /**
+   * The sessions whose turn in flight has put a question of its own. A turn
+   * that writes the spec and puts none has finished with what it asked
+   * before, and its ending takes that asking down ({@link endTurn}). Cleared
+   * wherever a turn begins or ends.
+   */
+  private readonly askedThisTurn = new Set<string>();
+  /**
    * The reading owed after an admitted write, per session.
    *
    * One at a time: a turn that writes the file and then edits it again admits
@@ -326,8 +334,14 @@ export class InterviewHost {
     pending: { stopped: boolean },
   ): Promise<InterviewStatus> {
     const model = await this.chatModel(TaskModelsSchema.strip().parse(asked.form.models));
-    const session = this.deps.editing.read(id);
-    if (pending.stopped || session.phase === "discarded") return this.status(id);
+    const current = this.deps.editing.read(id);
+    if (pending.stopped || current.phase === "discarded") return this.status(id);
+    // The provider from the same models the model was worked out from: the
+    // defaults a planning with no ticket reads can change while the catalog
+    // is read, and a model of one set run on another's provider is a session
+    // that cannot start.
+    const session = { ...current, form: { ...current.form, models: asked.form.models } };
+    const provider = interviewProvider(session);
     const repo = this.deps.repository(session.repoId);
     const args = interviewArgv(repo, session, model);
     let stderr = "";
@@ -384,7 +398,7 @@ export class InterviewHost {
         this.say(id, { kind: "note", text: "The chat's process failed.", output: redact(error.message) });
       },
     });
-    this.live.set(id, { repoId: repo.id, child, model, exited });
+    this.live.set(id, { repoId: repo.id, child, model, provider, exited });
     // Nothing is said yet: the interview's own `started` event is what says it
     // is there, and until then the only honest word is that it is starting,
     // which is what `running` on this change carries.
@@ -444,6 +458,7 @@ export class InterviewHost {
       this.planMovedThisTurn.delete(id);
       this.heldSaid.delete(id);
       this.opened.delete(id);
+      this.askedThisTurn.delete(id);
     }
     this.say(id, { kind: "turn", text: turn.text });
     // Recorded before it is answered, so the asking is judged against a
@@ -743,7 +758,7 @@ export class InterviewHost {
         this.deps.editing.recordInterview(
           id,
           read.session,
-          interviewProvider(this.deps.editing.read(id)),
+          this.live.get(id)?.provider ?? interviewProvider(this.deps.editing.read(id)),
           this.live.get(id)?.model ?? null,
         );
       } catch {
@@ -778,6 +793,7 @@ export class InterviewHost {
     // they are answering where one stands: recorded rather than counted back
     // out of the turns (D-117).
     if (asked !== null) {
+      this.askedThisTurn.add(id);
       this.deps.editing.beginAsking(id, asked.n);
       this.askingChanged(id);
     }
@@ -866,6 +882,7 @@ export class InterviewHost {
   private endTurn(id: string): void {
     this.sayWhatWasHeld(id);
     this.saySpecIsDrafted(id);
+    this.leaveWhatWasAsked(id);
     this.sayWhatWaitedOnTheNote(id);
     this.saySpecMovedToo(id);
     this.recordArchitectsTitle(id);
@@ -874,7 +891,24 @@ export class InterviewHost {
     this.doing.delete(id);
     this.saidDrafted.delete(id);
     this.afterTheNote.delete(id);
+    this.askedThisTurn.delete(id);
     this.forgetSpecCheck(id);
+  }
+
+  /**
+   * Take down what the interview asked before, where the turn ending wrote the
+   * spec and put no question of its own: the session has gone on without the
+   * answers, and a card left up for them would hold Generate plan back for
+   * questions nobody is waiting on. Pushed by whatever ends the turn, which
+   * says the asking as it leaves it.
+   */
+  private leaveWhatWasAsked(id: string): void {
+    if (!this.saidDrafted.has(id) || this.askedThisTurn.has(id)) return;
+    try {
+      this.deps.editing.leaveAsking(id);
+    } catch {
+      // The planning has gone, and its asking with it.
+    }
   }
 
   /** Say what was held, where the turn ended with it as the whole of it. */

@@ -54,6 +54,11 @@ export type ServerStep =
   | { kind: "blank" }
   /** A file change asked about with no item announced to say what it changes. */
   | { kind: "unannouncedChange" }
+  /**
+   * The turn ends here. A script with any of these is played across the
+   * session's turns, one stretch between them a turn, rather than replayed.
+   */
+  | { kind: "await" }
   /** An approval whose payload is not the shape its method takes. */
   | { kind: "malformed"; method: string }
   /** A command approval carrying no command, and naming no announced item. */
@@ -99,9 +104,10 @@ export interface FakeAppServer {
 /**
  * Write the fake, its script and its logs into `root`, and say where they are.
  *
- * `steps` are replayed on every turn the session starts; a session with no
- * turn opens a thread and stops, which is what an interview that was started
- * and not spoken to does.
+ * `steps` are replayed on every turn the session starts, or, where `await`
+ * steps divide them, played one stretch a turn; a session with no turn opens a
+ * thread and stops, which is what an interview that was started and not spoken
+ * to does.
  */
 export function fakeAppServer(input: {
   root: string;
@@ -170,9 +176,15 @@ const note = (kind, answer) => {
     errorCode: error && typeof error.code === 'number' ? error.code : null,
   }) + '\n');
 };
-async function runTurn(turnId) {
+/** The steps a turn plays: all of them, or its own stretch where awaits divide them. */
+const stretches = script.steps.reduce((all, step) => {
+  if (step.kind === 'await') all.push([]);
+  else all[all.length - 1].push(step);
+  return all;
+}, [[]]);
+async function runTurn(turnId, at) {
   let item = 0;
-  for (const step of script.steps) {
+  for (const step of stretches.length === 1 ? stretches[0] : (stretches[at] ?? [])) {
     const itemId = 'item-' + (item++);
     if (step.kind === 'blank') {
       // A line that is not a message. The real server's stdout carries these
@@ -313,9 +325,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       instructionSources: [] } });
   }
   if (message.method === 'turn/start') {
-    const turnId = 'turn-' + (turns++);
+    const at = turns++;
+    const turnId = 'turn-' + at;
     send({ id: message.id, result: { turn: { id: turnId } } });
-    void runTurn(turnId);
+    void runTurn(turnId, at);
     return;
   }
   if (message.id !== undefined) send({ id: message.id, error: { code: -32601, message: 'no ' + message.method } });

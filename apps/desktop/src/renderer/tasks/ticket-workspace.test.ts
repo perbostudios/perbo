@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { TicketStateSchema } from "@perbo/contracts";
-import { JOURNEY_END, homeOrder, homeRows, homeTally, homeTone, projectTicket, unseenAttention } from "./ticket-workspace.js";
+import { JOURNEY_END, homeOrder, homeRows, homeTally, homeTone, projectTicket, stageOf, unseenAttention } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { egressQuestionLine, egressSettledLine } from "@perbo/contracts";
 import type { Job } from "../../shared/protocol.js";
@@ -285,6 +285,46 @@ describe("ticket workspace projection", () => {
   });
 });
 
+describe("a ticket whose earlier run left a review on record", () => {
+  it("is its loop page while a new run of it is live, whatever was asked, and offers the results once that run ended with its own review on record", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    // The earlier run paused on its verdict, its review on record; Continue starts another.
+    const earlier: Job = { ...job, state: "completed", error: null, outcome: "escalated" };
+    const live: Job = { ...job, id: crypto.randomUUID(), state: "running", startedAt: "2026-09-09T10:00:00.000Z", endedAt: null, error: null };
+    expect(detail.attempts.at(-1)!.review).not.toBeNull();
+    workspace.jobs = [earlier, live];
+    for (const state of ["changes_requested", "ready", "provisioning", "pr_open"] as const) {
+      row.ticket.state = state;
+      for (const requested of ["auto", "loop", "review", "called-off"] as const)
+        expect([state, requested, projectTicket(workspace, row, detail, requested)]).toMatchObject([
+          state,
+          requested,
+          { screen: "loop", resultReady: false, primary: { label: "Watch", view: "loop" } },
+        ]);
+    }
+    // Another command on the ticket is no run: refreshing from GitHub keeps the review it was pressed on.
+    workspace.jobs = [earlier, { ...live, kind: "sync", label: "Refresh from GitHub" }];
+    expect(projectTicket(workspace, row, detail, "review").screen).toBe("review");
+    // The run ended, and its own review is on record.
+    workspace.jobs = [earlier, { ...live, state: "completed", endedAt: "2026-09-09T10:20:00.000Z" }];
+    row.ticket.state = "ready";
+    const reviewed = detail.attempts.at(-1)!;
+    detail.attempts.push({
+      ...reviewed,
+      id: "continued",
+      run: reviewed.run + 1,
+      review: { ...reviewed.review!, decision: "approve", findings: [] },
+      reviewDecision: "approve",
+    });
+    for (const requested of ["auto", "loop", "review"] as const)
+      expect(projectTicket(workspace, row, detail, requested)).toMatchObject({
+        screen: "review",
+        resultReady: true,
+        primary: { label: "Review result", view: "review" },
+      });
+  });
+});
+
 describe("where a Home ticket stands", () => {
   it("sorts every state into a decision, a stop, the journey's end or none", async () => {
     const { workspace, row, job } = await fixture();
@@ -320,6 +360,33 @@ describe("where a Home ticket stands", () => {
     row.ticket.state = "changes_requested";
     workspace.jobs = [{ ...job, kind: "decide", state: "running", endedAt: null, error: null }];
     expect(homeTone(workspace, row)).toBeNull();
+  });
+
+  it("is yellow only where the record puts a question to the person, and a stop where it puts none", async () => {
+    const { workspace, row, job } = await fixture();
+    row.ticket.state = "changes_requested";
+    const verdict = { ...job, state: "completed" as const, error: null, outcome: "remediation_stalled" as const };
+    for (const jobs of [[], [verdict]]) {
+      workspace.jobs = jobs;
+      // Questions on the record, and a count not yet read, are a pause.
+      for (const questions of [3, undefined]) {
+        const counted = { ...row, ...(questions === undefined ? {} : { questions }) };
+        expect(homeTone(workspace, counted), `${jobs.length} ${questions}`).toBe("yellow");
+        expect(projectTicket(workspace, counted)).toMatchObject({ paused: true, recoverable: false, stage: stageOf("changes_requested") });
+        expect(projectTicket(workspace, counted).primary.label).toBe("Answer");
+      }
+      // None: stopped, with the stopped page to say why, never decisions required.
+      const none = { ...row, questions: 0 };
+      expect(homeTone(workspace, none), `${jobs.length}`).toBe("red");
+      const projected = projectTicket(workspace, none);
+      expect(projected).toMatchObject({ paused: false, recoverable: true, screen: "stopped" });
+      expect(projected.stage).not.toBe(stageOf("changes_requested"));
+      expect(projected.primary.label).toBe("See the stopped run");
+    }
+    // A run that ended on a verdict, before its records are read, is still the pause.
+    row.ticket.state = "independent_review";
+    workspace.jobs = [verdict];
+    expect(homeTone(workspace, row)).toBe("yellow");
   });
 
   it("does not move while its repository's records are read again", async () => {

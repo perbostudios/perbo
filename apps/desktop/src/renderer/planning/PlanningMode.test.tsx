@@ -23,7 +23,7 @@ import { PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
 import { handlers } from "../../sample-host/handlers.js";
 import { isLive } from "../../shared/jobs.js";
 import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../../shared/discard.js";
-import { job, sampleReadings } from "../../sample-host/records.js";
+import { askingChanged, converse, editing as sampleEditing, job, sampleReadings } from "../../sample-host/records.js";
 import { READING_FAILED } from "./ReadingFailed.js";
 import { confirmRoute } from "./panes.js";
 import { SpecSection } from "./SpecSection.js";
@@ -5927,6 +5927,40 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() => expect(document.activeElement).toBe(own));
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
+  });
+
+  it("puts a card once for questions the session asks twice, and sends each answer once (D-117)", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.keyDown(composer(), { key: "Enter" });
+    const first = within(await within(dock()).findByRole("group", { name: "How the queue is split" }));
+    // The session puts the same questions a second time, as the host relays
+    // an asking it repeated while the person is on the first.
+    const asked = (await editingRead(plan.id)).conversation.find((entry) => entry.line.kind === "asked")!;
+    const again = converse(plan.id, asked.line);
+    sampleEditing.beginAsking(plan.id, again.n);
+    askingChanged(plan.id);
+
+    fireEvent.click(first.getByRole("radio", { name: /Split at the read/ }));
+    fireEvent.click(first.getByRole("radio", { name: /A unit test per node/ }));
+    fireEvent.click(first.getByRole("button", { name: "Send" }));
+    const second = within(await within(dock()).findByRole("group", { name: "Question 2" }));
+    fireEvent.click(second.getByRole("radio", { name: /Delete it/ }));
+    fireEvent.click(second.getByRole("button", { name: "Send" }));
+
+    // Both groups answered, the repeat is settled with those answers: no card
+    // comes back for it, and the composer is the way to speak again.
+    await waitFor(() => expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false));
+    await settle();
+    expect(within(dock()).queryByRole("group", { name: "How the queue is split" })).toBeNull();
+    expect(within(dock()).queryByRole("group", { name: "Question 2" })).toBeNull();
+    const turns = (await editingRead(plan.id)).conversation.flatMap((entry) =>
+      entry.line.kind === "turn" ? [entry.line.text] : [],
+    );
+    expect(turns).toEqual(["ask me", "a) Split at the read\nb) A unit test per node", "Delete it"]);
   });
 
   it("gives each part of a group its own box, holds the bar until every one is said, and sends them lettered", async () => {

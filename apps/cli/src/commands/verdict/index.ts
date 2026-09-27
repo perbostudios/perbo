@@ -10,6 +10,8 @@ import {
   decidable,
   decisionChoicesFor,
   egressQuestionsPath,
+  loopOnRecord,
+  NOTHING_TRIED,
   routedToPerson,
   stateDir,
   type DecisionChoice,
@@ -41,7 +43,7 @@ import { refuseUnknownReview, storedReviewSubject, storedReviewsFor } from "../r
 import type { CommandContext, Rendered } from "../../command.js";
 import type { ReportCommand } from "../../command-line/table.js";
 import { StoreTargetSchema, storeDir } from "../../store/index.js";
-import { listTickets } from "../../store/tickets.js";
+import { listTickets, readTicket } from "../../store/tickets.js";
 import {
   GIT_IDENTITY_COMMANDS,
   LOCAL_VERDICTS_SCHEMA_VERSION,
@@ -345,12 +347,15 @@ export interface KnownFinding {
   rule_id: string;
   routing: StopRouting | null;
   /**
-   * Whether `--decide` can answer it: a finding a run's own review routed to a
-   * person, which is what the loop reads an answer on (`routedToPerson`).
+   * Whether `--decide` can answer it: a finding routed to a person on a run's
+   * own review, as the loop reads it (`routedToPerson`, from what the loop has
+   * done on that review, `loopOnRecord`).
    */
   to_person: boolean;
   /** The decision of the run's own review that raised it; null where no run's review did. */
   review_decision: ReviewDecision | null;
+  /** Whether that review takes an answer (`decidable`); null where no run's review raised it. */
+  decidable: boolean | null;
   source: string;
 }
 
@@ -397,19 +402,28 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         routing: stopRoutingOf(finding.routing),
         to_person: false,
         review_decision: null,
+        decidable: null,
         source: `the review ${review.review_id}`,
       });
     }
   }
   const report = buildReportForSubject({ storeDirectory: dir, subject, attempt: null });
+  const history = subject.kind === "ticket" ? readTicket(dir, subject.ticket).history : [];
+  const bundles = report.attempts.flatMap((attempt) => attempt.bundles);
   for (const attempt of report.attempts) {
-    for (const finding of attempt.review?.findings ?? []) {
+    const review = attempt.review;
+    const loop =
+      review === null
+        ? NOTHING_TRIED
+        : (loopOnRecord({ review_id: review.review_id, bundles, history })?.loop ?? NOTHING_TRIED);
+    for (const finding of review?.findings ?? []) {
       found.set(finding.key, {
         finding_key: finding.key,
         rule_id: finding.rule_id,
         routing: stopRoutingOf(finding.routing),
-        to_person: routedToPerson(finding),
-        review_decision: attempt.review?.decision ?? null,
+        to_person: routedToPerson(finding, loop),
+        review_decision: review!.decision,
+        decidable: decidable(review!, loop),
         source: "the review artifact",
       });
     }
@@ -421,6 +435,7 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         routing: "declined",
         to_person: false,
         review_decision: null,
+        decidable: null,
         source: prior?.source ?? "the executor's decline",
       });
     }
@@ -432,6 +447,7 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
       routing: stop.routing,
       to_person: found.get(stop.finding_key)?.to_person ?? false,
       review_decision: found.get(stop.finding_key)?.review_decision ?? null,
+      decidable: found.get(stop.finding_key)?.decidable ?? null,
       source: "the pull request",
     });
   }
@@ -796,11 +812,14 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
         "Use --accept or --reject to judge the finding itself",
     );
   }
-  if (args.decision === "decide" && finding.review_decision !== null && !decidable({ decision: finding.review_decision })) {
+  if (args.decision === "decide" && finding.decidable === false) {
     throw new UsageError(
       `${finding.finding_key.slice(0, 12)} (${finding.rule_id}) is on a review that ended ` +
-        `${finding.review_decision}: it did not judge the whole change, so an answer would settle a finding ` +
-        "on a change nobody finished judging, and it takes none. `perbo principle add` carries your words to the executor",
+        `${finding.review_decision}: ` +
+        (finding.review_decision === "incomplete" || finding.review_decision === "error"
+          ? "it did not judge the whole change, so an answer would settle a finding on a change nobody finished judging, and it takes none"
+          : "its findings are the executor's until a run ends remediation_stalled or remediation_exhausted, and it takes no answer before then") +
+        ". `perbo principle add` carries your words to the executor",
     );
   }
 

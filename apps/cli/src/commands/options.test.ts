@@ -2,13 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { EXIT_CODES, ReviewArtifactSchema, SecretIndex, type Finding } from "@perbo/contracts";
+import { EXIT_CODES, ReviewArtifactSchema, SecretIndex, gateClosedNote, type Finding, type ReviewArtifact } from "@perbo/contracts";
 import { SUBMIT_REVIEW_TOOL, type Model, type ModelRequest, type ModelTurn } from "@perbo/model";
 import { DecisionOptionsVerdictSchema, decisionOptionsRecordPath, readDecisionOptionsRecord } from "@perbo/planning";
 import { BundleStore } from "@perbo/runner";
 import { initRepository } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
-import { listTickets, readTicket, storeDir } from "../store/tickets.js";
+import { listTickets, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { makeAttempt, makeReview } from "../test-support/records.js";
 import { recordStreams } from "../test-support/streams.js";
 import { UsageError } from "../usage-error.js";
@@ -125,7 +125,11 @@ const finding = (over: Partial<Finding>): Finding =>
 
 let repos = 0;
 /** PRB-1 admitted from its spec, with one attempt whose review escalated the given findings. */
-async function reviewed(findings: Finding[], reviewId = "rev_options0001"): Promise<{ repo: string; dir: string }> {
+async function reviewed(
+  findings: Finding[],
+  reviewId = "rev_options0001",
+  decision: ReviewArtifact["decision"] = "escalate",
+): Promise<{ repo: string; dir: string }> {
   const repo = join(scratch, `repo-${repos++}`);
   initRepository(repo, { files: { "specs/activation-email/spec.md": SPEC } });
   const streams = recordStreams();
@@ -137,12 +141,18 @@ async function reviewed(findings: Finding[], reviewId = "rev_options0001"): Prom
   });
   if (code !== EXIT_CODES.approve) throw new Error(`admission failed:\n${streams.err()}`);
   const dir = storeDir(repo, null);
-  record(dir, findings, reviewId, 1);
+  record(dir, findings, reviewId, 1, decision);
   return { repo, dir };
 }
 
 /** Another attempt on PRB-1, reviewed with the given findings, recorded after the ones before it. */
-function record(dir: string, findings: Finding[], reviewId: string, round: number): void {
+function record(
+  dir: string,
+  findings: Finding[],
+  reviewId: string,
+  round: number,
+  decision: ReviewArtifact["decision"] = "escalate",
+): void {
   const ticket_id = readTicket(dir, "PRB-1").ticket_id;
   const attempts = join(dir, "state", `${ticket_id}.attempts.json`);
   const prior = round === 1 ? [] : JSON.parse(readFileSync(attempts, "utf8")).attempts;
@@ -161,7 +171,7 @@ function record(dir: string, findings: Finding[], reviewId: string, round: numbe
     ...makeReview({
       review_id: reviewId,
       changeset_id: `cs_options0000${round}`,
-      decision: "escalate",
+      decision,
       cost_basis: "unavailable",
     }),
     findings,
@@ -202,6 +212,54 @@ function record(dir: string, findings: Finding[], reviewId: string, round: numbe
   write("review", review.review_id, { attempt_id: attempt.attempt_id }, [
     { name: "review.json", media_type: "application/json", body: JSON.stringify(review) },
   ]);
+}
+
+/**
+ * A remediation round on PRB-1 after its review, judged by a closure
+ * verification that was given `given` and left `open` open, recorded under
+ * the round's own attempt as the loop records it.
+ */
+function verified(dir: string, round: number, given: readonly string[], open: readonly string[]): void {
+  const ticket_id = readTicket(dir, "PRB-1").ticket_id;
+  const attempts = join(dir, "state", `${ticket_id}.attempts.json`);
+  const prior = JSON.parse(readFileSync(attempts, "utf8")).attempts;
+  const attempt = makeAttempt({
+    attempt_id: `att_options0000000${round}`,
+    ticket_id,
+    created_at: `2026-09-27T1${round}:00:00.000Z`,
+    termination: { reason: "completed", detail: "" },
+    usage: { cost_micros: 0 },
+    changeset_id: `cs_options0000${round}`,
+    head_commit: "b2c3d4e",
+  });
+  writeFileSync(attempts, `${JSON.stringify({ ticket_id, attempts: [...prior, attempt] }, null, 2)}\n`);
+  new BundleStore({ root: join(dir, "bundles"), retainContext: true }).write({
+    kind: "review",
+    subject_id: `cv_${attempt.attempt_id}`,
+    ticket_id,
+    inputs: { head_commit: "b2c3d4e", findings_given: given.join(","), findings_open: open.join(",") },
+    context_manifest: [],
+    versions: { code: "test", prompt: "closure_verify_v1", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
+    usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
+    artifacts: [],
+    errors: [],
+    transitions: [],
+    retention: { class: "raw_transcript", expires_at: null },
+    secrets: new SecretIndex(),
+    excluded_paths: [],
+    deterministic: false,
+    model_version_pinned: true,
+    now: new Date(`2026-09-27T1${round}:01:00.000Z`),
+  });
+}
+
+/** The row the CLI writes on PRB-1 for a run that ended on `outcome`. */
+function ended(dir: string, outcome: string): void {
+  const ticket = readTicket(dir, "PRB-1");
+  writeTicket(dir, {
+    ...ticket,
+    history: [...ticket.history, { at: "2026-09-27T15:00:00.000Z", from: "independent_review", to: "changes_requested", note: gateClosedNote(outcome) }],
+  });
 }
 
 const offered = [
@@ -331,6 +389,20 @@ describe("perbo options", () => {
     await expect(ask(repo, ["c".repeat(64)], unreachable())).rejects.toThrow(/is not a finding of PRB-1's last review/);
     await expect(ask(repo, [EXECUTORS], unreachable())).rejects.toThrow(/not a finding the review left for a person/);
     await expect(ask(repo, [SECRET], unreachable())).rejects.toThrow(/never handed to the executor/);
+  });
+
+  it("offers answers to what a stalled refinement left open, and still refuses one a round closed", async () => {
+    const stuck = finding({ key: DEAD_LETTER, routing: "remediable", closure: "executor", blocking: false });
+    const closed = finding({ key: WHO_IS_TOLD, routing: "remediable", closure: "executor", blocking: false });
+    const { repo, dir } = await reviewed([stuck, closed], "rev_options0001", "remediable");
+    verified(dir, 2, [DEAD_LETTER, WHO_IS_TOLD], [DEAD_LETTER]);
+    verified(dir, 3, [DEAD_LETTER], [DEAD_LETTER]);
+    // While the loop is still trying, both are the executor's.
+    await expect(ask(repo, [DEAD_LETTER], unreachable())).rejects.toThrow(/not a finding the review left for a person/);
+    ended(dir, "remediation_stalled");
+    const asked = await ask(repo, [DEAD_LETTER], scripted([submits({ answers: [{ finding: 1, options: offered }] })]));
+    expect(asked.printed.findings).toEqual([{ finding_key: DEAD_LETTER, options: offered }]);
+    await expect(ask(repo, [WHO_IS_TOLD], unreachable())).rejects.toThrow(/not a finding the review left for a person/);
   });
 
   it("says a ticket with no review has nothing to answer", async () => {

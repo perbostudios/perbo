@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
-import { costLabel, loopSteps, loopTally, runEnding, StageLog } from "./task-context.js";
+import { gateClosedNote, spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
+import { RUN_VERDICTS } from "@perbo/contracts";
+import { costLabel, loopSteps, loopTally, outcomeSentence, runEnding, StageLog } from "./task-context.js";
 import type { AttemptView, Job } from "../../shared/protocol.js";
 
 describe("costLabel", () => {
@@ -782,5 +783,41 @@ describe("loopSteps across runs", () => {
       ["Provisioning the worktree", "2026-09-24T02:00:05.000Z"],
       ...steps.slice(2).map(({ text, at }) => [text, at]),
     ]);
+  });
+});
+
+describe("how a run ended, in the steps", () => {
+  /** The row the CLI writes on a ticket as a run ends, for each way it can end. */
+  const ENDINGS = [
+    ["approved; a human merges it", "The review approved the change; the merge is yours."],
+    [gateClosedNote("changes_requested"), "The review asked for changes the loop could not make on its own."],
+    [
+      gateClosedNote("escalated"),
+      "The run stopped for a person: the review escalated a finding, or the executor declined one as having no determinable practice.",
+    ],
+    [gateClosedNote("remediation_stalled"), "The refinement stalled: a round closed none of the findings it was given."],
+    [gateClosedNote("remediation_exhausted"), "The refinement ran out of rounds or budget with findings still open."],
+    ["the attempt did not complete: no_changes", "The agent made no change to the branch."],
+    ["the attempt did not complete: terminated", "The attempt was terminated before it finished."],
+  ] as const;
+
+  it.each(ENDINGS)("says %s as a whole sentence in Perbo's words, never the outcome's name", (note, sentence) => {
+    const [step] = loopSteps({
+      history: [{ at: "2026-09-27T12:53:04.517Z", from: "independent_review", to: "changes_requested", note }],
+      jobs: [],
+      active: undefined,
+      attempts: [],
+      log: new StageLog(),
+      now: "2026-09-27T13:00:00.000Z",
+    });
+    expect(step!.text).toBe(sentence);
+    expect(step!.text).not.toMatch(/^[a-z_]+$/);
+    expect(step!.text).not.toMatch(/\b[a-z]+_[a-z_]+\b|the gate closed/);
+  });
+
+  it("says every verdict a run ends on for the person in words of its own", () => {
+    for (const outcome of RUN_VERDICTS) {
+      expect(outcomeSentence(outcome), outcome).not.toMatch(/^The run ended: /);
+    }
   });
 });

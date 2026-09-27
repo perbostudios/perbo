@@ -20,10 +20,12 @@ import {
   parseUnifiedDiff,
   rollCosts,
 } from "@perbo/contracts";
-import type { Cost, Ticket } from "@perbo/contracts";
+import type { Cost, RecordedBundle, Ticket } from "@perbo/contracts";
 import { assembleLiveGraph } from "../shared/graph-live.js";
+import { decisionQuestions, settledOnRecord, type SettledFindings } from "../shared/decisions.js";
 import type { LiveCheck, LiveNodeInput, LiveReview } from "../shared/graph-live.js";
 import type {
+  DecisionQuestion,
   GraphEditView,
   GraphLiveView,
   InterviewEdit,
@@ -514,6 +516,7 @@ const StoredReviewSchema = z.looseObject({
 });
 
 const FindingsOnRecordSchema = z.looseObject({
+  review_id: z.string(),
   decision: ReviewDecisionSchema,
   findings: z.array(
     z.looseObject({
@@ -553,6 +556,54 @@ export function findingsOnRecord(
   } catch {
     return null;
   }
+}
+
+/**
+ * A ticket's last review as the loop reads it, and what is settled on it —
+ * shipped as it is, closed by a round, and whether the loop has finished
+ * trying it (`settledOnRecord`) — read from the files the loop and `perbo
+ * verdict` wrote: the bundles, the verdicts record and the ticket's rows. What
+ * a person's answer is checked against, and what Home counts the questions
+ * of. Null where no review can be read.
+ */
+export function reviewOnRecord(input: {
+  bundles: readonly BundleManifest[];
+  ticket: Pick<Ticket, "ticket_id" | "history">;
+  objectsDirectory: string;
+  verdictsPath: string;
+}): { review: FindingsOnRecord; settled: SettledFindings } | null {
+  const review = findingsOnRecord(input.bundles, input.ticket.ticket_id, input.objectsDirectory);
+  if (review === null) return null;
+  let verdicts: unknown[] = [];
+  try {
+    const parsed = z.object({ verdicts: z.array(z.unknown()) }).safeParse(JSON.parse(readFileSync(input.verdictsPath, "utf8")));
+    if (parsed.success) verdicts = parsed.data.verdicts;
+  } catch {
+    // No record, or one `perbo inspect` reports: no answers stand.
+  }
+  const settled = settledOnRecord({
+    review_id: review.review_id,
+    bundles: input.bundles.flatMap((bundle) =>
+      bundle.ticket_id === input.ticket.ticket_id && bundle.created_at !== undefined
+        ? [{ kind: bundle.kind, subject_id: bundle.subject_id, created_at: bundle.created_at, inputs: bundle.inputs ?? {} } as RecordedBundle]
+        : [],
+    ),
+    history: input.ticket.history,
+    verdicts,
+    verification: null,
+  });
+  return { review, settled };
+}
+
+/**
+ * The questions a ticket's files put to the person, as its decision card asks
+ * them (`decisionQuestions` over `reviewOnRecord`): what Home counts
+ * (`TaskRow.questions`), so it is yellow only where there is one. Null where
+ * no review can be read, which says nothing either way.
+ */
+export function questionsOnFiles(input: Parameters<typeof reviewOnRecord>[0]): DecisionQuestion[] | null {
+  const onRecord = reviewOnRecord(input);
+  return onRecord === null ? null : decisionQuestions(onRecord.review, onRecord.settled);
 }
 
 /** One standing answer a person gave to a finding routed to them. */

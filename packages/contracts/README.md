@@ -52,10 +52,12 @@ measurement, not an edit.
 
 `decision.ts` is the single home for a person's answer to a finding the review routed to them
 ([D-132](../../docs/11-open-decisions.md)): the three
-choices and the words each carries where the person typed none, `routedToPerson`, which says which
-findings take one, `decidable`, which says only a review that judged the whole change and stopped
-for a person takes any, `answersReview`, which says which review an answer answers, and
-`decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
+choices and the words each carries where the person typed none, `loopOnRecord`, which reads what the
+loop has done on a review — whether a run since it ended stalled or exhausted, and what each
+finding's last closure verification left open — `routedToPerson`, which says which findings take
+one, `decidable`, which says only a review that judged the whole change and stopped for a person, or
+one the loop has finished trying, takes any, `answersReview`, which says which review an answer
+answers, and `decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
 

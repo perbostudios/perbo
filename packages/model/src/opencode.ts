@@ -10,6 +10,7 @@ import {
   OPENCODE_BUILTIN_MODES,
   OPENCODE_SESSION_ATTEMPTS,
   OPENCODE_SESSION_RETRY_MS,
+  awaitOpenCodeModel,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -171,6 +172,13 @@ class OpenCodeAcp {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: "perbo_reviewer", version: "0.1.0" },
+    });
+    // The scratch session's catalogue snapshot settles on `modelId` before the
+    // review's own session is opened (`awaitOpenCodeModel`).
+    await awaitOpenCodeModel({
+      model: modelId,
+      scratch: () => mkdtempSync(join(this.root, "catalogue-")),
+      request: (method, params) => this.request(method, params),
     });
     const opened = await this.openSession();
     const sessionId = opened?.sessionId;
