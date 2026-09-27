@@ -13,7 +13,13 @@ import { draftedReading, nameSpecAfterRename, saveSpec, specPath, specTexts, spe
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
+import {
+  ANOTHER_PLANNING_HOLDS,
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
+  deletePullRequestOpen,
+  pullRequestOpen,
+} from "../shared/discard.js";
 import {
   deleteDraftedFromSpec,
   deleteSpec,
@@ -844,6 +850,10 @@ async function replan(
 ): Promise<ReplyMap["replan"]> {
   const ticket = (await m.tickets.list(repo)).tickets.find((entry) => entry.key === request.key);
   if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
+  // A ticket whose pull request is open is not deleted, so it is not planned
+  // again either, at `pr_open` or wherever its delivery records the pull
+  // request open, as an escalated run that published leaves it (D-129).
+  if (pullRequestOpen(ticket)) throw new Error(deletePullRequestOpen(ticket));
   // The spec the stopped plan was drafted from, in the words the CLI refuses
   // in, because this is the same question `admit --start-over` asks and a
   // person should not meet two sentences for one answer.
@@ -1026,17 +1036,18 @@ function loop(
       const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
       if (resumeFrom)
         assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
-      // A run that owes the person's answers is refused before the CLI starts
-      // (D-132); an explicit resume carries an attempt's work into a fresh
-      // review, and an approval starts a ticket no run has tried.
+      // A run that owes the person's answers is refused before the CLI starts,
+      // on the branch as the loop reads it: one a person has moved is
+      // reviewed afresh (D-132). An explicit
+      // resume carries an attempt's work into a fresh review, and an approval
+      // starts a ticket no run has tried.
       if (request.kind === "run" && !request.approve && !resumeFrom)
         assertNothingOwed(
-          reviewOnRecord({
-            bundles: await m.tickets.bundles(repo),
-            ticket: await m.tickets.ticket(repo, request.key),
-            objectsDirectory: objectsPath(repo),
-            verdictsPath: verdictsPath(repo),
-          }),
+          await m.tickets.owed(
+            repo,
+            await m.tickets.ticket(repo, request.key),
+            m.tickets.contract(repo, request.key).contract,
+          ),
           request.key,
         );
       if (request.kind === "decide") {

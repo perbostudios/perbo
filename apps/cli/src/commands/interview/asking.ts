@@ -89,8 +89,8 @@ export function askingRecord(
     },
     repeats(groups) {
       const parts = groups.flatMap((group) => group.parts);
-      const open: string[] = [];
-      const given: { question: string; answer: string }[] = [];
+      const open: InterviewQuestionPart[] = [];
+      const given: { part: InterviewQuestionPart; answer: string }[] = [];
       /** Questions this call puts more than once, and nobody has been asked yet. */
       const twice: InterviewQuestionPart[] = [];
       /** Whether the call puts any question nobody has been asked. */
@@ -98,19 +98,27 @@ export function askingRecord(
       parts.forEach((part, at) => {
         const earlier = parts.slice(0, at).some((each) => sameQuestion(each, part));
         if (waiting.some((group) => group.parts.some((each) => sameQuestion(each, part)))) {
-          if (!earlier) open.push(part.question);
+          if (!earlier) open.push(part);
           return;
         }
         const was = answered.findLast((each) => sameQuestion(each.part, part));
         if (was !== undefined) {
-          if (!earlier) given.push({ question: part.question, answer: was.answer });
+          if (!earlier) given.push({ part, answer: was.answer });
           return;
         }
         fresh = true;
         if (earlier && !twice.some((each) => sameQuestion(each, part))) twice.push(part);
       });
-      const doubled = twice.map((part) => quoted(part.question));
       if (open.length === 0 && given.length === 0 && twice.length === 0) return null;
+      // A part is named by its question, and by its answers as well where
+      // another part in sight is worded alike and offers others, since the
+      // wording alone would name both.
+      const inSight = [...parts, ...waiting.flatMap((group) => group.parts), ...answered.map((each) => each.part)];
+      const named = (part: InterviewQuestionPart): string =>
+        inSight.some((each) => each.question.trim() === part.question.trim() && !sameQuestion(each, part))
+          ? `${quoted(part.question)} (offering ${listed(part.options.map((option) => quoted(option.label)), "or")})`
+          : quoted(part.question);
+      const doubled = twice.map(named);
       if (open.length === 0 && given.length === 0)
         return (
           `Nothing was put to the person, since ${listed(doubled)} ` +
@@ -122,8 +130,8 @@ export function askingRecord(
           : [`${listed(doubled)} ${twice.length === 1 ? "is" : "are"} put more than once in this call`]),
         ...(open.length === 0
           ? []
-          : [`${listed(open.map(quoted))} ${open.length === 1 ? "is" : "are"} already asked and waiting on their answer`]),
-        ...given.map((each) => `${quoted(each.question)} was already answered ${quoted(each.answer)}`),
+          : [`${listed(open.map(named))} ${open.length === 1 ? "is" : "are"} already asked and waiting on their answer`]),
+        ...given.map((each) => `${named(each.part)} was already answered ${quoted(each.answer)}`),
       ];
       const next =
         open.length === 0
@@ -144,7 +152,7 @@ export function askingRecord(
 
 const quoted = (text: string): string => `"${text}"`;
 
-/** Items in a run of prose: "a", "a and b", "a, b and c". */
-function listed(items: readonly string[]): string {
-  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)!}`;
+/** Items in a run of prose: "a", "a and b", "a, b and c", or with "or". */
+function listed(items: readonly string[], last: "and" | "or" = "and"): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${last} ${items.at(-1)!}`;
 }

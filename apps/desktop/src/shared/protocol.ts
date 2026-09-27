@@ -1736,6 +1736,15 @@ export interface Detail {
   principles: string;
   verdicts: unknown[];
   /**
+   * The questions a run of this ticket would be refused for (D-132): owed on
+   * its record — the loop finished trying, what it left the person is
+   * unanswered and nothing is handed on — while its branch is still at the
+   * commit judged, as the loop reads the branch. A branch a person has moved
+   * is reviewed afresh, and owes nothing. The contract page offers Answer in
+   * place of Start the loop on this, and the host refuses a run on it.
+   */
+  owed: DecisionQuestion[];
+  /**
    * What this run is actually bounded by (D-096): the stall window, and the
    * ticket cost cap that applies only where the executor is billed per token.
    */

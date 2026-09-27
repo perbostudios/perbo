@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { OPENCODE_SESSION_RETRY_MS } from "@perbo/contracts";
 import { ProviderError } from "./failure.js";
 import { openCodeCliModel, openCodeStructured } from "./opencode.js";
 import { fakeOpenCodeReviewer } from "./test-support/fake-opencode.js";
@@ -135,6 +136,25 @@ describe("the review's session and OpenCode's catalogue", () => {
       expect(opened[2]!.endsWith("/scratch")).toBe(true);
     },
     SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "asks again for a session OpenCode refused while its catalogue was still arriving, the catalogue's or the review's",
+    async () => {
+      // The first scratch session is refused, the second offers the model, and
+      // the review's own is refused once before it opens.
+      const fake = fakeOpenCodeReviewer([{ text: verdict }], { refuseSessions: [1, 3] });
+      const turn = await openCodeCliModel({ submitSchema, binary: fake.binary, modelId: "opencode/big-pickle" }).turn(request());
+      expect(turn.toolCalls.map((call) => call.name)).toEqual(["submit_review"]);
+      const opened = logOf(fake.log)
+        .lines.filter((line) => line["method"] === "session/new")
+        .map((line) => (line["params"] as { cwd: string }).cwd);
+      expect(opened).toHaveLength(4);
+      expect(opened.slice(0, 2).every((cwd) => cwd.includes("catalogue-"))).toBe(true);
+      expect(opened.slice(2).every((cwd) => cwd.endsWith("/scratch"))).toBe(true);
+    },
+    // Spawns the fake, and waits OPENCODE_SESSION_RETRY_MS before each of the two sessions asked again.
+    SPAWN_TEST_TIMEOUT_MS + 2 * OPENCODE_SESSION_RETRY_MS,
   );
 });
 

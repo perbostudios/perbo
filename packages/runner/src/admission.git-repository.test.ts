@@ -52,6 +52,26 @@ const REDIRECTS = [
   "HOME=/tmp/h; git x main",
   "declare -x XDG_CONFIG_HOME=/tmp/c; git x main",
   "export GIT_DIR=/tmp/r/.git && git log",
+  // env's options read as getopt reads them: a cluster letter that takes a
+  // value takes the rest of its word, or the next word where nothing follows.
+  "env -iu X HOME=/tmp/h git status",
+  "env -vu X HOME=/tmp/h git status",
+  "env -iC /tmp HOME=/tmp/h git status",
+  "env -uX HOME=/tmp/h git status",
+  "env -a name HOME=/tmp/h git status",
+  // An escaped quote opens nothing, a single-quoted backslash escapes
+  // nothing, and a double-quoted one escapes the quote after it.
+  "X=\\' HOME=/tmp/h git status \\'",
+  "X='a\\' HOME=/tmp/h git status",
+  'X="a\\" " HOME=/tmp/h git status',
+  // Made by the shell's own assigning commands, whatever their options: a
+  // variable the environment already exports keeps its export.
+  "declare -gx HOME=/tmp/h; git status",
+  "declare HOME=/tmp/h; git status",
+  "local -x HOME=/tmp/h; git status",
+  "readonly HOME=/tmp/h; git status",
+  "export -- HOME=/tmp/h; git status",
+  "export PAGER HOME=/tmp/h; git status",
   // Through a wrapper, a nested shell and a substitution.
   "HOME=/tmp/h sh -c 'git x main'",
   "sh -c 'HOME=/tmp/h git x main'",
@@ -94,7 +114,7 @@ describe("git pointed at a repository or config file the line picks", () => {
 });
 
 describe("what the rule leaves to the others", () => {
-  for (const line of ["git rev-parse --git-dir", "git log --oneline"]) {
+  for (const line of ["git rev-parse --git-dir", "git log --oneline", "echo \\'hi\\'"]) {
     it(`admits ${JSON.stringify(line)} on every executor`, () => {
       expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
       expect(codex(line).decision, line).toBe("allowed");
@@ -110,6 +130,14 @@ describe("what the rule leaves to the others", () => {
     it(`does not refuse ${JSON.stringify(line)}, which removes configuration`, () => {
       // No refusal on the hook. On Codex and OpenCode a leading assignment
       // puts the line outside every prefix entry, so the allow list refuses it.
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_repository_redirect });
+    });
+  }
+
+  for (const line of ["env -iu X git status", "declare -g FOO=1; git status"]) {
+    it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
       expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
       expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
       expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_repository_redirect });

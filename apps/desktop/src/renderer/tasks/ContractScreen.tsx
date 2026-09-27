@@ -12,7 +12,7 @@ import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/bro
 import { chatStillTalking, confirmRoute, contractState, curates, leftAt, planPaneFor, problemsOpen } from "../planning/panes.js";
 import { readingNow, useChatTalking } from "../planning/turn-hold.js";
 import { inTheWay } from "../../shared/jobs.js";
-import { owedOnRecord } from "../../shared/decisions.js";
+import { pullRequestOpen } from "../../shared/discard.js";
 import { useSettled } from "../planning/settled.js";
 import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { CriteriaEditor } from "./CriteriaEditor.js";
@@ -253,10 +253,12 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // the difference would freeze a scope the person has already changed.
   const pending = ticket.approved_at === null ? pendingScope(workspace.drafts, repoId, ticket.key, contract.scope) : null;
   const bundle = latest?.bundles.find((bundle) => bundle.kind === "execution");
-  // A ticket whose last run finished trying, with its questions unanswered and
-  // none handed to the executor, is not started again: the run would be the
-  // same brief against the same evidence, and the host refuses it (D-132).
-  const owed = ticket.approved_at === null ? [] : owedOnRecord(detail);
+  // A ticket whose last run finished trying, with its questions unanswered,
+  // none handed to the executor and its branch still at the commit judged, is
+  // not started again: the run would be the same brief against the same
+  // evidence, and the host refuses it. The host reads that fact, the branch
+  // included, and this page reads it off the ticket (D-132).
+  const owed = detail.owed;
   const start = (): void => {
     void action
       .mutateAsync({
@@ -764,7 +766,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
                   (D-129). One stage is not: a ticket
                   whose pull request is open has a record on GitHub that this
                   machine does not own, and the host refuses it there too. */}
-              {ticket.state !== "pr_open" && (
+              {!pullRequestOpen(ticket) && (
                 <button
                   className="text-button small muted contract-delete"
                   disabled={held}

@@ -69,6 +69,21 @@ const DEFINITIONS = [
   "env -i -u X GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='branch -D' git x main",
   "env -i GIT_CONFIG_PARAMETERS=\"'alias.x=branch -D'\" git x main",
   "env -- GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  // env's options read as getopt reads them: a cluster letter that takes a
+  // value takes the rest of its word, or the next word where nothing follows,
+  // and a long option by any prefix getopt accepts.
+  "env -iu X GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  "env -a name GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  "env --argv0 name GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  "env --un X GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  // An escaped quote opens nothing, so it hides no word after it.
+  "X=\\' GIT_CONFIG_GLOBAL=/tmp/cfg git status \\'",
+  // Made by the shell's own assigning commands, whatever their options.
+  "declare -gx GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
+  "declare -xg GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
+  "local -x GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
+  "export -- GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
+  "export PAGER GIT_CONFIG_GLOBAL=/tmp/cfg; git status",
   // GIT_CONFIG_PARAMETERS in both of git's forms: `'key=value'` and `'key'='value'`.
   "GIT_CONFIG_PARAMETERS=\"'alias.x'='branch -D'\" git x main",
   "GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'alias.x'='branch -D'\" git x main",
@@ -78,6 +93,8 @@ const DEFINITIONS = [
   "GIT_CONFIG_PARAMETERS=\"'color.ui=always\" git x main",
   // The key as the shell hands it over, its quotes and escapes applied.
   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=ali\\as.x GIT_CONFIG_VALUE_0='branch -D' git x main",
+  "git -c ali\\as.x='branch -D' x main",
+  "git --weird -c ali\\as.x='branch -D' x main",
   // An alias written for the lines after this one.
   "git config alias.x 'branch -D'",
   "git config --local alias.x 'branch -D'",
@@ -132,11 +149,27 @@ describe("a git line that sets config and defines no alias", () => {
     });
   }
 
-  it("admits `env -i git status` on the hook, where the allow list is what decides it", () => {
-    const line = "env -i git status";
-    expect(claude(line)).toMatchObject({ decision: "allowed", rule: null });
-    expect(codex(line).rule).not.toBe(ADMISSION_RULES.git_alias);
-    expect(opencode(line)).not.toMatchObject({ rule: ADMISSION_RULES.git_alias });
+  for (const line of ["env -i git status", "env -iu X git status", "declare -g FOO=1; git status"]) {
+    it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_alias);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_alias });
+    });
+  }
+
+  for (const line of ["echo \\'hi\\'", "git log --grep \"it\\'s\""]) {
+    it(`admits ${JSON.stringify(line)}, whose escaped quote opens nothing, on every executor`, () => {
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(opencode(line), line).toEqual({ decision: "allowed" });
+    });
+  }
+
+  it("leaves `git commit -m \"it\\'s\"` to the deny list", () => {
+    const line = "git commit -m \"it\\'s\"";
+    for (const decision of [claude(line), codex(line), opencode(line)]) {
+      expect(decision, line).toMatchObject({ decision: "denied", rule: ADMISSION_RULES.deny_list });
+    }
   });
 
   it("leaves the plain -c listing to the allow list on Codex and OpenCode", () => {

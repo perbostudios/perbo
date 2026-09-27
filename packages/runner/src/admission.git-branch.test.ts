@@ -151,6 +151,7 @@ const WRITES = [
   "git --no-pager branch -D feature",
   "git -P branch -D feature",
   "git --super-prefix=x/ branch -D feature",
+  "git -c core.x=\\' branch -D feature \\'",
   "/usr/bin/git branch -D feature",
   "env git branch -D feature",
   "command git branch feature",

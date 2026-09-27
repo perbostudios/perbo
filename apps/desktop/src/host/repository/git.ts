@@ -46,6 +46,11 @@ export async function repositoryStatus(
   };
 }
 
+/** The commit a ref names in the checkout at `root`, or null where it names none. */
+export function resolveCommit(execute: Execute, root: string, ref: string): Promise<string | null> {
+  return repository(execute).resolveCommit(root, ref);
+}
+
 /** The root of the checkout a path sits in, which is the only folder this host registers. */
 export function topLevel(execute: Execute, path: string): Promise<string> {
   return repository(execute).topLevel(path);

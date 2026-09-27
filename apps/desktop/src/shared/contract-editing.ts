@@ -738,6 +738,32 @@ export class ContractEditing {
   }
 
   /**
+   * The interview is starting a new session rather than continuing one
+   * recorded ({@link interviewSessionArgs}) — the recorded one is another
+   * provider's, since the planning's drafting choice changed — so the planning
+   * takes up the new session's record, which is empty (D-117). Nothing a
+   * session before it asked is being asked any more: a card left standing
+   * would hold Generate plan and send its answer to a session that never saw
+   * the question, so its askings stop being put, and every one waiting with
+   * them. Nor has the new session heard the answers the person gave, so they
+   * start empty too: a question it asks again is put as a card and answered,
+   * rather than passed over while the session waits on an answer that never
+   * comes. The conversation keeps all of it to be read. A problem between the
+   * plan and the spec in front of the person is the host's own question
+   * rather than a session's, and stays.
+   */
+  newInterview(id: string): void {
+    const session = this.read(id);
+    if (session.asking === null && session.askingNext.length === 0 && session.answers.length === 0) return;
+    this.update(id, (next) => {
+      const standing = standingAsked(next);
+      next.askingNext = [];
+      next.answers = [];
+      if (standing?.line.drift === undefined) next.asking = null;
+    });
+  }
+
+  /**
    * What one turn does to the asking in front of the person.
    *
    * An answer to the group they are on moves them to the next, and the last of

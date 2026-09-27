@@ -235,6 +235,14 @@ export interface TicketRuns {
    * and a clean re-level, which records none, does not spend one.
    */
   starting(work: AdmittedWork, relevel: boolean): number | null;
+  /**
+   * D-132: a run the loop refused under its run lock, owed a person's answers,
+   * started nothing, so the ticket goes back to `before`, the record it had
+   * before `starting` moved it, where the rows since are the ones `starting`
+   * wrote; a row anything else wrote since stands, and so does the ticket.
+   * Answers the state it is left in.
+   */
+  unstarted(work: AdmittedWork, before: Ticket): string;
   /** Record what the run did to the ticket, and answer the state it left it in. */
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean): string;
   /**
@@ -818,6 +826,18 @@ export const TICKET_RUNS: TicketRuns = {
     return runsStartedBy(started);
   },
 
+  unstarted(work: AdmittedWork, before: Ticket) {
+    const now = readTicket(work.dir, work.key);
+    const last = now.history[now.history.length - 1];
+    const ours =
+      now.state === "provisioning" &&
+      last?.note === `run started against ${work.contract.plan_id}` &&
+      JSON.stringify(now.history.slice(0, before.history.length)) === JSON.stringify(before.history);
+    if (!ours) return now.state;
+    writeTicket(work.dir, before);
+    return before.state;
+  },
+
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean) {
     if (relevel) {
       // SCP-227: the ticket stays at `pr_open` whatever the re-level did — a
@@ -874,10 +894,13 @@ export const TICKET_RUNS: TicketRuns = {
 
 /**
  * The states a run's result proves. A delivery a person's decisions took
- * without a round proves only that the run provisioned and then went where an
- * approval goes, and its row says why in the words the lifecycle's guard reads
- * (D-132); every other run is walked
- * through what its rounds prove.
+ * without a round proves only that the run provisioned and then went where its
+ * outcome goes (D-132): an approval to
+ * `pr_open`, on a row that says why in the words the lifecycle's guard reads;
+ * one that ends `escalated` over a finding the executor declined (D-065) is
+ * walked as every run is, and goes from `provisioning` to `changes_requested`
+ * on the row every escalated run writes. Every other run is walked through
+ * what its rounds prove.
  */
 export function observedPath(result: TicketRunResult): ReturnType<typeof statesObserved> {
   if (result.outcome === "approved" && result.rounds.length === 0 && result.decided.length > 0) {
@@ -1080,7 +1103,8 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     decisionsStore === null
       ? null
       : decidedFindings(readLocalVerdictsOrWarn(decisionsStore, streams).verdicts, contract.ticket_id);
-  const history = admitted === null ? null : readTicket(admitted.dir, admitted.key).history;
+  const standing = admitted === null ? null : readTicket(admitted.dir, admitted.key);
+  const history = standing?.history ?? null;
   if (retained === null && history !== null) {
     try {
       await refuseOwedAnswers({ config: { ...config, relevel: args.relevel }, contract, decided: decided ?? [], history });
@@ -1323,6 +1347,15 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
         : {}),
     });
   } catch (error) {
+    // D-132: the loop asks again under its
+    // run lock whether the person owes answers, and a refusal there started
+    // nothing, so the ticket goes back where it was before this command moved
+    // it, as the refusal above leaves it.
+    if (error instanceof AnswersOwedError && admitted !== null && standing !== null) {
+      TICKET_RUNS.unstarted(admitted, standing);
+      streams.stderr(`error: ${physicalLine(error.message)}\n`);
+      return EXIT_CODES.did_not_complete;
+    }
     // A refusal is the repository's own answer, and it is caught here for the
     // one thing the top level cannot do: put it on the record this run already
     // wrote about itself, so it is still readable when the terminal is gone.

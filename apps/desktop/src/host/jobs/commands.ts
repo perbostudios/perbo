@@ -2,8 +2,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
 import type { LimitsTableSchema, PlanContract } from "@perbo/contracts";
-import type { Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
-import { decisionQuestions, owedQuestions, type SettledFindings } from "../../shared/decisions.js";
+import type { DecisionQuestion, Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
+import { decisionQuestions, type SettledFindings } from "../../shared/decisions.js";
 import type { FindingsOnRecord } from "../records.js";
 
 /**
@@ -281,14 +281,11 @@ export function assertDecidable(
 
 /**
  * A run of a ticket whose last run finished trying, with the questions it left
- * the person unanswered and none handed to the executor, is refused before the
- * CLI is started (`owedQuestions`), as the CLI and the loop refuse it (D-132).
+ * the person unanswered, none handed to the executor and its branch still at
+ * the commit judged (`owedOnBranch`), is refused before the CLI is started, as
+ * the CLI and the loop refuse it (D-132).
  */
-export function assertNothingOwed(
-  onRecord: { review: FindingsOnRecord; settled: SettledFindings } | null,
-  key: string,
-): void {
-  const owed = owedQuestions(onRecord?.review ?? null, onRecord?.settled);
+export function assertNothingOwed(owed: readonly DecisionQuestion[], key: string): void {
   if (owed.length > 0)
     throw new Error(
       `${key}'s last run finished trying and left ${owed.length} ${owed.length === 1 ? "question" : "questions"} ` +

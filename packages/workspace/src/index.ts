@@ -23,6 +23,7 @@ export {
   branchName,
   isAttemptBranch,
   recordedBranch,
+  ticketBranchStillAt,
 } from "./naming.js";
 export { replaceFile } from "./replace-file.js";
 export type { ReplaceFileOptions } from "./replace-file.js";

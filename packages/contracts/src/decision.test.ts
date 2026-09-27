@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  answersReview,
+  answersFinding,
   decidable,
   decisionChoicesFor,
   DECISION_CHOICES,
   FINISHED_TRYING,
+  judgedCommit,
   leftToPrinciple,
   loopOnRecord,
   loopOnReview,
@@ -13,6 +14,7 @@ import {
   owedAnswers,
   routedToPerson,
   type DecisionChoice,
+  type LoopOnReview,
 } from "./decision.js";
 import { gateClosedNote } from "./retained.js";
 import { FINDING_ROUTINGS, REVIEW_DECISIONS } from "./review.js";
@@ -27,10 +29,11 @@ import { FINDING_ROUTINGS, REVIEW_DECISIONS } from "./review.js";
 const KEY = "a".repeat(64);
 const REVIEWED_AT = "2026-09-27T12:48:05.305Z";
 const ended = (outcome: string, at = "2026-09-27T12:53:04.517Z") => ({ at, note: gateClosedNote(outcome) });
-const finished = (closed: readonly string[] = [], declined: readonly string[] = []) => ({
+const finished = (closed: readonly string[] = [], declined: readonly string[] = []): LoopOnReview => ({
   finished: true,
   closed: new Set(closed),
   declined: new Set(declined),
+  lastGiven: new Map(),
 });
 
 describe("which findings are a person's to answer", () => {
@@ -63,10 +66,14 @@ describe("which findings are a person's to answer", () => {
 
 describe("which findings are left to a principle", () => {
   it("is an open finding the executor declined, which no choice answers, and no other", () => {
-    expect(leftToPrinciple({ key: KEY, status: "open", routing: "remediable" }, finished([], [KEY]))).toBe(true);
-    expect(leftToPrinciple({ key: KEY, status: "open", routing: "blocks" }, finished([], [KEY]))).toBe(true);
-    expect(leftToPrinciple({ key: KEY, status: "resolved", routing: "remediable" }, finished([], [KEY]))).toBe(false);
-    expect(leftToPrinciple({ key: KEY, status: "open", routing: "remediable" }, finished())).toBe(false);
+    expect(leftToPrinciple({ key: KEY, status: "open" }, finished([], [KEY]))).toBe(true);
+    expect(leftToPrinciple({ key: KEY, status: "resolved" }, finished([], [KEY]))).toBe(false);
+    expect(leftToPrinciple({ key: KEY, status: "open" }, finished())).toBe(false);
+    // Never a finding a person answers with a choice, whatever its routing.
+    for (const routing of ["blocks", "escalates", "remediable"] as const) {
+      const finding = { key: KEY, status: "open", routing } as const;
+      expect(leftToPrinciple(finding, finished([], [KEY])) && routedToPerson(finding, finished([], [KEY])), routing).toBe(false);
+    }
   });
 });
 
@@ -75,7 +82,7 @@ describe("the findings a run would start without an answer to", () => {
   const open = (key: string, rule_id = "product.preference") =>
     ({ key, status: "open", routing: "remediable", rule_id }) as const;
   const owed = (
-    loop: ReturnType<typeof finished> | typeof NOTHING_TRIED,
+    loop: LoopOnReview,
     answers: Array<[string, DecisionChoice]> = [],
     findings = [open(x), open(y)],
   ) => owedAnswers({ review: { decision: "remediable", findings }, loop, answers: new Map(answers) });
@@ -101,6 +108,19 @@ describe("the findings a run would start without an answer to", () => {
 
   it("is none while the loop is still trying", () => {
     expect(owed(NOTHING_TRIED)).toEqual([]);
+  });
+
+  it("is a finding a person handed to a round that left it open, with the others routed to them, before any run finished trying", () => {
+    const blocks = (key: string) => ({ key, status: "open", routing: "blocks", rule_id: "product.preference" }) as const;
+    const handedAndLeft: LoopOnReview = { ...NOTHING_TRIED, lastGiven: new Map([[x, "2026-09-27T13:00:00.000Z"]]) };
+    const review = (findings: ReturnType<typeof blocks>[]) => ({ decision: "changes_requested" as const, findings });
+    expect(owedAnswers({ review: review([blocks(x), blocks(y)]), loop: handedAndLeft, answers: new Map() })).toEqual([x, y]);
+    // Nothing handed and left open: the executor has not been tried on them.
+    expect(owedAnswers({ review: review([blocks(x), blocks(y)]), loop: NOTHING_TRIED, answers: new Map() })).toEqual([]);
+    // Answered again, and handed on: the run is the round on it.
+    expect(
+      owedAnswers({ review: review([blocks(x), blocks(y)]), loop: handedAndLeft, answers: new Map([[x, "approach"]]) }),
+    ).toEqual([]);
   });
 });
 
@@ -139,9 +159,9 @@ describe("what the loop has done on a review", () => {
       reviewed_at: REVIEWED_AT,
       history: [],
       verifications: [
-        { given: [a!, b!, c!], open: [a!, b!], declined: [] },
+        { at: REVIEWED_AT, given: [a!, b!, c!], open: [a!, b!], declined: [] },
         // A round scoped to one finding says nothing of the others.
-        { given: [a!], open: [], declined: [] },
+        { at: REVIEWED_AT, given: [a!], open: [], declined: [] },
       ],
     });
     expect([...loop.closed].sort()).toEqual([a, c]);
@@ -149,8 +169,8 @@ describe("what the loop has done on a review", () => {
       reviewed_at: REVIEWED_AT,
       history: [],
       verifications: [
-        { given: [a!], open: [], declined: [] },
-        { given: [a!], open: [a!], declined: [] },
+        { at: REVIEWED_AT, given: [a!], open: [], declined: [] },
+        { at: REVIEWED_AT, given: [a!], open: [a!], declined: [] },
       ],
     });
     expect([...reopened.closed]).toEqual([]);
@@ -162,9 +182,9 @@ describe("what the loop has done on a review", () => {
       reviewed_at: REVIEWED_AT,
       history: [],
       verifications: [
-        { given: [b!], open: [b!], declined: [a!] },
+        { at: REVIEWED_AT, given: [b!], open: [b!], declined: [a!] },
         // A later round given only the other finding does not take the decline back.
-        { given: [b!], open: [b!], declined: [] },
+        { at: REVIEWED_AT, given: [b!], open: [b!], declined: [] },
       ],
     });
     expect([...loop.declined]).toEqual([a]);
@@ -199,17 +219,51 @@ describe("the answers a finding takes", () => {
   });
 });
 
-describe("which answers answer a review", () => {
+describe("which answers answer a finding", () => {
   const review = { review_id: "rev_0000000000000002", recorded_at: "2026-09-24T09:00:00.000Z" };
+  const answer = (decided_at: string, review_id: string | null = null) => ({ finding_key: KEY, decided_at, review_id });
 
   it("is one taken at or after the review was recorded, and never before", () => {
-    expect(answersReview({ decided_at: "2026-09-24T09:00:00.000Z", review_id: null }, review)).toBe(true);
-    expect(answersReview({ decided_at: "2026-09-24T08:59:59.999Z", review_id: null }, review)).toBe(false);
+    expect(answersFinding(answer("2026-09-24T09:00:00.000Z"), review, NOTHING_TRIED)).toBe(true);
+    expect(answersFinding(answer("2026-09-24T08:59:59.999Z"), review, NOTHING_TRIED)).toBe(false);
   });
 
   it("is held to the review it names, where it names one", () => {
     const after = "2026-09-24T09:30:00.000Z";
-    expect(answersReview({ decided_at: after, review_id: "rev_0000000000000002" }, review)).toBe(true);
-    expect(answersReview({ decided_at: after, review_id: "rev_0000000000000001" }, review)).toBe(false);
+    expect(answersFinding(answer(after, "rev_0000000000000002"), review, NOTHING_TRIED)).toBe(true);
+    expect(answersFinding(answer(after, "rev_0000000000000001"), review, NOTHING_TRIED)).toBe(false);
+  });
+
+  it("is one taken after the last round handed the finding, and never the answer that round already tried", () => {
+    const loop = loopOnReview({
+      reviewed_at: review.recorded_at,
+      history: [],
+      verifications: [{ at: "2026-09-24T10:00:00.000Z", given: [KEY], open: [KEY], declined: [] }],
+    });
+    expect(answersFinding(answer("2026-09-24T09:30:00.000Z"), review, loop)).toBe(false);
+    expect(answersFinding(answer("2026-09-24T10:30:00.000Z"), review, loop)).toBe(true);
+    // A round given another finding says nothing of this one's answer.
+    expect(answersFinding({ ...answer("2026-09-24T09:30:00.000Z"), finding_key: "b".repeat(64) }, review, loop)).toBe(true);
+    // One whose round closed the finding stands.
+    const closed = loopOnReview({
+      reviewed_at: review.recorded_at,
+      history: [],
+      verifications: [{ at: "2026-09-24T10:00:00.000Z", given: [KEY], open: [], declined: [] }],
+    });
+    expect(answersFinding(answer("2026-09-24T09:30:00.000Z"), review, closed)).toBe(true);
+  });
+});
+
+describe("the commit a record judged", () => {
+  const verification = (inputs: Record<string, string>) => ({ inputs });
+
+  it("is the review's where no verification judged since, and the last verification's that judged a tree", () => {
+    expect(judgedCommit("abc1234", [])).toBe("abc1234");
+    expect(judgedCommit("abc1234", [verification({ head_commit: "def5678" })])).toBe("def5678");
+    // A round the scope rule refused judged no tree, and is passed over.
+    expect(
+      judgedCommit("abc1234", [verification({ head_commit: "def5678" }), verification({ refused_head_commit: "fff9999" })]),
+    ).toBe("def5678");
+    expect(judgedCommit("abc1234", [verification({})])).toBe(null);
   });
 });

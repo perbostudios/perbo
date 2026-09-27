@@ -1,8 +1,9 @@
 import { z } from "zod";
 import {
-  answersReview,
+  answersFinding,
   decidable,
   decisionChoicesFor,
+  leftToPrinciple,
   loopOnRecord,
   NOTHING_TRIED,
   owedAnswers,
@@ -47,6 +48,9 @@ import type { AttemptView, DecisionQuestion } from "./protocol.js";
  * (D-132). Such a finding in
  * `settled` is not asked again. Every other question takes no choice: its
  * answer is recorded as a principle for the executor (D-065) and nothing else.
+ * A finding the executor declined (`leftToPrinciple`) is not asked at all: a
+ * principle is its answer, added with `perbo principle add` (D-065), and the
+ * stopped page names it and that command.
  *
  * A finding the last round's verification left open on its deterministic
  * evidence — a check the round failed, or a scope it widened — is asked with
@@ -73,6 +77,7 @@ export function decisionQuestions(
     .filter(
       (finding) =>
         finding.status === "open" &&
+        !leftToPrinciple(finding, settled.loop) &&
         (decides(finding)
           ? !settled.keys.has(finding.key)
           : routedToPerson(finding, settled.loop) || finding.closure === "human"),
@@ -93,9 +98,10 @@ export function decisionQuestions(
 
 /**
  * The questions a run of the ticket would start without an answer to, as the
- * loop reads them (`owedAnswers`): the loop refuses such a run, the host
- * refuses it before starting one, and the contract page offers the questions
- * instead of Start the loop.
+ * loop reads them (`owedAnswers`), whatever the branch holds: the host keeps
+ * those whose branch is still at the commit judged (`owedOnBranch`), which the
+ * loop refuses, the host refuses before starting one, and the contract page
+ * offers the questions for instead of Start the loop.
  */
 export function owedQuestions(
   review: Parameters<typeof decisionQuestions>[0],
@@ -114,7 +120,7 @@ function asSentence(text: string): string {
 }
 
 const AnsweredSchema = z.object({
-  review: z.object({ reference: z.string() }),
+  review: z.object({ ticket_id: z.string(), reference: z.string() }),
   finding_key: z.string(),
   decision: z.literal("decide"),
   choice: z.enum(["approach", "let_it_decide", "ship_as_is"]),
@@ -138,7 +144,7 @@ export interface SettledFindings {
   refusal: { sentence: string; open: ReadonlySet<string> } | null;
   /** What the loop has done on the review (`loopOnRecord`), which says who each finding is asked of. */
   loop: LoopOnReview;
-  /** Each standing answer that answers the review (`answersReview`), by finding. */
+  /** Each standing answer that answers its finding (`answersFinding`), by finding. */
   answers: ReadonlyMap<string, DecisionChoice>;
 }
 
@@ -150,14 +156,15 @@ const NOTHING_SETTLED: SettledFindings = { keys: new Set(), refusal: null, loop:
  * answer (D-132): shipped as it is by
  * a standing answer that answers that review, or closed by a round after it,
  * as the loop reads the record (`loopOnRecord`) — which also says whether the
- * loop has finished trying it. Which answers answer the review is
- * `answersReview`, the loop's rule, against the review's own bundle — the one
- * whose subject is its id — and the time it was recorded, as the loop reads
- * it. The review is immutable, so this is read beside it, and so is the
+ * loop has finished trying it. Which answers answer their finding is
+ * `answersFinding`, the loop's rule, against the review's own bundle — the one
+ * whose subject is its id — the time it was recorded, and the last round
+ * handed the finding, as the loop reads them; only the ticket's own answers
+ * are read, as `perbo run` reads them. The review is immutable, so this is read beside it, and so is the
  * deterministic failure the last round since it was refused on.
  */
 export function settledFindings(detail: {
-  ticket: Pick<Ticket, "history">;
+  ticket: Pick<Ticket, "ticket_id" | "history">;
   attempts: readonly AttemptView[];
   verdicts: readonly unknown[];
 }): SettledFindings {
@@ -169,6 +176,7 @@ export function settledFindings(detail: {
     return parsed.success ? [parsed.data] : [];
   });
   return settledOnRecord({
+    ticket_id: detail.ticket.ticket_id,
     review_id: review.review_id,
     bundles: detail.attempts.flatMap((attempt) => attempt.bundles),
     history: detail.ticket.history,
@@ -185,6 +193,7 @@ export function settledFindings(detail: {
  * through `settledFindings` from the report, so the two ask alike.
  */
 export function settledOnRecord(input: {
+  ticket_id: string;
   review_id: string;
   bundles: readonly RecordedBundle[];
   history: readonly HistoryRow[];
@@ -196,10 +205,15 @@ export function settledOnRecord(input: {
   const answered = input.verdicts.flatMap((row) => {
     const parsed = AnsweredSchema.safeParse(row);
     if (!parsed.success) return [];
-    const { review: named, decided_at } = parsed.data;
+    const { review: named, decided_at, finding_key } = parsed.data;
+    if (named.ticket_id !== input.ticket_id) return [];
     // A decision names a review by its id, or the ticket or its pull request.
     const review_id = named.reference.startsWith("rev_") ? named.reference : null;
-    return answersReview({ decided_at, review_id }, { review_id: input.review_id, recorded_at: onRecord.reviewed_at })
+    return answersFinding(
+      { finding_key, decided_at, review_id },
+      { review_id: input.review_id, recorded_at: onRecord.reviewed_at },
+      onRecord.loop,
+    )
       ? [parsed.data]
       : [];
   });
@@ -222,7 +236,7 @@ export function settledOnRecord(input: {
  * Home's colour all read this, so a pause is never one with nothing to ask.
  */
 export function questionsOnRecord(detail: {
-  ticket: Pick<Ticket, "history">;
+  ticket: Pick<Ticket, "ticket_id" | "history">;
   attempts: readonly AttemptView[];
   verdicts: readonly unknown[];
 }): DecisionQuestion[] {
@@ -230,7 +244,11 @@ export function questionsOnRecord(detail: {
   return decisionQuestions(review, settledFindings(detail));
 }
 
-/** The questions a run of the ticket would start without an answer to, as its record puts them (`owedQuestions`). */
+/**
+ * The questions a run of the ticket would start without an answer to, as its
+ * record puts them (`owedQuestions`): the sample host's `Detail.owed`, whose
+ * branches never move. The desktop's host reads the branch too (`owedOnBranch`).
+ */
 export function owedOnRecord(detail: Parameters<typeof questionsOnRecord>[0]): DecisionQuestion[] {
   const review = detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
   return owedQuestions(review, settledFindings(detail));

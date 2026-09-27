@@ -129,6 +129,7 @@ export {
   CriterionIdSchema,
   RequirementIdSchema,
   ReviewIdSchema,
+  sameCommit,
   TicketIdSchema,
 } from "./ids.js";
 export type { NodeId } from "./ids.js";
@@ -311,12 +312,13 @@ export type {
   Waiver,
 } from "./review.js";
 export {
-  answersReview,
+  answersFinding,
   DECISION_CHOICES,
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  judgedCommit,
   leftToPrinciple,
   loopOnRecord,
   loopOnReview,

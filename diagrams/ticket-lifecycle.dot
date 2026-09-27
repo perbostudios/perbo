@@ -41,6 +41,7 @@ digraph G {
   blocked -> cancelled;
   provision -> failed;
   provision -> pr [label="every standing finding shipped as it is by a person or verified closed, on the judged commit"];
+  provision -> changes [label="the same, with a finding the executor declined left for a principle: escalated"];
   execute -> failed;
   verify -> failed;
   failed -> ready [label="new attempt"];

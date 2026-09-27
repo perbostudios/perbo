@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -219,6 +219,36 @@ describe("the line an interview is asked for by", () => {
     });
     expect(existsSync(join(elsewhere, "taken.json"))).toBe(false);
     expect(streams.err()).toContain("symlink");
+  });
+
+  it("writes its record whole, renamed over the one before rather than written into it", async () => {
+    const repo = repository();
+    await interview(repo, [writeSpec()], { sessionId: "sess-whole" });
+    const folder = join(repo, SPEC_FOLDER);
+    const path = join(folder, INTERVIEW_SESSION_FILE);
+    // A second name for the record as it stands, marked so its bytes are its own.
+    const before = `${JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), marked: true })}\n`;
+    writeFileSync(path, before);
+    linkSync(path, join(folder, "kept.json"));
+    await interview(repo, [], { sessionId: "sess-whole", argv: ["--session", "sess-whole"] });
+    // Written in place, the kept name would read the new record too.
+    expect(readFileSync(join(folder, "kept.json"), "utf8")).toBe(before);
+    const after = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    expect(after).toMatchObject({ session_id: "sess-whole" });
+    expect(after).not.toHaveProperty("marked");
+    expect(readdirSync(folder).sort()).toEqual([INTERVIEW_SESSION_FILE, "kept.json", "spec.md"].sort());
+  });
+
+  it("says so where the record beside the spec cannot be read, and goes on with nothing asked", async () => {
+    const repo = repository();
+    mkdirSync(join(repo, SPEC_FOLDER), { recursive: true });
+    // A record torn part way through.
+    writeFileSync(join(repo, SPEC_FOLDER, INTERVIEW_SESSION_FILE), '{"session_id": "sess-torn", "asking": {"wai');
+    const { streams } = await interview(repo, [], { sessionId: "sess-torn", argv: ["--session", "sess-torn"] });
+    expect(streams.err()).toContain(
+      `what the session sess-torn asked could not be read from ${INTERVIEW_SESSION_FILE} beside its spec`,
+    );
+    expect(events(streams)[0]?.type).toBe("started");
   });
 
   it("takes the spec of the folder a session's record was found in, and skips a record it cannot read", async () => {

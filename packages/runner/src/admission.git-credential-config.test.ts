@@ -209,13 +209,12 @@ describe("git's own environment variables", () => {
 });
 
 /**
- * Round 3: the assignment can stand in its own segment, introduced by
- * `export`, `declare -x` or `typeset -x` rather than by `env` or by standing
+ * The assignment can stand in its own segment, made by `export`, `declare`,
+ * `typeset`, `local` or `readonly` rather than handed to `env` or standing
  * bare in front of the command — `export GIT_SSH_COMMAND=…; git fetch` sets
- * the variable in one segment and runs git in the next, and the env reader
- * only knew to look past a leading `env`.
+ * the variable in one segment and runs git in the next.
  */
-describe("the same environment reached through export/declare -x/typeset -x", () => {
+describe("the same environment reached through export, declare and typeset", () => {
   it("refuses GIT_SSH_COMMAND exported in its own segment ahead of the git command", () => {
     const admission = judge("export GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch");
     expect(admission.decision).toBe("denied");
@@ -242,8 +241,16 @@ describe("the same environment reached through export/declare -x/typeset -x", ()
     expect(judge("export PAGER=cat; git log").decision).toBe("allowed");
   });
 
-  it("keeps a plain (non-exported) declare admitted", () => {
-    expect(judge("declare GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch").decision).toBe("allowed");
+  it("refuses a declare with no -x, as a bare assignment is refused", () => {
+    // A variable the environment already exports keeps its export when
+    // `declare` assigns it, so git sees the new value.
+    const admission = judge("declare GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch");
+    expect(admission.decision).toBe("denied");
+    expect(admission.rule).toBe(ADMISSION_RULES.git_credential_config);
+  });
+
+  it("keeps a declare of an unrelated variable admitted", () => {
+    expect(judge("declare -g FOO=1; git status").decision).toBe("allowed");
   });
 });
 
@@ -297,6 +304,15 @@ describe("on every executor, however the line reaches git", () => {
     ["env --unset=X GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0=x GIT_CONFIG_COUNT=1 git fetch", "core.sshCommand"],
     ["env -i -u X GIT_SSH_COMMAND='ssh -i /tmp/k' git fetch", "GIT_SSH_COMMAND"],
     ["env -i GIT_EXEC_PATH=/tmp/x git submodule status", "GIT_EXEC_PATH"],
+    // A cluster, read as getopt reads it: `-u` takes the next word where nothing follows it.
+    ["env -iu X GIT_CONFIG_PARAMETERS=\"'include.path=/tmp/c'\" git status", "include.path"],
+    ["env -iu X GIT_SSH_COMMAND=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    // An escaped quote opens nothing, so it hides no word after it.
+    ["X=\\' GIT_SSH_COMMAND=/tmp/x git fetch \\'", "GIT_SSH_COMMAND"],
+    // Made by the shell's own assigning commands, whatever their options.
+    ["declare -gx GIT_SSH_COMMAND=/tmp/x; git fetch", "GIT_SSH_COMMAND"],
+    ["export -- GIT_SSH_COMMAND=/tmp/x; git fetch", "GIT_SSH_COMMAND"],
+    ["typeset -x -- FOO=1 GIT_ASKPASS=/tmp/x; git fetch", "GIT_ASKPASS"],
     // GIT_CONFIG_PARAMETERS in git's `'key'='value'` form, alone and among others.
     ["GIT_CONFIG_PARAMETERS=\"'credential.helper'='store'\" git fetch", "credential.helper"],
     ["GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'credential.helper'='store'\" git fetch", "credential.helper"],
@@ -311,6 +327,11 @@ describe("on every executor, however the line reaches git", () => {
     ['git "--exec-path=/tmp/x" submodule status', "--exec-path"],
     ["git -C . --exec-path=/tmp/x bisect start", "--exec-path"],
     ["env -i git --exec-path=/tmp/x submodule status", "--exec-path"],
+    // Past an option the global-option walk does not know, on the rest of the line.
+    ["git --weird --exec-path=/tmp/x status", "--exec-path"],
+    // A key as the shell hands it to git, its backslashes applied.
+    ["git -c cred\\ential.helper=/tmp/h fetch", "credential.helper"],
+    ["git config cred\\ential.helper /tmp/h", "credential.helper"],
   ];
 
   for (const [line, target] of REFUSED) {

@@ -291,20 +291,44 @@ function unquote(word: string): string {
   return (first === "'" || first === '"') && first === last ? word.slice(1, -1) : word;
 }
 
+/** The characters a backslash escapes inside double quotes; before any other, it stands for itself. */
+const DOUBLE_QUOTED_ESCAPES = '$`"\\\n';
+
 /**
- * Split into words the way a shell would, quotes kept but respected — a
- * quoted value's own spaces are not word boundaries. `matchesListEntry`'s
- * plain `split(/\s+/)` is good enough for prefix matching, but a `-c
- * key='a b'` value has to survive as one word for the key that precedes its
- * `=` to be read correctly. This does not expand escapes or substitutions
- * the way the shell reader's own lexer (`shell/internal/lexer.ts`) does; it
- * only has to not split a quoted span apart.
+ * The backslash at `i` and the character it escapes, kept as written for
+ * `shellValue` to read — outside quotes any character, inside double quotes
+ * only the ones the shell escapes there — or null where it escapes nothing:
+ * inside single quotes a backslash is itself.
+ */
+function escapedPair(text: string, i: number, quote: string | null): string | null {
+  if (text[i] !== "\\" || i + 1 >= text.length) return null;
+  if (quote !== null && (quote !== '"' || !DOUBLE_QUOTED_ESCAPES.includes(text[i + 1]!))) return null;
+  return text.slice(i, i + 2);
+}
+
+/**
+ * Split into words the way a shell would, quotes and backslashes kept but
+ * respected — a quoted value's own spaces are not word boundaries, and an
+ * escaped quote (`\'`, `"…\"…"`) opens or closes nothing, nor does an escaped
+ * blank end a word. `matchesListEntry`'s plain `split(/\s+/)` is good enough
+ * for prefix matching, but a `-c key='a b'` value has to survive as one word
+ * for the key that precedes its `=` to be read correctly. This does not
+ * expand escapes or substitutions the way the shell reader's own lexer
+ * (`shell/internal/lexer.ts`) does — `shellValue` reads a word's value — it
+ * only has to split the line where the shell does.
  */
 function splitWords(text: string): string[] {
   const words: string[] = [];
   let current = "";
   let quote: string | null = null;
-  for (const ch of text) {
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    const pair = escapedPair(text, i, quote);
+    if (pair !== null) {
+      current += pair;
+      i += 1;
+      continue;
+    }
     if (quote !== null) {
       current += ch;
       if (ch === quote) quote = null;
@@ -383,9 +407,10 @@ export function gitGlobalOptions(words: readonly string[]): { verbIndex: number;
       if (assignment !== undefined) {
         const assignEq = assignment.indexOf("=");
         const key = assignEq === -1 ? assignment : assignment.slice(0, assignEq);
-        // The shell hands git the key without its quotes, however they are
-        // placed: `-c "alias.x=branch -D"` sets `alias.x`.
-        configuredKeys.push(key.replace(/["']/g, ""));
+        // The shell hands git the key without its quotes and backslashes,
+        // however they are placed: `-c "alias.x=branch -D"` sets `alias.x`,
+        // and `-c cred\ential.helper=…` sets `credential.helper`.
+        configuredKeys.push(shellValue(key));
       }
       i += attached === null ? 2 : 1;
       continue;
@@ -441,7 +466,7 @@ function gitConfigWrittenKeys(words: readonly string[], verbIndex: number): stri
       if (GIT_CONFIG_VALUE_FLAGS.has(name) && eq === -1) i += 1;
       continue;
     }
-    const value = unquote(word);
+    const value = shellValue(word);
     if (subcommand === null && operands.length === 0 && (GIT_CONFIG_READ_SUBCOMMANDS.has(value) || GIT_CONFIG_WRITE_SUBCOMMANDS.has(value))) {
       subcommand = value;
       if (GIT_CONFIG_READ_SUBCOMMANDS.has(value)) read = true;
@@ -541,7 +566,7 @@ function gitAliasDefinition(text: string): string | null {
       const name = eq === -1 ? words[i]! : words[i]!.slice(0, eq);
       if (!GIT_GLOBAL_CONFIG_FLAGS.has(name)) continue;
       const assignment = eq === -1 ? words[i + 1] : words[i]!.slice(eq + 1);
-      if (assignment !== undefined) configured.push(assignment.split("=")[0]!.replace(/["']/g, ""));
+      if (assignment !== undefined) configured.push(shellValue(assignment.split("=")[0]!));
     }
   }
   for (const key of configured) {
@@ -576,7 +601,8 @@ const GIT_BRANCH_COMMIT_FILTERS = new Set(["--contains", "--no-contains", "--mer
 const GIT_BRANCH_VALUE_FLAGS = new Set(["--points-at", "--sort", "--format"]);
 
 /**
- * Split into words the way `splitWords` does, with every redirect left out:
+ * Split into words the way `splitWords` does, backslashes included, with
+ * every redirect left out — an escaped `\>` is a character of its word:
  * `>`, `2>/dev/null`, `2>&1`, `&>log`, `<<<`, `<<EOF`, and a target joined to
  * its operator or standing after it, are the shell's business rather than
  * words the program is given. A descriptor is the digits a word holds when an
@@ -595,6 +621,12 @@ function wordsWithoutRedirects(text: string): string[] {
   };
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i]!;
+    const pair = escapedPair(text, i, quote);
+    if (quote !== null && pair !== null) {
+      current += pair;
+      i += 1;
+      continue;
+    }
     if (quote !== null) {
       current += ch;
       if (ch === quote) quote = null;
@@ -607,6 +639,11 @@ function wordsWithoutRedirects(text: string): string[] {
     if (redirect === "blank") {
       if (/\s/.test(ch)) continue;
       redirect = "target";
+    }
+    if (pair !== null) {
+      current += pair;
+      i += 1;
+      continue;
     }
     if (ch === "'" || ch === '"') {
       quote = ch;
@@ -840,12 +877,12 @@ function runsGit(text: string): boolean {
 
 /**
  * Why one command line points git at a repository or a config file it picks,
- * or null. The environment it sets — an assignment of its own, one in front
- * of its program, or one handed to `env` (past `env`'s options), `export` or
- * `declare -x` — is read here only for a line the caller has found runs git
- * somewhere; git's `--git-dir`, `--work-tree` and `--namespace` are read
- * among its global options, and on the rest of the line where the walk stops
- * at an option it does not know.
+ * or null. The environment it sets (`lineEnvironment`) — an assignment of
+ * its own, one in front of its program, one handed to `env` past its
+ * options, or one `export`, `declare` and the like make — is read here only
+ * for a line the caller has found runs git somewhere; git's `--git-dir`,
+ * `--work-tree` and `--namespace` are read among its global options, and on
+ * the rest of the line where the walk stops at an option it does not know.
  */
 function gitRepositoryRedirect(text: string): string | null {
   const words = splitWords(text.trim());
@@ -932,22 +969,52 @@ const GIT_CONFIG_KEY_VAR = /^GIT_CONFIG_KEY_\d+$/;
 const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
 
 /**
- * The word or words that introduce an environment assignment without being
- * one themselves — `env`, `export`, and the `-x` (export) form of
- * `declare`/`typeset` — consumed the same way, so the assignment behind them
- * is still read. A plain `declare NAME=value` with no `-x` never reaches the
- * environment a child process sees, so it is deliberately not one of these
- * (SCP-201 round 3: the assignment can stand in its own segment — `export
+ * The shell's own commands that assign variables, every word after them an
+ * option, a name or a `NAME=value`. Each assignment is read whatever the
+ * options: `export`, and `-x` in any cluster (`declare -gx`), put a variable
+ * in the environment of the commands after it, and without them a variable
+ * the environment already exports — `HOME` always — keeps its export and
+ * carries the new value, as a bare `HOME=/tmp/h; git x` does (SCP-201 round
+ * 3: the assignment can stand in its own segment — `export
  * GIT_SSH_COMMAND=…; git fetch` — ahead of the git command's own).
  */
-function envAssignmentIntroducerWidth(words: readonly string[]): number {
-  if (words[0] === "env" || words[0] === "export") return 1;
-  if ((words[0] === "declare" || words[0] === "typeset") && words[1] === "-x") return 2;
-  return 0;
-}
+const ASSIGNING_BUILTINS = new Set(["export", "declare", "typeset", "local", "readonly"]);
 
-/** `env`'s options that take the next word as their value, GNU's and the BSD `env` macOS ships. */
-const ENV_VALUE_OPTIONS = new Set(["-u", "-C", "-S", "-P", "-a", "--unset", "--chdir", "--split-string", "--argv0"]);
+/**
+ * `env`'s short options that take a value: GNU's `-u`, `-C`, `-S` and `-a`,
+ * the `-u`, `-S` and `-P` of the BSD `env` macOS ships, and FreeBSD's `-L`
+ * and `-U`. A letter one `env` does not know makes that `env` refuse the
+ * line and run nothing.
+ */
+const ENV_VALUE_LETTERS = new Set(["u", "C", "S", "P", "a", "L", "U"]);
+/** GNU `env`'s long options that take the next word as their value unless one is attached with `=`. */
+const ENV_VALUE_LONG_OPTIONS = ["--unset", "--chdir", "--split-string", "--argv0"];
+
+/**
+ * Where `env`'s operands start: past its options, read as getopt reads
+ * them. A cluster (`-iu`, `-0u`) is read letter by letter, and a letter that
+ * takes a value takes the rest of the word, or the next word where nothing
+ * follows it in this one; a long option takes the next word where it, or a
+ * prefix of it getopt accepts (`--un`), takes a value and none is attached.
+ * `--` ends the options, and the first word not an option is an operand.
+ */
+function envOperandsStart(words: readonly string[]): number {
+  let i = 1;
+  while (i < words.length) {
+    const word = words[i]!;
+    if (word === "--") return i + 1;
+    if (!word.startsWith("-")) break;
+    if (word.startsWith("--")) {
+      const takesNext = !word.includes("=") && ENV_VALUE_LONG_OPTIONS.some((option) => option.startsWith(word));
+      i += takesNext ? 2 : 1;
+      continue;
+    }
+    const letters = word.slice(1);
+    const valueAt = [...letters].findIndex((letter) => ENV_VALUE_LETTERS.has(letter));
+    i += valueAt !== -1 && valueAt === letters.length - 1 ? 2 : 1;
+  }
+  return i;
+}
 
 /**
  * One word's value as the shell hands it over: its quotes removed and its
@@ -966,7 +1033,7 @@ function shellValue(word: string): string {
     }
     if (quote === '"') {
       if (ch === '"') quote = null;
-      else if (ch === "\\" && i + 1 < word.length && '$`"\\\n'.includes(word[i + 1]!)) value += word[(i += 1)];
+      else if (ch === "\\" && i + 1 < word.length && DOUBLE_QUOTED_ESCAPES.includes(word[i + 1]!)) value += word[(i += 1)];
       else value += ch;
       continue;
     }
@@ -985,36 +1052,39 @@ interface EnvAssignment {
 }
 
 /**
- * The environment one command line hands the program it runs: every
- * `NAME=value` in front of it — bare, behind `export` or `declare -x`/
- * `typeset -x`, or handed to `env` past env's own options (`-i`, `-u NAME`,
- * `--unset=NAME`, `--`, …). The alias, credential and repository rules each
- * read the line's environment through this one walk, so none of them stops
- * where another reads on.
+ * The environment one command line hands the program it runs, or the
+ * commands after it: every `NAME=value` in front of its program, bare or
+ * handed to `env` past env's own options (`envOperandsStart`), and every
+ * one an `export`, `declare`, `typeset`, `local` or `readonly` assigns,
+ * past its options and the names beside it (`ASSIGNING_BUILTINS`). The
+ * alias, credential and repository rules each read the line's environment
+ * through this one walk, so none of them stops where another reads on.
  */
 function lineEnvironment(words: readonly string[]): EnvAssignment[] {
-  let i = envAssignmentIntroducerWidth(words);
-  while (words[0] === "env" && i < words.length && words[i]!.startsWith("-")) {
-    i += ENV_VALUE_OPTIONS.has(words[i]!) ? 2 : 1;
-  }
   const assignments: EnvAssignment[] = [];
-  for (; i < words.length; i += 1) {
-    const match = ENV_ASSIGNMENT.exec(words[i]!);
-    if (match === null) break;
-    assignments.push({ name: match[1]!, value: shellValue(match[2]!) });
+  /** Whether `word` is a `NAME=value`, recording it where it is. */
+  const assigns = (word: string): boolean => {
+    const match = ENV_ASSIGNMENT.exec(word);
+    if (match !== null) assignments.push({ name: match[1]!, value: shellValue(match[2]!) });
+    return match !== null;
+  };
+  if (words[0] !== undefined && ASSIGNING_BUILTINS.has(words[0])) {
+    for (const word of words.slice(1)) assigns(word);
+    return assignments;
   }
+  let i = words[0] === "env" ? envOperandsStart(words) : 0;
+  while (i < words.length && assigns(words[i]!)) i += 1;
   return assignments;
 }
 
 /**
  * The credential-shaping environment variable one command line sets, however
  * it sets it — a leading `NAME=value` before the program, the same shape
- * handed to `env` past env's options, or one `export`/`declare -x`/`typeset
- * -x` away from it (`lineEnvironment`) —
- * and the reason, or null where the leading run of assignments names none of
- * them (SCP-201 round 2: `git` reads `GIT_CONFIG_PARAMETERS`/
- * `GIT_CONFIG_KEY_<n>` and the SSH/askpass/exec-path variables from the
- * environment as readily as from the command line).
+ * handed to `env` past env's options, or one `export`, `declare` and the
+ * like make ahead of it (`lineEnvironment`) — and the reason, or null where
+ * the line's environment names none of them (SCP-201 round 2: `git` reads
+ * `GIT_CONFIG_PARAMETERS`/`GIT_CONFIG_KEY_<n>` and the SSH/askpass/exec-path
+ * variables from the environment as readily as from the command line).
  */
 function gitCredentialEnvAssignment(text: string): { name: string; key: string | null } | null {
   for (const { name, value } of lineEnvironment(splitWords(text.trim()))) {

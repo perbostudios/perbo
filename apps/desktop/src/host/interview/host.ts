@@ -13,7 +13,12 @@ import {
   InterviewEntrySchema,
   TaskModelsSchema,
 } from "../../shared/protocol.js";
-import { interviewModelFor, type InterviewProviderName, type PromisePair } from "../../shared/contract-editing.js";
+import {
+  interviewModelFor,
+  interviewSessionArgs,
+  type InterviewProviderName,
+  type PromisePair,
+} from "../../shared/contract-editing.js";
 import { interviewArgv, interviewProvider } from "./argv.js";
 import { relayed } from "./relay.js";
 import type { Cli } from "../cli.js";
@@ -101,6 +106,7 @@ export interface InterviewDeps {
     | "beginAsking"
     | "answerAsking"
     | "turnOnAsking"
+    | "newInterview"
     | "countNodes"
     | "adopt"
   >;
@@ -337,6 +343,9 @@ export class InterviewHost {
     const provider = interviewProvider(session);
     const repo = this.deps.repository(session.repoId);
     const args = interviewArgv(repo, session, model);
+    // A new session has asked nothing, and its record beside the spec says so:
+    // the planning's card says the same (D-117).
+    if (interviewSessionArgs(session, provider).length === 0) this.deps.editing.newInterview(id);
     let stderr = "";
     let gone: () => void = () => undefined;
     const exited = new Promise<void>((resolve) => {

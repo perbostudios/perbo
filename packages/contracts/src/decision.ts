@@ -62,13 +62,20 @@ export interface LoopOnReview {
    * one (`perbo principle add`), and no choice closes it.
    */
   declined: ReadonlySet<string>;
+  /**
+   * When the last closure verification given each finding was recorded: a
+   * person's answer that handed a finding to a round which left it open
+   * answers it no more, and the finding is theirs to answer again
+   * (`answersFinding`).
+   */
+  lastGiven: ReadonlyMap<string, string>;
 }
 
 /** The part of a ticket's row the loop's end is read from. */
 export type HistoryRow = Pick<TicketHistoryEntry, "at" | "note">;
 
 /** A review nothing has run on since: no round verified, no run ended. */
-export const NOTHING_TRIED: LoopOnReview = { finished: false, closed: new Set(), declined: new Set() };
+export const NOTHING_TRIED: LoopOnReview = { finished: false, closed: new Set(), declined: new Set(), lastGiven: new Map() };
 
 /**
  * What the loop has done on a review, from the ticket's rows and the closure
@@ -81,14 +88,23 @@ export const NOTHING_TRIED: LoopOnReview = { finished: false, closed: new Set(),
 export function loopOnReview(input: {
   reviewed_at: string;
   history: readonly HistoryRow[];
-  verifications: readonly { given: readonly string[]; open: readonly string[]; declined: readonly string[] }[];
+  verifications: readonly {
+    at: string;
+    given: readonly string[];
+    open: readonly string[];
+    declined: readonly string[];
+  }[];
 }): LoopOnReview {
   const since = Date.parse(input.reviewed_at);
   const endings = FINISHED_TRYING.map((outcome) => gateClosedNote(outcome));
   const closed = new Set<string>();
   const declined = new Set<string>();
+  const lastGiven = new Map<string, string>();
   for (const verification of input.verifications) {
-    for (const key of verification.given) closed.add(key);
+    for (const key of verification.given) {
+      closed.add(key);
+      lastGiven.set(key, verification.at);
+    }
     for (const key of verification.open) closed.delete(key);
     for (const key of verification.declined) declined.add(key);
   }
@@ -96,6 +112,7 @@ export function loopOnReview(input: {
     finished: input.history.some((row) => Date.parse(row.at) >= since && endings.includes(row.note)),
     closed,
     declined,
+    lastGiven,
   };
 }
 
@@ -134,6 +151,7 @@ export function loopOnRecord(input: {
       reviewed_at: recorded.created_at,
       history: input.history,
       verifications: verifications.map((bundle) => ({
+        at: bundle.created_at,
         given: keysOf(bundle.inputs["findings_given"]),
         open: keysOf(bundle.inputs["findings_open"]),
         declined: keysOf(bundle.inputs["findings_declined"]),
@@ -163,27 +181,28 @@ export function routedToPerson(
 }
 
 /**
- * Whether a finding is left to a principle (D-065): open, declined by the
- * executor in a round since the review, and not a person's to answer with a
- * choice. No answer closes it and it is never handed again; it holds no
+ * Whether a finding is left to a principle (D-065): open and declined by the
+ * executor in a round since the review, which `routedToPerson` never routes to
+ * a person. No answer closes it and it is never handed again; it holds no
  * delivery back, and a run that delivers with one open ends `escalated`, the
  * pull request listing it for the person. `perbo principle add` is its answer.
  */
-export function leftToPrinciple(finding: Pick<Finding, "key" | "status" | "routing">, loop: LoopOnReview): boolean {
-  return finding.status === "open" && loop.declined.has(finding.key) && !routedToPerson(finding, loop);
+export function leftToPrinciple(finding: Pick<Finding, "key" | "status">, loop: LoopOnReview): boolean {
+  return finding.status === "open" && loop.declined.has(finding.key);
 }
 
 /**
- * The findings a run would start without an answer to (D-132), by key: once a
- * run since the review finished trying, those routed to the person that no
- * round closed and no standing answer the finding takes answers, where none
- * is handed to the executor and none is still the executor's to close. Empty
- * where a run has what it needs: a round on what was handed on or is still
- * the executor's, or a delivery on answers. Another run on them unanswered is
- * the same brief against the same evidence, paid for again, with the same
- * questions at its end, so it is refused before anything starts, and the
- * desktop does not offer it. `answers` holds each standing answer that
- * answers the review (`answersReview`).
+ * The findings a run would start without an answer to (D-132), by key: those
+ * routed to the person that no round closed and no standing answer the
+ * finding takes answers, where none is handed to the executor, once the loop
+ * has finished trying — a run since the review ended on `FINISHED_TRYING`, or
+ * a round left open a finding a person handed it, which ends the run only
+ * where the round stalled or exhausted its attempts. Empty where a run has
+ * what it needs: a round on what was handed on, or a delivery on answers.
+ * Another run on them unanswered is the same brief against the same evidence,
+ * paid for again, with the same questions at its end, so it is refused before
+ * anything starts, and the desktop does not offer it. `answers` holds each
+ * standing answer that answers its finding (`answersFinding`).
  */
 export function owedAnswers(input: {
   review: Pick<ReviewArtifact, "decision"> & {
@@ -193,22 +212,19 @@ export function owedAnswers(input: {
   answers: ReadonlyMap<string, DecisionChoice>;
 }): string[] {
   const { review, loop, answers } = input;
-  if (!loop.finished || !decidable(review, loop)) return [];
+  if (!decidable(review, loop)) return [];
   const open = review.findings.filter((finding) => finding.status === "open" && !loop.closed.has(finding.key));
-  const stillTrying = open.some(
-    (finding) =>
-      finding.routing === "remediable" && !routedToPerson(finding, loop) && !leftToPrinciple(finding, loop),
-  );
+  const person = open.filter((finding) => routedToPerson(finding, loop));
+  if (!loop.finished && !person.some((finding) => loop.lastGiven.has(finding.key))) return [];
   const taken = (finding: (typeof open)[number]): DecisionChoice | null => {
     const choice = answers.get(finding.key);
     return choice !== undefined && decisionChoicesFor(finding.rule_id).includes(choice) ? choice : null;
   };
-  const person = open.filter((finding) => routedToPerson(finding, loop));
   const handed = person.some((finding) => {
     const choice = taken(finding);
     return choice === "approach" || choice === "let_it_decide";
   });
-  if (stillTrying || handed) return [];
+  if (handed) return [];
   return person.filter((finding) => taken(finding) === null).map((finding) => finding.key);
 }
 
@@ -230,20 +246,43 @@ export function decidable(review: Pick<ReviewArtifact, "decision">, loop: LoopOn
 }
 
 /**
- * Whether an answer answers a review: taken at or after the review was
- * recorded — its bundle's `created_at`, which the loop reads — because a person
- * can only answer what they were shown, and naming that review where the
- * person named one by its id. An earlier answer on the same key answered an
- * earlier review of another change set.
+ * Whether an answer answers its finding on a review: taken at or after the
+ * review was recorded — its bundle's `created_at`, which the loop reads —
+ * because a person can only answer what they were shown, naming that review
+ * where the person named one by its id, and, for a finding a round was given
+ * and left open, taken after that round's closure verification
+ * (`LoopOnReview.lastGiven`). An earlier answer on the same key answered an
+ * earlier review of another change set, and one taken before a round that
+ * was handed the finding and left it open is the answer that round already
+ * tried: the finding is the person's to answer again, and the next run is not
+ * handed the same brief for it. An answer whose round closed the finding
+ * stands, and the pull request lists it.
  */
-export function answersReview(
-  answer: { decided_at: string; review_id: string | null },
+export function answersFinding(
+  answer: { finding_key: string; decided_at: string; review_id: string | null },
   review: { review_id: string; recorded_at: string },
+  loop: Pick<LoopOnReview, "lastGiven" | "closed">,
 ): boolean {
+  const given = loop.closed.has(answer.finding_key) ? undefined : loop.lastGiven.get(answer.finding_key);
   return (
     Date.parse(answer.decided_at) >= Date.parse(review.recorded_at) &&
-    (answer.review_id === null || answer.review_id === review.review_id)
+    (answer.review_id === null || answer.review_id === review.review_id) &&
+    (given === undefined || Date.parse(answer.decided_at) > Date.parse(given))
   );
+}
+
+/**
+ * The commit a review, or the last closure verification after it, judged:
+ * what the ticket's branch has to be at for a run to act on that record
+ * rather than review the branch afresh. A round the scope rule refused
+ * (SCP-194) records the commit it refused under a key of its own and judged no
+ * tree, so it is passed over. Null where the verification that judged last
+ * records no commit.
+ */
+export function judgedCommit(review_head: string, verifications: readonly Pick<RecordedBundle, "inputs">[]): string | null {
+  const last = verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined);
+  const head = last === undefined ? review_head : (last.inputs["head_commit"] ?? null);
+  return typeof head === "string" && head.length > 0 ? head : null;
 }
 
 /** The answers a finding of this rule takes: only shipping it as it is, where the executor is never handed its family. */

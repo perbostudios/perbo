@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -2440,7 +2440,19 @@ function recordSession(
     if (isSymlink(file)) {
       return `${file} is a symlink, and this is the repository's own record`;
     }
-    writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+    // Whole or not at all: the record is written again at every change to
+    // the asking, and one torn by a kill mid-write is a record `--session`
+    // cannot find and whose asking is lost. So it is written beside itself,
+    // under a name nothing else holds (`wx` refuses one that is there, a
+    // symlink included), and renamed over the record in one step.
+    const written = join(landed, `${INTERVIEW_SESSION_FILE}.${process.pid}.${randomUUID()}`);
+    try {
+      writeFileSync(written, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
+      renameSync(written, file);
+    } catch (error) {
+      rmSync(written, { force: true });
+      throw error;
+    }
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -2481,26 +2493,32 @@ async function* turnsOf(turns: AsyncIterable<string> | undefined): AsyncGenerato
 
 /**
  * What the session resumed asked before, from its record beside the spec, or
- * nothing where the record is another session's. A record of this session's
- * whose asking cannot be read is said, and read as nothing asked: the session
- * goes on, and may ask again what it asked before.
+ * nothing where there is no record or it is another session's. A record that
+ * cannot be read, or one of this session's whose asking cannot be, is said,
+ * and read as nothing asked: the session goes on, and may ask again what it
+ * asked before.
  */
 function recordedAsking(folder: string, session: string, streams: Streams): AskingState {
+  const unread = (): AskingState => {
+    streams.stderr(
+      `what the session ${session} asked could not be read from ${INTERVIEW_SESSION_FILE} beside its spec, ` +
+        "so a question it asked before is not refused if it asks it again\n",
+    );
+    return NOTHING_ASKED;
+  };
+  const path = join(folder, INTERVIEW_SESSION_FILE);
+  if (!existsSync(path)) return NOTHING_ASKED;
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(join(folder, INTERVIEW_SESSION_FILE), "utf8"));
+    raw = JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    return NOTHING_ASKED;
+    return unread();
   }
   const found = FoundSessionSchema.safeParse(raw);
-  if (!found.success || found.data.session_id !== session) return NOTHING_ASKED;
+  if (!found.success) return unread();
+  if (found.data.session_id !== session) return NOTHING_ASKED;
   const asking = AskingStateSchema.safeParse((raw as { asking?: unknown }).asking);
-  if (asking.success) return asking.data;
-  streams.stderr(
-    `what the session ${session} asked could not be read from ${INTERVIEW_SESSION_FILE} beside its spec, ` +
-      "so a question it asked before is not refused if it asks it again\n",
-  );
-  return NOTHING_ASKED;
+  return asking.success ? asking.data : unread();
 }
 
 /** stdin, one line at a time. */

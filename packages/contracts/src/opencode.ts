@@ -78,14 +78,16 @@ export const OPENCODE_MODEL_NOT_FOUND = "model not found";
  * taken after the scratch ones:
  *
  * - with a `model` named, until a snapshot offers it, and answers with it;
- * - with none (`null`), until two snapshots in a row name the same default,
- *   and answers with that default, which the role then selects by name.
+ * - with none (`null`), until two snapshots name the same default with no
+ *   other snapshot between them, and answers with that default, which the
+ *   role then selects by name.
  *
- * `OPENCODE_SESSION_ATTEMPTS` snapshots at most, `OPENCODE_SESSION_RETRY_MS`
+ * `OPENCODE_SESSION_ATTEMPTS` sessions at most, `OPENCODE_SESSION_RETRY_MS`
  * apart. A `session/new` OpenCode answered with an error — it refuses one
  * asked for before its catalogue has arrived ("Internal service failure") —
- * counts as one snapshot, and the last attempt's refusal is thrown as it
- * came; `refused` says which of `request`'s rejections are such an answer.
+ * is one of those sessions but no snapshot, so it neither ends nor breaks two
+ * agreeing ones, and the last attempt's refusal is thrown as it came;
+ * `refused` says which of `request`'s rejections are such an answer.
  * Any other rejection — the process gone, a request timed out — is thrown at
  * once, unchanged.
  */

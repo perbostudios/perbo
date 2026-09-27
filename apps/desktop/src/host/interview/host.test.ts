@@ -7,7 +7,7 @@ import { InterviewHost, type InterviewDeps } from "./host.js";
 import { ContractEditing } from "../../shared/contract-editing.js";
 import { INTERVIEW_WROTE_THE_SPEC, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
 import type { PromisePair } from "../../shared/contract-editing.js";
-import type { Change, EditingSession, InterviewEntry } from "../../shared/protocol.js";
+import type { Change, EditingSession, InterviewEntry, TaskModels } from "../../shared/protocol.js";
 import type { LineProcess, LineProcessOptions } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -75,6 +75,8 @@ function host(
   known: InterviewDeps["catalogs"]["known"] = () => Promise.resolve(undefined),
   /** The records as the app finds them on disk as it starts. */
   saved: EditingSession[] = [],
+  /** The provider new tasks draft on, which a planning with no ticket takes; the settings' default where none is given. */
+  drafting?: TaskModels["draftingProvider"],
 ) {
   let records: EditingSession[] = structuredClone(saved);
   const told: Change[] = [];
@@ -87,7 +89,10 @@ function host(
       records = structuredClone(next);
     },
     repository: () => undefined,
-    defaults: () => TaskModelsSchema.strip().parse(SettingsSchema.parse({})),
+    defaults: () => {
+      const models = TaskModelsSchema.strip().parse(SettingsSchema.parse({}));
+      return drafting === undefined ? models : { ...models, draftingProvider: drafting };
+    },
     detail: () => {
       throw new Error("no detail in this test");
     },
@@ -550,6 +555,25 @@ describe("a session asking what it has already asked (D-117)", () => {
     expect(w.editing.read(id).answers).toEqual([]);
     expect(w.editing.read(id).asking).toBeNull();
   });
+
+  it("does not take a lettered answer to an asking waiting behind as the answer to the asking in front", async () => {
+    const { w, id, child } = await planning();
+    // Two askings: the flap and the score in front, the look and the sound
+    // asked later and waiting behind them.
+    child.say({ type: "asked", groups: [EVERYTHING[0]!] });
+    child.say({ type: "asked", groups: [EVERYTHING[2]!] });
+    child.say({ type: "idle", turns: 1 });
+    const [first, behind] = w.conversation(id).filter((entry) => entry.line.kind === "asked").map((entry) => entry.n);
+    expect(w.editing.read(id).asking).toEqual({ entry: first, answered: 0 });
+    expect(w.editing.read(id).askingNext).toEqual([behind]);
+    // The later asking's answers under the letters of the one in front: read as
+    // the interview reads them against what waits behind, not the flap and
+    // the score's answer, so nothing is recorded and every asking ends.
+    await w.interviews.turn(id, "a) Pixel-art sprites drawn in code\nb) Simple beeps generated in code");
+    expect(w.editing.read(id).answers).toEqual([]);
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).askingNext).toEqual([]);
+  });
 });
 
 describe("what a turn tells the interview of the questions it waits on (D-117)", () => {
@@ -623,6 +647,98 @@ describe("what a turn tells the interview of the questions it waits on (D-117)",
     expect(condense.text).toMatch(/^Perbo: .*Write it again, condensed to fit/);
     expect(condense.asking).toBe("kept");
     expect(w.editing.read(id).asking).toEqual({ entry: asked, answered: 0 });
+  });
+
+  it("puts nothing the session before asked once the interview starts a new session, and takes its answers down too", async () => {
+    const repo = repository();
+    const { w, id, child } = await (async () => {
+      const w = host(repo);
+      const session = await w.open();
+      w.editing.recordSpec(session.id, "retry-a-failed-run");
+      await w.interviews.start(session.id);
+      const child = w.spawned[0]!.child;
+      child.say(started("sdk-1"));
+      return { w, id: session.id, child };
+    })();
+    const WHO = { title: "Who", parts: [{ question: "Who?", options: [option("Me"), option("Them")] }] };
+    const WHEN = { title: "When", parts: [{ question: "When?", options: [option("Now"), option("Later")] }] };
+    // One question answered, one in front of the person and one waiting behind it.
+    child.say({ type: "asked", groups: [WHERE] });
+    await w.interviews.turn(id, "Home");
+    expect(w.editing.read(id).answers).toHaveLength(1);
+    child.say({ type: "asked", groups: [WHO] });
+    child.say({ type: "asked", groups: [WHEN] });
+    const lines = w.conversation(id);
+    expect(w.editing.read(id).askingNext).toHaveLength(1);
+    child.close(0);
+
+    // The same provider continues the session, and what it asked and heard stands.
+    const same = host(repo, undefined, w.records());
+    await same.interviews.start(id);
+    expect(same.spawned[0]!.args).toContain("--session");
+    expect(same.editing.read(id).asking).not.toBeNull();
+    expect(same.editing.read(id).askingNext).toHaveLength(1);
+    expect(same.editing.read(id).answers).toHaveLength(1);
+
+    // Another provider starts a session of its own, which has asked nothing
+    // and heard nothing. New tasks draft on Codex now, and so does this
+    // planning, which has no ticket.
+    const other = host(repo, undefined, w.records(), "codex-cli");
+    await other.interviews.start(id);
+    expect(other.spawned[0]!.args).not.toContain("--session");
+    expect(other.editing.read(id).asking).toBeNull();
+    expect(other.editing.read(id).askingNext).toEqual([]);
+    expect(other.editing.read(id).answers).toEqual([]);
+    expect(other.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toBeNull();
+    expect(other.conversation(id)).toEqual(lines);
+    // The question the session before had answered, asked again by the new
+    // one: put as a card, and its answer goes down to the session waiting on it.
+    const fresh = other.spawned[0]!.child;
+    fresh.say(started("codex-1"));
+    fresh.say({ type: "asked", groups: [WHERE] });
+    const again = other.conversation(id).filter((entry) => entry.line.kind === "asked").at(-1)!.n;
+    expect(other.editing.read(id).asking).toEqual({ entry: again, answered: 0 });
+    await other.interviews.turn(id, "Board");
+    expect(sent(fresh).at(-1)).toEqual({ type: "turn", text: "Board" });
+    expect(other.editing.read(id).answers).toEqual([{ question: "Where?", labels: ["Home", "Board"], answer: "Board" }]);
+    expect(other.editing.read(id).asking).toBeNull();
+  });
+
+  it("takes the answers down when the interview starts a new session with nothing left asked", async () => {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    child.say({ type: "asked", groups: [WHERE] });
+    await w.interviews.turn(id, "Home");
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).answers).toHaveLength(1);
+    child.close(0);
+    const other = host(repo, undefined, w.records(), "codex-cli");
+    await other.interviews.start(id);
+    expect(other.editing.read(id).answers).toEqual([]);
+  });
+
+  it("keeps a problem of the host's in front when the interview starts a new session, and drops what waited behind it", async () => {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    problemInFront(w, id, child);
+    const problem = w.editing.read(id).asking;
+    child.close(0);
+    const other = host(repo, undefined, w.records(), "codex-cli");
+    await other.interviews.start(id);
+    expect(other.editing.read(id).asking).toEqual(problem);
+    expect(other.editing.read(id).askingNext).toEqual([]);
   });
 });
 

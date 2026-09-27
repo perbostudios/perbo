@@ -15,7 +15,13 @@ import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { heldTicket, isLive, isRun } from "../shared/jobs.js";
 import { questionsOnRecord } from "../shared/decisions.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
+import {
+  ANOTHER_PLANNING_HOLDS,
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
+  deletePullRequestOpen,
+  pullRequestOpen,
+} from "../shared/discard.js";
 import { ANTHROPIC_API_ABOUT, HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
 import { egressSettledLine } from "@perbo/contracts/browser";
@@ -485,6 +491,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   replan: async (request) => {
     const { ticket } = ticketRow(request.key);
+    // A ticket whose pull request is open is not deleted, so it is not planned
+    // again either, as the host refuses it (D-129).
+    if (pullRequestOpen(ticket)) throw new Error(deletePullRequestOpen(ticket));
     // The spec the stopped plan was drafted from, in the words the CLI refuses
     // in, because this is the same question `admit --start-over` asks and a
     // person should not meet two sentences for one answer.

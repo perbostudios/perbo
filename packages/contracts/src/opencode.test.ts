@@ -167,7 +167,16 @@ describe("waiting until OpenCode offers a model", () => {
     expect(opened(acp)).toHaveLength(OPENCODE_SESSION_ATTEMPTS);
   });
 
-  it("counts a session OpenCode refused as one snapshot, and throws the last refusal as it came", async () => {
+  it("with no model named, takes two snapshots with a refused session between them as agreeing", async () => {
+    const refusal = new Refusal("Internal error: Internal service failure");
+    const acp = server(0, "opencode/longcat", { 2: async () => Promise.reject(refusal) });
+    await expect(awaitOpenCodeModel({ model: null, scratch, request: acp.request, refused, wait })).resolves.toBe(
+      "opencode/longcat",
+    );
+    expect(opened(acp)).toHaveLength(3);
+  });
+
+  it("counts a session OpenCode refused toward the sessions it may open, and throws the last refusal as it came", async () => {
     const refusal = new Refusal("Internal error: Internal service failure");
     const once = server(0, "opencode/longcat", { 1: async () => Promise.reject(refusal) });
     await expect(awaitOpenCodeModel({ model: "opencode/longcat", scratch, request: once.request, refused, wait })).resolves.toBe(

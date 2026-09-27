@@ -527,23 +527,6 @@ export function runnableOpenCodeModels(reported: {
 }
 
 /**
- * The models an OpenCode role can run, under the same home every role runs in
- * (D-134): fresh directories, no project
- * configuration, OpenCode Zen's key where the app environment has one and no
- * other credential of the person's.
- *
- * ACP's `session/new` offers every model OpenCode's catalogue holds, a price
- * behind a missing key included, and says nothing of which can run; measured
- * on 2.0.14, a Zen model with a price and no key is offered and then refused
- * at the turn. So this asks OpenCode's own server instead
- * (`OPENCODE_SERVE_ARGV`): which integrations it reports connected, which
- * provider each model belongs to, and each model's price, reading the model
- * list until two readings agree, since OpenCode says the list may precede its
- * plugins settling. Only reads are sent; the password is minted here, sent
- * only to the loopback address the server names, and the server ends with
- * this process's hold on its stdin.
- */
-/**
  * The first line a stream prints, read up to `limit` characters. Once it is
  * read — or the limit refused — nothing more is kept: the listener comes off
  * and the stream is left flowing, so a server that keeps printing is drained
@@ -576,6 +559,22 @@ export function firstLine(stream: Readable, limit: number): Promise<string> {
   });
 }
 
+/**
+ * The models an OpenCode role can run, under the same home every role runs in
+ * (D-134): fresh directories, no project configuration, OpenCode Zen's key
+ * where the app environment has one and no other credential of the person's.
+ *
+ * ACP's `session/new` offers every model OpenCode's catalogue holds, a price
+ * behind a missing key included, and says nothing of which can run; measured
+ * on 2.0.14, a Zen model with a price and no key is offered and then refused
+ * at the turn. So this asks OpenCode's own server instead
+ * (`OPENCODE_SERVE_ARGV`): which integrations it reports connected, which
+ * provider each model belongs to, and each model's price, reading the model
+ * list until two readings agree, since OpenCode says the list may precede its
+ * plugins settling. Only reads are sent; the password is minted here, sent
+ * only to the loopback address the server names, and the server ends with
+ * this process's hold on its stdin.
+ */
 async function openCodeModels(options: {
   binary: string;
   scratch: string;

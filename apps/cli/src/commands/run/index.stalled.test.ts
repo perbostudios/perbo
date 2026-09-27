@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,8 +33,11 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 5, re
 
 const OUTCOME = "The feature module exports a computed total";
 
-/** An executor that writes a new line to one file on every call, so each round changes the branch. */
-function agent(dir: string): string {
+/**
+ * An executor that writes a new line to one file on every call, so each round
+ * changes the branch, and declines `declines` (D-065) whenever its prompt names it.
+ */
+function agent(dir: string, declines: string | null = null): string {
   const binary = join(dir, "agent.cjs");
   writeFileSync(
     binary,
@@ -52,7 +56,10 @@ emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "toolu_fa
 const path = join(process.cwd(), input.file_path);
 mkdirSync(dirname(path), { recursive: true });
 appendFileSync(path, input.content);
-emit({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.004, permission_denials: [] });
+const declines = ${JSON.stringify(declines)};
+const prompt = process.argv[process.argv.indexOf("-p") + 1] || "";
+const result = declines !== null && prompt.includes(declines) ? "NO_PRACTICE " + declines + ": which fixture loads is a product call" : "done";
+emit({ type: "result", subtype: "success", is_error: false, result, total_cost_usd: 0.004, permission_denials: [] });
 process.exit(0);
 `,
     { mode: 0o755 },
@@ -92,8 +99,8 @@ const FINDINGS = ["src/a.ts", "src/b.ts", "src/c.ts"].map((file) => ({
 }));
 const [SHIPPED, HANDED, CLOSED_EARLY] = FINDINGS.map((finding) => finding.key) as [string, string, string];
 
-/** A reviewer that routes the three findings to the executor, on the commit it was handed. */
-const remediable = async (request: { changeset?: { changeset_id: string }; head_commit?: string }) => {
+/** A reviewer that routes `findings` to the executor, on the commit it was handed. */
+const remediableWith = (findings: ReadonlyArray<{ key: string; file: string }>) => async (request: { changeset?: { changeset_id: string }; head_commit?: string }) => {
   const base = makeReview({
     review_id: "rev_0000000000000015",
     changeset_id: request.changeset?.changeset_id ?? "cs_0000000000000001",
@@ -106,7 +113,7 @@ const remediable = async (request: { changeset?: { changeset_id: string }; head_
       ...base,
       target: { ...base.target, head_commit: request.head_commit ?? base.target.head_commit },
       checks: [],
-      findings: FINDINGS.map(
+      findings: findings.map(
         ({ key, file }): Finding => ({
           ...template,
           key,
@@ -119,6 +126,9 @@ const remediable = async (request: { changeset?: { changeset_id: string }; head_
     bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
   };
 };
+
+/** A reviewer that routes the three findings to the executor. */
+const remediable = remediableWith(FINDINGS);
 
 /** A closure verifier that records what each round was given and closes what `closes` names. */
 const verifier = (seen: string[][], closes: (round: number) => readonly string[]) =>
@@ -148,7 +158,7 @@ const noReview = (async () => {
 }) as never;
 
 /** A repository with PRB-1 admitted and approved, and what a run of it needs. */
-function fixture(): { repo: string; config: string; key: string; gh: string; ghLog: string } {
+function fixture(declines: string | null = null): { repo: string; config: string; key: string; gh: string; ghLog: string } {
   const dir = mkdtempSync(join(scratch, "ticket-"));
   const repo = join(dir, "repo");
   initRepository(repo, {
@@ -173,7 +183,7 @@ function fixture(): { repo: string; config: string; key: string; gh: string; ghL
     config,
     JSON.stringify({
       worktree_root: join(dir, "worktrees"),
-      agent_binary: agent(dir),
+      agent_binary: agent(dir, declines),
       model: "double",
       max_remediation_rounds: 3,
       materialization_manifest: {
@@ -221,9 +231,14 @@ async function run(
   }
 }
 
-async function decide(at: ReturnType<typeof fixture>, key: string, choice: string): Promise<number> {
+async function decide(
+  at: ReturnType<typeof fixture>,
+  key: string,
+  choice: string,
+  argv: readonly string[] = [],
+): Promise<number> {
   return runCommandLine(verdictCommandLine, {
-    argv: [at.key, "--decide", key, "--choice", choice, "--author", "Owen <owen@example.com>", "--repo", at.repo],
+    argv: [at.key, "--decide", key, "--choice", choice, "--author", "Owen <owen@example.com>", "--repo", at.repo, ...argv],
     streams: recordStreams(),
     cwd: at.repo,
     now: new Date(),
@@ -339,5 +354,126 @@ describe("perbo run after a refinement that stalled", () => {
     const log = existsSync(at.ghLog) ? readFileSync(at.ghLog, "utf8") : "";
     expect(log).toContain("### Decided by a person");
     expect(log).toContain(`decided by Owen: ${DECISION_WORDS.ship_as_is}`);
+  }, 300_000);
+});
+
+/** `git` in a fixture repository, as a person at a terminal runs it. */
+const git = (repo: string, ...args: string[]): string =>
+  execFileSync("git", ["-C", repo, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Owen",
+      GIT_AUTHOR_EMAIL: "owen@example.com",
+      GIT_COMMITTER_NAME: "Owen",
+      GIT_COMMITTER_EMAIL: "owen@example.com",
+    },
+  }).trim();
+
+describe("perbo run after a round left open a finding the person handed on", () => {
+  it("does not hand it again on the answer that round tried, and is refused until it is answered again", async () => {
+    const at = await stalledTicket();
+    const store = storeDir(at.repo, null);
+    expect(await decide(at, SHIPPED, "ship-as-is")).toBe(0);
+    expect(await decide(at, HANDED, "let-it-decide")).toBe(0);
+    const tried: string[][] = [];
+    const second = await run(at, { hooks: { review: noReview, verify: verifier(tried, () => []) } });
+    expect(tried).toEqual([[HANDED]]);
+    expect(second.code, second.err).toBe(2);
+    expect((JSON.parse(second.out) as { outcome: string }).outcome).toBe("escalated");
+    const before = readTicket(store, at.key);
+
+    // The answer that round tried answers the finding no more: nothing is
+    // handed on, so the same brief is not bought again.
+    const refused = await run(at, { hooks: nothingRuns });
+    expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
+    expect(refused.err).toContain(`left 1 finding(s) for you to answer (${HANDED.slice(0, 12)})`);
+    expect(readTicket(store, at.key)).toEqual(before);
+
+    // Answered again, it is handed on again, and delivered once a round closes it.
+    expect(await decide(at, HANDED, "approach", ["--replace", "--note", "Compute the total from its inputs."])).toBe(0);
+    const again: string[][] = [];
+    const third = await run(at, { hooks: { review: noReview, verify: verifier(again, () => [HANDED]) } });
+    expect(again).toEqual([[HANDED]]);
+    expect(third.code, third.err).toBe(0);
+    expect(readTicket(store, at.key).state).toBe("pr_open");
+  }, 300_000);
+});
+
+describe("perbo run where the loop refuses what the command let through", () => {
+  it("puts the ticket back where it was before the command moved it", async () => {
+    const at = await stalledTicket();
+    const store = storeDir(at.repo, null);
+    const before = readTicket(store, at.key);
+    const branch = before.delivery.branch!;
+    const judged = git(at.repo, "rev-parse", `refs/heads/${branch}`);
+    // A commit a person made on the branch by hand: the command reviews that
+    // afresh, so it lets the run through and moves the ticket...
+    const byHand = git(at.repo, "commit-tree", `${judged}^{tree}`, "-p", judged, "-m", "a fix by hand");
+    git(at.repo, "update-ref", `refs/heads/${branch}`, byHand);
+    // ...and by the time the loop holds its lock the branch is back at the
+    // commit judged, which the loop refuses.
+    const refused = await run(at, {
+      hooks: nothingRuns,
+      preflight: (request) => {
+        git(at.repo, "update-ref", `refs/heads/${branch}`, judged);
+        return okPreflight(request);
+      },
+    });
+    expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
+    expect(refused.err).toContain(`error: ${at.key}'s last run finished trying and left 2 finding(s) for you to answer`);
+    expect(readTicket(store, at.key)).toEqual(before);
+  }, 300_000);
+});
+
+/**
+ * D-132 beside D-065 at the command line: a refinement stalls with one finding
+ * the executor declined and one it could not close, the person ships the other
+ * as it is, and the next run delivers without a round. It ends `escalated`
+ * over the decline and lands where every escalated run lands, publishing or
+ * not.
+ */
+describe("perbo run on answers that leave a finding the executor declined", () => {
+  const [DECLINED, ANSWERED] = ["src/d.ts", "src/e.ts"].map((file) => ({
+    key: findingKey({ rule_id: "verification.execution_missing", criterion_id: "ac_1", file, symbol: null }),
+    file,
+  })) as [{ key: string; file: string }, { key: string; file: string }];
+
+  it.each([
+    ["not publishing", false],
+    ["publishing", true],
+  ] as const)("lands at changes_requested on the escalated run's row, %s", async (_label, publish) => {
+    const at = fixture(DECLINED.key);
+    const store = storeDir(at.repo, null);
+    const verified: string[][] = [];
+    const first = await run(at, {
+      hooks: { review: remediableWith([DECLINED, ANSWERED]) as never, verify: verifier(verified, () => []) },
+    });
+    expect(first.code, first.err).toBe(2);
+    expect(verified).toEqual([[ANSWERED.key]]);
+    expect(readTicket(store, at.key).history.at(-1)?.note).toBe(gateClosedNote("remediation_stalled"));
+
+    expect(await decide(at, ANSWERED.key, "ship-as-is")).toBe(0);
+    const delivered = await run(
+      at,
+      { hooks: { ...nothingRuns, push: (async () => ({ pushed: true, detail: "recorded" })) as never } },
+      publish ? ["--publish"] : [],
+    );
+    expect(delivered.code, delivered.err).toBe(2);
+    const result = JSON.parse(delivered.out) as { outcome: string; rounds: unknown[] };
+    expect([result.outcome, result.rounds]).toEqual(["escalated", []]);
+    expect(delivered.err).toContain(`${at.key} is now changes_requested`);
+    const ticket = readTicket(store, at.key);
+    expect(ticket.state).toBe("changes_requested");
+    expect(ticket.history.at(-1)).toMatchObject({
+      from: "provisioning",
+      to: "changes_requested",
+      note: gateClosedNote("escalated"),
+    });
+    expect(ticket.delivery).toMatchObject(
+      publish
+        ? { state: "open", pull_request_url: "https://github.com/o/r/pull/15", opened_by: "loop" }
+        : { state: "none", pull_request_url: null },
+    );
   }, 300_000);
 });

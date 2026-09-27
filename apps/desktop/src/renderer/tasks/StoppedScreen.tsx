@@ -9,6 +9,7 @@ import type { StopReason, TaskContext } from "./task-context.js";
 import { LoopStages, TaskHeader } from "./LoopScreen.js";
 import { ConfirmDelete, deletes, ticketSpec, useCreate, useDiscardTicket, useSettle } from "../shell/create.js";
 import { draftedLanding } from "../planning/panes.js";
+import { deletePullRequestOpen, pullRequestOpen } from "../../shared/discard.js";
 
 /**
  * The page a stopped run lands on.
@@ -84,18 +85,21 @@ export function StoppedScreen(context: TaskContext) {
   // still live has its plan. A ticket in `changes_requested` that this page
   // shows asks the person nothing (`ticketRun`): its loop ended on a verdict
   // nobody can answer, so it is spent, and planning again is the way forward
-  // (D-132). A pull request open is not offered it at all, because a ticket
-  // with one is not deleted.
+  // (D-132). A ticket whose pull request is open — at `pr_open`, or an
+  // escalated run's that published (D-065) — is offered neither this nor
+  // Delete, because a ticket with one is not deleted, and the page says so in
+  // one sentence naming it (D-129).
   const spent =
     ticket.state === "failed" || ticket.state === "cancelled" || (ticket.state === "changes_requested" && projection.recoverable);
-  const replannable = spec !== null && ticket.state !== "pr_open";
+  const prOpen = pullRequestOpen(ticket);
+  const replannable = spec !== null && !prOpen;
   // Whether Plan it again can be pressed now, which is what a hover may point to.
   const planAgainLive = replannable && spent;
   // Why the run stopped: the reasons of its last run, read as the loop page's
   // ended card reads them, or — a run that closed the gate with nothing left
   // to ask the person — the outcome its row records.
   const ending = runEnding(jobs.filter(isRun), latest);
-  const closedGate = ending === null ? gateClosedReasons(ticket.history, detail.attempts) : null;
+  const closedGate = ending === null ? gateClosedReasons(ticket.history, detail.attempts, replannable) : null;
   const reasons: StopReason[] = ending?.reasons ?? closedGate ?? [
     {
       text: "Perbo holds no record of how this run ended.",
@@ -107,9 +111,11 @@ export function StoppedScreen(context: TaskContext) {
   // Continue carries on only from the person's own stop or Perbo closing:
   // every other reason is one another attempt at the same plan meets again,
   // and where the record is gone nothing says which it was.
-  const onward = planAgainLive
-    ? "Plan it again to change the spec or the plan and start the loop over."
-    : "Delete this work to start it over from a new plan.";
+  const onward = prOpen
+    ? deletePullRequestOpen(ticket)
+    : planAgainLive
+      ? "Plan it again to change the spec or the plan and start the loop over."
+      : "Delete this work to start it over from a new plan.";
   const why = projection.continuable
     ? undefined
     : ending === null && closedGate === null
@@ -190,13 +196,16 @@ export function StoppedScreen(context: TaskContext) {
             </li>
           ))}
         </ul>
+        {prOpen && <Notice tone="warning">{deletePullRequestOpen(ticket)}</Notice>}
         {error !== null && <Notice tone="danger">{error}</Notice>}
         {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
       </div>
       <div className="approve-actions pane-confirm stopped-actions">
-        <Button disabled={held} onClick={() => setDeleting(true)}>
-          Delete this work
-        </Button>
+        {!prOpen && (
+          <Button disabled={held} onClick={() => setDeleting(true)}>
+            Delete this work
+          </Button>
+        )}
         {replannable && (
           <Button
             disabled={!spent || busy || drafting}

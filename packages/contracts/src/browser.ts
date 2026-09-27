@@ -11,12 +11,13 @@ export type { ApproachRecord, GraphEdge } from "./approach.js";
 export { costOf, formatUsd, rollCosts } from "./cost.js";
 export type { Cost, CostRoll } from "./cost.js";
 export {
-  answersReview,
+  answersFinding,
   DECISION_CHOICES,
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  judgedCommit,
   leftToPrinciple,
   loopOnRecord,
   loopOnReview,

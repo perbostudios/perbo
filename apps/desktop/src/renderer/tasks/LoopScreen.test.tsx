@@ -239,7 +239,7 @@ describe("the three answers a question takes", () => {
           { kind: "review", subject_id: review.review_id, created_at: review.created_at, usage: { wall_clock_ms: 0 } } as never,
         ];
         detail.verdicts = review.findings.map((finding) => ({
-          review: { reference: "PRB-412" },
+          review: { ticket_id: detail.ticket.ticket_id, reference: "PRB-412" },
           finding_key: finding.key,
           decision: "decide",
           choice: "ship_as_is",

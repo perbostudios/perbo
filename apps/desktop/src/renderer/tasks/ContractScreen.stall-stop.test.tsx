@@ -219,3 +219,37 @@ describe("the wait while a contract is being approved", () => {
     expect(screen.queryByText("Approving the contract")).toBeNull();
   });
 });
+
+/**
+ * D-132: a ticket whose record owes the person's answers, with its branch
+ * still at the commit judged, is offered Answer in place of Start the loop.
+ * The host reads that fact, the branch included, and the page reads it off
+ * the ticket (`Detail.owed`) rather than working it out itself.
+ */
+describe("the way on from an approved contract whose run owes the person's answers", () => {
+  async function approved(owed: TaskContext["detail"]["owed"]): Promise<TaskContext> {
+    const context = await contractContext();
+    context.detail.ticket.approved_at = "2026-09-24T09:00:00.000Z";
+    context.detail.owed = owed;
+    return context;
+  }
+
+  it("offers Answer, which opens the decisions, in place of Start the loop", async () => {
+    const context = await approved([
+      { id: "a".repeat(64), title: "Which fixture loads?", context: "", choices: ["approach", "let_it_decide", "ship_as_is"] },
+    ]);
+    mount(<ContractScreen {...context} />);
+    const answer = await screen.findByRole("button", { name: "Answer" });
+    expect(screen.getByText(/The last run finished trying and left 1 question for you/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start the loop" })).toBeNull();
+    fireEvent.click(answer);
+    expect(context.show).toHaveBeenCalledWith("decisions");
+  });
+
+  it("offers Start the loop where the ticket owes nothing, a branch a person moved included", async () => {
+    const context = await approved([]);
+    mount(<ContractScreen {...context} />);
+    expect(await screen.findByRole("button", { name: "Start the loop" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
+  });
+});

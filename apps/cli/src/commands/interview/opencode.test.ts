@@ -198,6 +198,8 @@ describe("the OpenCode the interview starts", () => {
     for (const argv of [[], ["--model", "opencode/big-pickle"]]) {
       const repo = repository(scratch);
       const fake = fakeOpenCode({ root: mkdtempSync(join(scratch, "fake-")), steps: [], sessionId: "ses-7", exitAtScratch: 1 });
+      /** Every wait between snapshots, each of which a snapshot asked again comes after. */
+      const waits: number[] = [];
       const failure = await Promise.resolve(
         runCommandLine(interviewCommandLine, {
           argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "opencode", ...argv],
@@ -207,7 +209,9 @@ describe("the OpenCode the interview starts", () => {
             transport: openCodeInterviewTransport({
               binary: fake.binary,
               dataDirectory: join(mkdtempSync(join(scratch, "home-")), "data"),
-              wait: noWait,
+              wait: async (ms) => {
+                waits.push(ms);
+              },
             }),
             turns: (async function* () {
               yield JSON.stringify({ type: "turn", text: "hello" });
@@ -217,8 +221,9 @@ describe("the OpenCode the interview starts", () => {
       ).catch((error: unknown) => error);
       expect(failure, argv.join(" ")).toBeInstanceOf(Error);
       expect((failure as Error).message).toContain("opencode stopped before the interview ended (3): opencode crashed");
-      // No snapshot was asked for after the process was gone.
+      // No snapshot was asked for, or waited for, after the process was gone.
       expect(fake.seen().scratch).toHaveLength(1);
+      expect(waits, argv.join(" ")).toEqual([]);
     }
   }, SPAWN_TEST_TIMEOUT_MS);
 

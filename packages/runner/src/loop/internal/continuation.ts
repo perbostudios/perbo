@@ -3,10 +3,11 @@ import {
   ExecutionAttemptSchema,
   NodeReviewsSchema,
   ReviewArtifactSchema,
-  answersReview,
+  answersFinding,
   attemptsFileName,
   decidable,
   decisionChoicesFor,
+  judgedCommit,
   leftToPrinciple,
   loopOnRecord,
   owedAnswers,
@@ -19,15 +20,15 @@ import {
   type ReviewArtifact,
   type RunBundle,
   type HistoryRow,
+  sameCommit,
 } from "@perbo/contracts";
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
-import { branchName, git, recordedBranch } from "@perbo/workspace";
+import { git, ticketBranchStillAt } from "@perbo/workspace";
 import { z } from "zod";
 import { lastAttemptBranch, readAttemptsRecord, type AttemptsRecord } from "../../attempts.js";
 import { handsToExecutor, recordDecisions, type DecidedFinding } from "../../decisions.js";
 import { BundleStore } from "../../bundle.js";
 import type { Decline } from "../../declines.js";
-import { sameCommit } from "../../resume.js";
 import { changedPathsBetween, commitsSince } from "../../seal.js";
 import type { TicketRunConfig } from "./config.js";
 import type { RoundState } from "./state.js";
@@ -193,15 +194,14 @@ export function judgedOnRecord(input: {
             .filter((key) => !loop.closed.has(key)),
         );
 
-  const lastJudged = verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined);
-  const head =
-    lastJudged === undefined ? review.target.head_commit : (lastJudged.inputs["head_commit"] ?? null);
-  if (typeof head !== "string" || head.length === 0) return null;
+  const head = judgedCommit(review.target.head_commit, verifications);
+  if (head === null) return null;
   return { review, node_reviews, reviewed_at: last.created_at, openKeys, loop, head_commit: head };
 }
 
 /**
- * The decisions that answer a review (`answersReview`): one per finding key.
+ * The decisions that answer their findings on a review (`answersFinding`): one
+ * per finding key.
  * None answer a review that is not `decidable`: one that did not judge the
  * whole change, or that routed its findings to the executor while the loop is
  * still trying, so the run goes on as though nothing were answered.
@@ -219,7 +219,7 @@ export function decisionsOn(
       .filter(
         (row) =>
           keys.has(row.finding_key) &&
-          answersReview(row, { review_id: review.review_id, recorded_at: reviewed_at }),
+          answersFinding(row, { review_id: review.review_id, recorded_at: reviewed_at }, loop),
       )
       .map((row) => [row.finding_key, row]),
   );
@@ -356,10 +356,10 @@ export class AnswersOwedError extends Error {
  * Refuse a run that owes a person's answers (`answersOwed`), with the sentence
  * that says how to give them, before anything is provisioned: the command
  * asks it before it moves the ticket, and the loop again under the run lock.
- * The branch the ticket's records name is read in the checkout itself: one
- * whose tip is no longer the commit the review, or the last verification
- * after it, judged carries work nobody judged, and that run reviews it
- * afresh. An explicit `--resume-from` names the attempt whose work the run
+ * The branch the ticket's records name is read in the checkout itself
+ * (`ticketBranchStillAt`, which the desktop's host reads too): one whose tip
+ * is no longer the commit the review, or the last verification after it,
+ * judged carries work nobody judged, and that run reviews it afresh. An explicit `--resume-from` names the attempt whose work the run
  * carries on, which a fresh review then judges, and a re-level merges the
  * base into an open pull request's branch: neither is refused here.
  */
@@ -389,11 +389,15 @@ export async function refuseOwedAnswers(input: {
   });
   if (owed === null) return;
   const attempts = readAttemptsRecord(join(config.state_root, attemptsFileName(contract.ticket_id)));
-  const branch =
-    recordedBranch({ delivery: config.delivery_branch, attempt: lastAttemptBranch(attempts) }, contract.ticket_id) ??
-    branchName({ ticket_key: config.ticket_key, ticket_id: contract.ticket_id, outcome: contract.outcome });
-  const tip = await git.resolveCommit(config.repository_root, `refs/heads/${branch}`);
-  if (tip === null || !sameCommit(tip, owed.head_commit)) return;
+  const judged = await ticketBranchStillAt({
+    resolveCommit: (ref) => git.resolveCommit(config.repository_root, ref),
+    recorded: { delivery: config.delivery_branch, attempt: lastAttemptBranch(attempts) },
+    ticket_key: config.ticket_key,
+    ticket_id: contract.ticket_id,
+    outcome: contract.outcome,
+    commit: owed.head_commit,
+  });
+  if (!judged) return;
   throw new AnswersOwedError(answersOwedSentence(config.ticket_key, owed.findings));
 }
 

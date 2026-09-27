@@ -341,6 +341,30 @@ describe("the stopped page", () => {
     expect(behind()[0]).toMatch(/Plan it again starts that run from the spec\.$/);
   });
 
+  /** An escalated run that published (D-065): its pull request is open on GitHub. */
+  const published = () => {
+    const run = closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]);
+    run.detail.ticket = {
+      ...run.detail.ticket,
+      delivery: { ...run.detail.ticket.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+    };
+    return run;
+  };
+
+  it("offers neither Delete nor Plan it again while its pull request is open, and says why in one sentence naming it", () => {
+    mount(published());
+    expect(screen.queryByRole("button", { name: "Delete this work" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Plan it again" })).toBeNull();
+    expect(
+      within(page()).getAllByText(
+        "PRB-415's pull request #15 is open, and that is a record this machine does not own. Close or merge it " +
+          "on GitHub first; the work can be deleted or planned again after that.",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(behind()[0]).toMatch(/reads on the next run\.$/);
+    everyHoverNamesALiveButton();
+  });
+
   it("has no way to the contract, and the paused loop beside Continue at the right", () => {
     mount(stopped({ state: "cancelled" }));
     const footer = page().querySelector(".stopped-actions")!;

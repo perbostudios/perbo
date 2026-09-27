@@ -12,6 +12,7 @@
  * already recorded for one is a recorded identifier and is kept
  * ({@link recordedBranch}, D-098).
  */
+import { sameCommit } from "@perbo/contracts";
 
 /** The prefix a newly derived branch takes. */
 export const BRANCH_PREFIX = "prb";
@@ -96,4 +97,28 @@ export function recordedBranch(recorded: RecordedBranches, ticketId: string): st
     if (typeof branch === "string" && isAttemptBranch(branch) && branch.split("/")[1] === own) return branch;
   }
   return null;
+}
+
+/**
+ * Whether a ticket's branch in the checkout is still at `commit` (D-132): the
+ * branch its records name, or the one the loop mints for it where they name
+ * none, read through `resolveCommit` as `refs/heads/<branch>`. A branch that
+ * is absent, or whose tip has moved past `commit`, carries work nobody judged,
+ * so a run reviews it afresh rather than acting on what judged `commit`. The
+ * loop refuses a run owed a person's answers on this, and the desktop's host
+ * offers and refuses the same run on it.
+ */
+export async function ticketBranchStillAt(input: {
+  resolveCommit: (ref: string) => Promise<string | null>;
+  recorded: RecordedBranches;
+  ticket_key: string;
+  ticket_id: string;
+  outcome: string;
+  commit: string;
+}): Promise<boolean> {
+  const branch =
+    recordedBranch(input.recorded, input.ticket_id) ??
+    branchName({ ticket_key: input.ticket_key, ticket_id: input.ticket_id, outcome: input.outcome });
+  const tip = await input.resolveCommit(`refs/heads/${branch}`);
+  return tip !== null && sameCommit(tip, input.commit);
 }

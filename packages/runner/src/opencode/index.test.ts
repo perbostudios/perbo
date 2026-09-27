@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@perbo/contracts";
+import { LimitsTableSchema, OPENCODE_SESSION_ATTEMPTS, OPENCODE_SESSION_RETRY_MS } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import type { AgentRequest } from "../adapter.js";
 import { AttemptCeilings } from "../ceilings.js";
@@ -280,16 +280,58 @@ describe("the OpenCode executor", () => {
   );
 
   it(
+    "asks again for a session OpenCode refused while its catalogue was still arriving, a scratch one or the worktree's",
+    async () => {
+      // The first scratch session is refused, the second offers the model, and
+      // the worktree's own is refused once before it opens.
+      const { fake, worktree, run } = attempt({ refuseSessions: [1, 3], turns: [{ steps: [{ say: "Done." }] }] });
+      const result = await run;
+      expect(result.termination).toEqual({ reason: "completed", detail: "" });
+      const opened = fake
+        .received()
+        .filter((line) => line["method"] === "session/new")
+        .map((line) => (line["params"] as { cwd: string }).cwd);
+      expect(opened).toHaveLength(4);
+      expect(opened.slice(0, 2).every((cwd) => cwd !== worktree)).toBe(true);
+      expect(opened.slice(2)).toEqual([worktree, worktree]);
+    },
+    // Spawns the fake, and waits OPENCODE_SESSION_RETRY_MS before each of the two sessions asked again.
+    SPAWN_TEST_TIMEOUT_MS + 2 * OPENCODE_SESSION_RETRY_MS,
+  );
+
+  it(
     "ends an OpenCode that stopped while its catalogue was waited for as the agent's error, saying why it stopped",
     async () => {
+      const started = Date.now();
       const { fake, run } = attempt({ exitAtSession: 1, turns: [{ steps: [] }] });
       const result = await run;
       expect(result.termination.reason).toBe("agent_error");
       expect(result.termination.detail).toContain("OpenCode stopped before completing (3): opencode crashed");
-      // No session was asked for after the process was gone.
+      // No session was asked for after the process was gone, and none was
+      // waited for: a snapshot asked again waits OPENCODE_SESSION_RETRY_MS first.
       expect(fake.received().filter((line) => line["method"] === "session/new")).toHaveLength(1);
+      expect(Date.now() - started).toBeLessThan((OPENCODE_SESSION_ATTEMPTS - 1) * OPENCODE_SESSION_RETRY_MS);
     },
     SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "says why OpenCode stopped where it stops during the wait between catalogue snapshots, the first one stale or refused",
+    async () => {
+      for (const script of [
+        { staleSnapshots: 1, exitAfterSession: 1 },
+        { refuseSessions: [1], exitAfterSession: 1 },
+      ]) {
+        const { fake, run } = attempt({ ...script, turns: [{ steps: [] }] });
+        const result = await run;
+        const name = JSON.stringify(script);
+        expect(result.termination.reason, name).toBe("agent_error");
+        expect(result.termination.detail, name).toContain("OpenCode stopped before completing (3): opencode crashed");
+        expect(fake.received().filter((line) => line["method"] === "session/new"), name).toHaveLength(1);
+      }
+    },
+    // Spawns the fake twice, each waiting OPENCODE_SESSION_RETRY_MS after its first snapshot.
+    SPAWN_TEST_TIMEOUT_MS + 2 * OPENCODE_SESSION_RETRY_MS,
   );
 
   it(

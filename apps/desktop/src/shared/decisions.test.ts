@@ -140,7 +140,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     };
   };
   const answer = (finding_key: string, over: Record<string, unknown> = {}) => ({
-    review: { reference: "PRB-1" },
+    review: { ticket_id: "ticket_1", reference: "PRB-1" },
     finding_key,
     decision: "decide",
     choice: "ship_as_is",
@@ -149,7 +149,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     ...over,
   });
   const settled = (attempts: unknown[], verdicts: unknown[]) =>
-    [...settledFindings({ ticket: { history: [] }, attempts: attempts as never, verdicts }).keys].sort();
+    [...settledFindings({ ticket: { ticket_id: "ticket_1", history: [] }, attempts: attempts as never, verdicts }).keys].sort();
 
   it("counts a standing answer that shipped it as it is, taken after the review", () => {
     expect(
@@ -170,10 +170,16 @@ describe("the findings a person's answers and the rounds since have settled", ()
       settled(
         [reviewed],
         [
-          answer("a", { review: { reference: "rev_0000000000000002" } }),
-          answer("b", { review: { reference: "rev_0000000000000001" } }),
+          answer("a", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000002" } }),
+          answer("b", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000001" } }),
         ],
       ),
+    ).toEqual(["a"]);
+  });
+
+  it("reads only the ticket's own answers, as perbo run reads them", () => {
+    expect(
+      settled([reviewed], [answer("a"), answer("b", { review: { ticket_id: "ticket_2", reference: "PRB-2" } })]),
     ).toEqual(["a"]);
   });
 
@@ -184,8 +190,8 @@ describe("the findings a person's answers and the rounds since have settled", ()
       settled(
         [{ ...reviewed, bundles: [another, own] }],
         [
-          answer("a", { review: { reference: "rev_0000000000000002" } }),
-          answer("b", { review: { reference: "rev_0000000000000001" }, decided_at: "2026-09-24T10:30:00.000Z" }),
+          answer("a", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000002" } }),
+          answer("b", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000001" }, decided_at: "2026-09-24T10:30:00.000Z" }),
         ],
       ),
     ).toEqual([]);
@@ -218,7 +224,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
       "test/extra.test.ts were not in the change set it was asked to narrow. " +
       "The contract's writes are admitted only under: `src/**`.";
     const standing = settledFindings({
-      ticket: { history: [] },
+      ticket: { ticket_id: "ticket_1", history: [] },
       attempts: [reviewed, verified(["a", "b"], ["a", "b"], refusal)] as never,
       verdicts: [],
     });
@@ -241,7 +247,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
 
   it("names no refusal where the last round's verification stopped on none", () => {
     const standing = settledFindings({
-      ticket: { history: [] },
+      ticket: { ticket_id: "ticket_1", history: [] },
       attempts: [reviewed, verified(["a"], ["a"], "scope: an earlier round's failure"), verified(["a"], ["a"], null)] as never,
       verdicts: [],
     });
@@ -278,14 +284,14 @@ describe("the questions a stalled refinement leaves, beside a declined finding",
     ],
   };
   const stalled = { at: "2026-09-24T09:20:00.000Z", note: gateClosedNote("remediation_stalled") };
-  const detail = (verdicts: unknown[], history: unknown[] = [stalled]) =>
-    ({ ticket: { history }, attempts: [reviewAttempt, declinedRound], verdicts }) as never;
-  const answer = (finding_key: string, choice: string) => ({
-    review: { reference: "PRB-1" },
+  const detail = (verdicts: unknown[], history: unknown[] = [stalled], rounds: unknown[] = []) =>
+    ({ ticket: { ticket_id: "ticket_1", history }, attempts: [reviewAttempt, declinedRound, ...rounds], verdicts }) as never;
+  const answer = (finding_key: string, choice: string, decided_at = "2026-09-24T09:30:00.000Z") => ({
+    review: { ticket_id: "ticket_1", reference: "PRB-1" },
     finding_key,
     decision: "decide",
     choice,
-    decided_at: "2026-09-24T09:30:00.000Z",
+    decided_at,
     superseded_at: null,
   });
 
@@ -301,5 +307,33 @@ describe("the questions a stalled refinement leaves, beside a declined finding",
     expect(owedOnRecord(detail([answer("y", "approach")]))).toEqual([]);
     expect(owedOnRecord(detail([answer("y", "ship_as_is")]))).toEqual([]);
     expect(owedOnRecord(detail([], []))).toEqual([]);
+  });
+
+  it("never asks a declined finding, not even for a principle where the reviewer named a person its closer", () => {
+    const humanClosed = { ...reviewAttempt, review: { ...reviewAttempt.review, findings: [finding({ key: "x", routing: "remediable", closure: "human" }), remediable("y")] } };
+    const asked = questionsOnRecord({ ticket: { ticket_id: "ticket_1", history: [stalled] }, attempts: [humanClosed, declinedRound], verdicts: [] } as never);
+    expect(asked.map((question) => question.id)).toEqual(["y"]);
+  });
+
+  it("asks again, and owes, a finding handed to a round that left it open, on the answer that round tried", () => {
+    // The person handed y on at 09:30, and the round given it at 09:40 left it open.
+    const leftOpen = {
+      review: null,
+      verification: { open_keys: ["y"], per_finding: [{ finding_key: "y" }], deterministic_failure: null },
+      bundles: [
+        {
+          kind: "review",
+          subject_id: "cv_att_3",
+          created_at: "2026-09-24T09:40:00.000Z",
+          inputs: { findings_given: "y", findings_open: "y" },
+        },
+      ],
+    };
+    const escalated = { at: "2026-09-24T09:45:00.000Z", note: gateClosedNote("escalated") };
+    const tried = detail([answer("y", "approach")], [stalled, escalated], [leftOpen]);
+    expect(questionsOnRecord(tried).map((question) => [question.id, question.choices.length])).toEqual([["y", 3]]);
+    expect(owedOnRecord(tried).map((question) => question.id)).toEqual(["y"]);
+    // Answered again after that round, it is handed on again.
+    expect(owedOnRecord(detail([answer("y", "approach", "2026-09-24T09:50:00.000Z")], [stalled, escalated], [leftOpen]))).toEqual([]);
   });
 });

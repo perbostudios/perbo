@@ -3,6 +3,7 @@
  * import nothing of Node: the desktop's sample host walks a ticket along the
  * same rows `transition` does, from `@perbo/contracts/browser`.
  */
+import { gateClosedNote } from "./retained.js";
 import type { Ticket, TicketState } from "./ticket.js";
 
 /**
@@ -94,6 +95,17 @@ export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
     from: "provisioning",
     to: "pr_open",
     when: (_ticket, note) => note.startsWith(DECIDED_DELIVERY_NOTE),
+  },
+  // D-132 beside D-065: the same delivery where a finding the executor
+  // declined is still open ends `escalated`, and lands where every escalated
+  // run lands, `changes_requested` on the row naming that outcome, with the
+  // pull request it published open on its delivery record. Nothing else ends
+  // `escalated` without a round, so no other walk from `provisioning` writes
+  // that note.
+  {
+    from: "provisioning",
+    to: "changes_requested",
+    when: (_ticket, note) => note === gateClosedNote("escalated"),
   },
   { from: "independent_review", to: "changes_requested" },
   // An attempt can terminate after its review — a ceiling reached on a

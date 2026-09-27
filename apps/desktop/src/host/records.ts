@@ -17,12 +17,15 @@ import {
   FINDING_ROUTINGS,
   ReviewDecisionSchema,
   costOf,
+  judgedCommit,
+  loopOnRecord,
   parseUnifiedDiff,
   rollCosts,
 } from "@perbo/contracts";
-import type { Cost, RecordedBundle, Ticket } from "@perbo/contracts";
+import type { Cost, PlanContract, RecordedBundle, Ticket } from "@perbo/contracts";
+import { ticketBranchStillAt } from "@perbo/workspace";
 import { assembleLiveGraph } from "../shared/graph-live.js";
-import { decisionQuestions, settledOnRecord, type SettledFindings } from "../shared/decisions.js";
+import { decisionQuestions, owedQuestions, settledOnRecord, type SettledFindings } from "../shared/decisions.js";
 import type { LiveCheck, LiveNodeInput, LiveReview } from "../shared/graph-live.js";
 import type {
   DecisionQuestion,
@@ -518,6 +521,7 @@ const StoredReviewSchema = z.looseObject({
 const FindingsOnRecordSchema = z.looseObject({
   review_id: z.string(),
   decision: ReviewDecisionSchema,
+  target: z.looseObject({ head_commit: z.string() }).optional(),
   findings: z.array(
     z.looseObject({
       key: z.string(),
@@ -559,19 +563,20 @@ export function findingsOnRecord(
 }
 
 /**
- * A ticket's last review as the loop reads it, and what is settled on it —
+ * A ticket's last review as the loop reads it, what is settled on it —
  * shipped as it is, closed by a round, and whether the loop has finished
- * trying it (`settledOnRecord`) — read from the files the loop and `perbo
- * verdict` wrote: the bundles, the verdicts record and the ticket's rows. What
- * a person's answer is checked against, and what Home counts the questions
- * of. Null where no review can be read.
+ * trying it (`settledOnRecord`) — and the commit it, or the last closure
+ * verification after it, judged (`judgedCommit`), read from the files the
+ * loop and `perbo verdict` wrote: the bundles, the verdicts record and the
+ * ticket's rows. What a person's answer is checked against, and what Home
+ * counts the questions of. Null where no review can be read.
  */
 export function reviewOnRecord(input: {
   bundles: readonly BundleManifest[];
   ticket: Pick<Ticket, "ticket_id" | "history">;
   objectsDirectory: string;
   verdictsPath: string;
-}): { review: FindingsOnRecord; settled: SettledFindings } | null {
+}): { review: FindingsOnRecord; settled: SettledFindings; judged: string | null } | null {
   const review = findingsOnRecord(input.bundles, input.ticket.ticket_id, input.objectsDirectory);
   if (review === null) return null;
   let verdicts: unknown[] = [];
@@ -581,18 +586,54 @@ export function reviewOnRecord(input: {
   } catch {
     // No record, or one `perbo inspect` reports: no answers stand.
   }
+  const recorded = input.bundles.flatMap((bundle) =>
+    bundle.ticket_id === input.ticket.ticket_id && bundle.created_at !== undefined
+      ? [{ kind: bundle.kind, subject_id: bundle.subject_id, created_at: bundle.created_at, inputs: bundle.inputs ?? {} } as RecordedBundle]
+      : [],
+  );
   const settled = settledOnRecord({
+    ticket_id: input.ticket.ticket_id,
     review_id: review.review_id,
-    bundles: input.bundles.flatMap((bundle) =>
-      bundle.ticket_id === input.ticket.ticket_id && bundle.created_at !== undefined
-        ? [{ kind: bundle.kind, subject_id: bundle.subject_id, created_at: bundle.created_at, inputs: bundle.inputs ?? {} } as RecordedBundle]
-        : [],
-    ),
+    bundles: recorded,
     history: input.ticket.history,
     verdicts,
     verification: null,
   });
-  return { review, settled };
+  const onRecord = loopOnRecord({ review_id: review.review_id, bundles: recorded, history: input.ticket.history });
+  const judged =
+    onRecord === null || review.target === undefined ? null : judgedCommit(review.target.head_commit, onRecord.verifications);
+  return { review, settled, judged };
+}
+
+/**
+ * The questions a run of the ticket would be refused for (D-132): those its
+ * record owes the person (`owedQuestions`), while its branch is still at the
+ * commit its review, or the last closure verification after it, judged, read
+ * as the loop reads it (`ticketBranchStillAt`) from the delivery record's
+ * branch, the last attempt's, or the one the loop mints. A branch that has
+ * moved, a person's own commit on it included, is reviewed afresh, and a run
+ * of it owes nothing. The contract page offers Answer in place of Start the
+ * loop on this (`Detail.owed`), and the host refuses a run on it.
+ */
+export async function owedOnBranch(input: {
+  onRecord: { review: FindingsOnRecord; settled: SettledFindings; judged: string | null } | null;
+  ticket: Pick<Ticket, "key" | "ticket_id" | "delivery">;
+  contract: Pick<PlanContract, "outcome">;
+  attemptsPath: string;
+  resolveCommit: (ref: string) => Promise<string | null>;
+}): Promise<DecisionQuestion[]> {
+  const { onRecord } = input;
+  const owed = owedQuestions(onRecord?.review ?? null, onRecord?.settled);
+  if (owed.length === 0 || onRecord?.judged == null) return [];
+  const still = await ticketBranchStillAt({
+    resolveCommit: input.resolveCommit,
+    recorded: { delivery: input.ticket.delivery.branch, attempt: readAttempts(input.attemptsPath).attempts.at(-1)?.branch },
+    ticket_key: input.ticket.key,
+    ticket_id: input.ticket.ticket_id,
+    outcome: input.contract.outcome,
+    commit: onRecord.judged,
+  });
+  return still ? owed : [];
 }
 
 /**

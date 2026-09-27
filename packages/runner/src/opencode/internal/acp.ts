@@ -316,7 +316,12 @@ export class OpenCodeExecutorSession {
     });
     await awaitOpenCodeModel({
       model,
-      scratch: () => mkdtempSync(join(this.root, "catalogue-")),
+      // The root goes once the child has, so a child gone during the wait
+      // between snapshots is answered with why it went.
+      scratch: () => {
+        if (this.failure) throw this.failure;
+        return mkdtempSync(join(this.root, "catalogue-"));
+      },
       request: (method, params) => this.request(method, params),
       refused: (error) => error instanceof Error && this.openCodeRefusals.has(error),
     });
@@ -326,8 +331,8 @@ export class OpenCodeExecutorSession {
         opened = await this.request("session/new", { cwd, mcpServers: [] });
         break;
       } catch (error) {
-        if (!(error instanceof Error && this.openCodeRefusals.has(error)) || attempt + 1 >= OPENCODE_SESSION_ATTEMPTS || this.closed)
-          throw error;
+        const refused = error instanceof Error && this.openCodeRefusals.has(error);
+        if (!refused || attempt + 1 >= OPENCODE_SESSION_ATTEMPTS || this.closed) throw error;
         await new Promise((resolve) => setTimeout(resolve, OPENCODE_SESSION_RETRY_MS));
       }
     }

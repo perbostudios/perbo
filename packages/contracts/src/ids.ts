@@ -43,6 +43,27 @@ export const CommitShaSchema = z
   .string()
   .regex(/^[0-9a-f]{7,40}$/, "commit must be a 7-40 character lowercase hex sha");
 
+/**
+ * Whether two recorded commit shas name the same commit.
+ *
+ * A contract may pin an abbreviated sha and a bundle records the resolved one,
+ * so equality alone would refuse a resume that is perfectly in order. Git's own
+ * abbreviation rule — a prefix identifies one commit in the repository — is
+ * what makes the prefix comparison the right one rather than a loosening.
+ *
+ * The rule holds only for a prefix long enough to be an abbreviation. Git will
+ * not print one shorter than seven characters, and `CommitShaSchema` is where
+ * this repository already states that floor; anything below it is a string that
+ * happens to start the same way, and `0` or `00` would match half the commits
+ * in a repository. Neither side is compared until it has passed that schema, so
+ * a bundle recording a truncated base is not silently read as a match.
+ */
+export function sameCommit(one: string, other: string): boolean {
+  if (!CommitShaSchema.safeParse(one).success) return false;
+  if (!CommitShaSchema.safeParse(other).success) return false;
+  return one.startsWith(other) || other.startsWith(one);
+}
+
 export const ContextManifestHashSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, "context manifest hash must be sha256:<64 hex>");

@@ -5,6 +5,7 @@ import {
   type PlanContractWithCriteria,
   type SecretIndex,
   type VerifiedCommit,
+  sameCommit,
 } from "@perbo/contracts";
 import {
   cleanup,
@@ -17,7 +18,7 @@ import { recordedBaseVerification, specCommitOnRecord } from "../../attempts.js"
 import { sweepWorktree } from "./orphans.js";
 import { readPrinciples, readPrinciplesFile } from "../../principles.js";
 import { buildPermissionProfile } from "../../profile.js";
-import { RETAINED_DIFF_ARTIFACT, ResumeRefusedError, sameCommit } from "../../resume.js";
+import { RETAINED_DIFF_ARTIFACT, ResumeRefusedError } from "../../resume.js";
 import { headCommit } from "../../seal.js";
 import { commitSpec } from "../../spec-commit.js";
 import type { TicketRunConfig } from "./config.js";

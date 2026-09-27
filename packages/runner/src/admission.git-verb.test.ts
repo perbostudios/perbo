@@ -58,6 +58,8 @@ const UNKNOWN = [
   "git x main --help",
   "git $VERB main",
   "V=log; git $V",
+  // An escaped quote in a global option's value opens nothing, so it hides no verb after it.
+  "git -c core.x=\\' x \\'",
   "git --weird log",
   // Verbs a git later than the table's adds: refused until the table names them.
   "git replay --onto main HEAD~1",
