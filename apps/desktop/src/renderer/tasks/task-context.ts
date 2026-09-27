@@ -390,15 +390,11 @@ const RUN_OUTCOME_SENTENCES: Record<string, string> = {
  * beside the outcome sentences they stand for.
  */
 const NOTHING_ASKED = {
-  /** The executor declined what was left (D-065), as the attempts record it: answered by a principle, not on the card. */
-  declined: {
-    text: "The executor declined the findings left open, saying no practice determines them.",
-    detail:
-      "The executor declined the findings left open, saying no practice determines them; its reasons are on the " +
-      "round record. A declined finding takes no answer on the decision card: `perbo principle add` records " +
-      "your answer in .perbo/principles.md, which the executor reads on the next run.",
-  },
-  /** An escalation with nothing declined and nothing on the record for the person, as an incomplete review's can be. */
+  /**
+   * An escalation with nothing on the record for the person, as an incomplete
+   * review's can be. A finding the executor declined is always one: it is put
+   * to them on the decision card (D-065, D-132), so the run is a pause.
+   */
   escalated: {
     text: "The review escalated the run, and put nothing on its record to you.",
     detail:
@@ -427,27 +423,20 @@ const rowWords = (entry: Pick<Detail["ticket"]["history"][number], "note" | "to"
 /**
  * Why a ticket whose last run closed the gate stopped, where the record puts
  * no question to the person: that its review could not be read; for an
- * escalation, that the executor declined what was left where an attempt since
- * the review records declines, and otherwise that the review put nothing to
- * them; for any other outcome, its row's outcome in Perbo's words and that
- * nothing is left to answer. Null where its last row is not such a run's end.
+ * escalation, that the review put nothing to them; for any other outcome, its
+ * row's outcome in Perbo's words and that nothing is left to answer. Null
+ * where its last row is not such a run's end.
  */
 export function gateClosedReasons(
   history: Detail["ticket"]["history"],
-  attempts: readonly Pick<AttemptView, "review" | "declines">[],
+  attempts: readonly Pick<AttemptView, "review">[],
 ): StopReason[] | null {
   const last = history.at(-1);
   if (last === undefined || !last.note.startsWith(gateClosedNote(""))) return null;
   const outcome = runEndedOn(last.note);
   if (outcome === null) return null;
-  const reviewed = attempts.findLastIndex((attempt) => attempt.review !== null);
-  if (reviewed === -1) return [NOTHING_ASKED.unreadable];
-  if (outcome === "escalated")
-    return [
-      attempts.slice(reviewed).some((attempt) => (attempt.declines ?? []).length > 0)
-        ? NOTHING_ASKED.declined
-        : NOTHING_ASKED.escalated,
-    ];
+  if (!attempts.some((attempt) => attempt.review !== null)) return [NOTHING_ASKED.unreadable];
+  if (outcome === "escalated") return [NOTHING_ASKED.escalated];
   const text = outcomeSentence(outcome);
   return [
     {
@@ -502,14 +491,18 @@ const DecidedSchema = z.object({
   finding_key: z.string(),
   decision: z.literal("decide"),
   choice: z.enum(DECISION_CHOICES),
-  note: z.string().nullable(),
+  note: z.string().nullable().optional(),
   decided_at: z.string(),
+  superseded_at: z.string().nullable().optional(),
 });
 /** Answers taken this close together were given at one sitting, as the decision screen records them. */
 const ONE_SITTING_MS = 5 * 60_000;
 /**
  * The person's decisions, each sitting one step at the time it was taken:
- * how many findings it answered, with each answer behind the `i`.
+ * how many findings it answered, with each answer behind the `i`. A sitting
+ * stays a step whatever came after it — a later answer that replaced one of
+ * its answers, a fresh review — so the page keeps saying what the person
+ * decided and when (D-132).
  */
 function decisionSteps(verdicts: readonly unknown[]): (LoopStep & { key: string })[] {
   const rows = verdicts
@@ -517,14 +510,23 @@ function decisionSteps(verdicts: readonly unknown[]): (LoopStep & { key: string 
       const parsed = DecidedSchema.safeParse(row);
       return parsed.success ? [parsed.data] : [];
     })
-    .sort((left, right) => Date.parse(left.decided_at) - Date.parse(right.decided_at));
+    // In the order they were given; of two answers to one finding at one
+    // moment, the one a later answer did not replace comes last.
+    .sort(
+      (left, right) =>
+        Date.parse(left.decided_at) - Date.parse(right.decided_at) ||
+        Number(left.superseded_at === null) - Number(right.superseded_at === null),
+    );
   const sittings: (typeof rows)[] = [];
   for (const row of rows) {
     const sitting = sittings.at(-1);
     const last = sitting?.at(-1);
-    if (sitting !== undefined && last !== undefined && Date.parse(row.decided_at) - Date.parse(last.decided_at) <= ONE_SITTING_MS)
+    if (sitting !== undefined && last !== undefined && Date.parse(row.decided_at) - Date.parse(last.decided_at) <= ONE_SITTING_MS) {
+      // A finding answered again at the same sitting is one answer: the one that stands.
+      const again = sitting.findIndex((earlier) => earlier.finding_key === row.finding_key);
+      if (again !== -1) sitting.splice(again, 1);
       sitting.push(row);
-    else sittings.push([row]);
+    } else sittings.push([row]);
   }
   const said = (row: (typeof rows)[number]): string =>
     row.choice === "ship_as_is"
@@ -565,6 +567,7 @@ export function loopSteps(input: {
   jobs: readonly Job[];
   active: Job | undefined;
   attempts: readonly AttemptView[];
+  /** The verdicts record's rows (`Detail.verdicts`): each sitting at which the person answered is a step. */
   verdicts: readonly unknown[];
   log: StageLog;
   now: string;

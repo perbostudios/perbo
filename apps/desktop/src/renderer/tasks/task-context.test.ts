@@ -925,3 +925,34 @@ describe("how a run ended, in the steps", () => {
     }
   });
 });
+
+describe("a person's answers, in the steps", () => {
+  it("lists a sitting once, at the time its last answer was given, each finding once in the words that stand, and never an endorsement", () => {
+    const answer = (over: Record<string, unknown>) => ({
+      review: { reference: "PRB-20" },
+      finding_key: "e".repeat(64),
+      decision: "decide",
+      choice: "approach",
+      note: "Add a test script that runs the suite.",
+      decided_at: "2026-09-27T17:40:00.000Z",
+      superseded_at: null,
+      ...over,
+    });
+    const steps = loopSteps({
+      history: [],
+      jobs: [],
+      active: undefined,
+      attempts: [],
+      log: new StageLog(),
+      now: "2026-09-27T18:00:00.000Z",
+      verdicts: [
+        answer({}),
+        answer({ finding_key: "a".repeat(64), choice: "ship_as_is", note: "Ship it.", decided_at: "2026-09-27T17:41:00.000Z" }),
+        answer({ note: "An earlier answer.", superseded_at: "2026-09-27T17:40:00.000Z" }),
+        answer({ decision: "endorse", choice: undefined }),
+      ],
+    });
+    expect(steps.map(({ text, at }) => [text, at])).toEqual([["You answered 2 findings", "2026-09-27T17:41:00.000Z"]]);
+    expect(steps[0]!.reason).toBe("1. Your approach: Add a test script that runs the suite.\n2. Ship as it is.");
+  });
+});

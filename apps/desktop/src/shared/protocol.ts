@@ -1689,10 +1689,10 @@ export interface AttemptView {
   verification: unknown;
   /**
    * The findings this attempt's executor declined as having no determinable
-   * practice (D-065), by key, as `perbo inspect` reads them. Absent where the
-   * records it was read from do not say.
+   * practice (D-065), each with the reason it gave, as the attempt's record
+   * holds them. Absent where the records it was read from do not say.
    */
-  declines?: readonly string[];
+  declines?: readonly { finding_key: string; reason: string }[];
   bundles: RunBundle[];
 }
 export interface Detail {
@@ -1746,6 +1746,13 @@ export interface DecisionQuestion {
   id: string;
   title: string;
   context: string;
+  /**
+   * The executor's own reasons for declining the finding since the review
+   * (D-065), each whole and as the record holds it, redacted: shown to the
+   * person as data beside the question, never an instruction. Empty where it
+   * declined nothing.
+   */
+  declined: readonly string[];
   /**
    * The answers the finding takes (D-132);
    * none where the question takes the person's words for a principle alone.

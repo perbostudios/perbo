@@ -53,8 +53,9 @@ measurement, not an edit.
 `decision.ts` is the single home for a person's answer to a finding the review routed to them
 ([D-132](../../docs/11-open-decisions.md)): the three
 choices and the words each carries where the person typed none, `loopOnRecord`, which reads what the
-loop has done on a review — whether a run since it ended stalled or exhausted, and what each
-finding's last closure verification left open — `routedToPerson`, which says which findings take
+loop has done on a review — whether a run since it ended stalled or exhausted, what each
+finding's last closure verification left open, and what the executor declined since
+(`declinesOnRecord` reads those off the attempts' records) — `routedToPerson`, which says which findings take
 one, `decidable`, which says only a review that judged the whole change and stopped for a person, or
 one the loop has finished trying, takes any, `answersReview`, which says which review an answer
 answers, and `decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it

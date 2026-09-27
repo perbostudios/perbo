@@ -219,7 +219,13 @@ function record(
  * verification that was given `given` and left `open` open, recorded under
  * the round's own attempt as the loop records it.
  */
-function verified(dir: string, round: number, given: readonly string[], open: readonly string[]): void {
+function verified(
+  dir: string,
+  round: number,
+  given: readonly string[],
+  open: readonly string[],
+  declines: readonly { finding_key: string; reason: string }[] = [],
+): void {
   const ticket_id = readTicket(dir, "PRB-1").ticket_id;
   const attempts = join(dir, "state", `${ticket_id}.attempts.json`);
   const prior = JSON.parse(readFileSync(attempts, "utf8")).attempts;
@@ -232,7 +238,10 @@ function verified(dir: string, round: number, given: readonly string[], open: re
     changeset_id: `cs_options0000${round}`,
     head_commit: "b2c3d4e",
   });
-  writeFileSync(attempts, `${JSON.stringify({ ticket_id, attempts: [...prior, attempt] }, null, 2)}\n`);
+  writeFileSync(
+    attempts,
+    `${JSON.stringify({ ticket_id, attempts: [...prior, { ...attempt, declines: [...declines] }] }, null, 2)}\n`,
+  );
   new BundleStore({ root: join(dir, "bundles"), retainContext: true }).write({
     kind: "review",
     subject_id: `cv_${attempt.attempt_id}`,
@@ -402,6 +411,22 @@ describe("perbo options", () => {
     ended(dir, "remediation_stalled");
     const asked = await ask(repo, [DEAD_LETTER], scripted([submits({ answers: [{ finding: 1, options: offered }] })]));
     expect(asked.printed.findings).toEqual([{ finding_key: DEAD_LETTER, options: offered }]);
+    await expect(ask(repo, [WHO_IS_TOLD], unreachable())).rejects.toThrow(/not a finding the review left for a person/);
+  });
+
+  it("offers answers to a finding the executor declined, and still refuses one its round closed (D-065)", async () => {
+    const declined = finding({ key: DEAD_LETTER, routing: "remediable", closure: "executor", blocking: false });
+    const closed = finding({ key: WHO_IS_TOLD, routing: "remediable", closure: "executor", blocking: false });
+    const { repo, dir } = await reviewed([declined, closed], "rev_options0001", "remediable");
+    verified(dir, 2, [WHO_IS_TOLD], [], [{ finding_key: DEAD_LETTER, reason: "A person decides where a failed email goes." }]);
+    ended(dir, "escalated");
+    const model = scripted([submits({ answers: [{ finding: 1, options: offered }] })]);
+    const asked = await ask(repo, [DEAD_LETTER], model);
+    expect(asked.printed.findings).toEqual([{ finding_key: DEAD_LETTER, options: offered }]);
+    // The Architect reads the executor's reason beside the finding, as data.
+    expect(String(model.requests[0]!.messages[0]!.content)).toContain(
+      "The executor declined it: A person decides where a failed email goes.",
+    );
     await expect(ask(repo, [WHO_IS_TOLD], unreachable())).rejects.toThrow(/not a finding the review left for a person/);
   });
 

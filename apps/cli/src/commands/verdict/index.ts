@@ -10,6 +10,7 @@ import {
   decidable,
   decisionChoicesFor,
   egressQuestionsPath,
+  declinesOnRecord,
   loopOnRecord,
   NOTHING_TRIED,
   routedToPerson,
@@ -410,12 +411,13 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
   const report = buildReportForSubject({ storeDirectory: dir, subject, attempt: null });
   const history = subject.kind === "ticket" ? readTicket(dir, subject.ticket).history : [];
   const bundles = report.attempts.flatMap((attempt) => attempt.bundles);
+  const declines = declinesOnRecord(report.attempts.map((attempt) => attempt.record));
   for (const attempt of report.attempts) {
     const review = attempt.review;
     const loop =
       review === null
         ? NOTHING_TRIED
-        : (loopOnRecord({ review_id: review.review_id, bundles, history })?.loop ?? NOTHING_TRIED);
+        : (loopOnRecord({ review_id: review.review_id, bundles, history, declines })?.loop ?? NOTHING_TRIED);
     for (const finding of review?.findings ?? []) {
       found.set(finding.key, {
         finding_key: finding.key,
@@ -433,9 +435,11 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         finding_key: decline.finding_key,
         rule_id: prior?.rule_id ?? DECLINED_RULE_UNRECORDED,
         routing: "declined",
-        to_person: false,
-        review_decision: null,
-        decidable: null,
+        // A decline is the executor's; whether the person answers it is the
+        // review's finding's, as the loop reads it (D-132).
+        to_person: prior?.to_person ?? false,
+        review_decision: prior?.review_decision ?? null,
+        decidable: prior?.decidable ?? null,
         source: prior?.source ?? "the executor's decline",
       });
     }

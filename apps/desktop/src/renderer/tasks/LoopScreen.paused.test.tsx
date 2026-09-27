@@ -6,6 +6,7 @@ import { egressQuestionLine, egressSettledLine } from "@perbo/contracts";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Detail, Job, Snapshot } from "../../shared/protocol.js";
 import { LoopScreen } from "./LoopScreen.js";
+import { projectTicket } from "./ticket-workspace.js";
 import type { TaskContext } from "./task-context.js";
 
 /**
@@ -316,5 +317,132 @@ describe("a refinement that stalled", () => {
     expect(document.querySelector(".stage-labels .current")?.textContent).not.toBe("decisions required");
     expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
     expect(context.show).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * PRB-20 as the founder met it: run 2's review routed two findings to the
+ * executor; its remediation round closed one and declined the other with its
+ * reason, and the run ended `escalated`. The declined finding is the person's
+ * (D-065, D-132): one question, the executor's reason shown whole beside it,
+ * the three answers and the Architect's, Answer the primary, Home yellow.
+ */
+describe("a finding the executor declined", () => {
+  const CLOSED = "a290b79c1b37b7f3837d19ff6a3ddddfb40c880028a0a7af15318a26a718d023";
+  const DECLINED = "e940ee937342ca444e740ffde3687a027eacee182bd4818a11181e14e79a8390";
+  const REASON =
+    "A person must decide whether review should run `node --test tests/flappy.test.mjs` itself, which needs a CI job " +
+    "or a test script outside this ticket's allowed files, or accept the committed TAP record.";
+
+  /** PRB-20's detail after run 2: its review, the round that closed one and declined one, and the row it wrote. */
+  function declinedDetail(): Detail {
+    const detail = structuredClone(sample.detail);
+    const template = detail.attempts[0]!;
+    const finding = template.review!.findings[0]!;
+    const review = {
+      ...template.review!,
+      review_id: "rev_23a5fd52e1b1d056",
+      decision: "remediable" as const,
+      findings: [CLOSED, DECLINED].map((key, at) => ({
+        ...finding,
+        key,
+        rule_id: "verification.execution_missing",
+        routing: "remediable" as const,
+        closure: "executor" as const,
+        blocking: false,
+        status: "open" as const,
+        statement: at === 0 ? "The flappy test has no recorded run." : "No execution result establishes the flappy test.",
+      })),
+    };
+    const bundle = (subject_id: string, created_at: string, inputs: Record<string, string>) =>
+      ({
+        bundle_id: `bundle_${subject_id}`,
+        kind: "review",
+        subject_id,
+        created_at,
+        inputs,
+        artifacts: [],
+        usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
+      }) as never;
+    detail.attempts = [
+      {
+        ...template,
+        id: "att_dc9cf2f4bbabade7",
+        round: 0,
+        startedAt: "2026-09-27T17:18:09.500Z",
+        review,
+        declines: [],
+        bundles: [bundle(review.review_id, "2026-09-27T17:22:52.274Z", {})],
+      },
+      {
+        ...template,
+        id: "att_1475c2842fb5ae56",
+        round: 1,
+        startedAt: "2026-09-27T17:22:52.300Z",
+        review: null,
+        reviewDecision: null,
+        declines: [{ finding_key: DECLINED, reason: REASON }],
+        verification: {
+          all_closed: true,
+          deterministic_failure: null,
+          open_keys: [],
+          per_finding: [{ finding_key: CLOSED, status: "closed", pointer: "" }],
+        },
+        bundles: [bundle("cv_att_1475c2842fb5ae56", "2026-09-27T17:27:32.945Z", { findings_given: CLOSED, findings_open: "" })],
+      },
+    ];
+    detail.ticket.state = "changes_requested";
+    detail.ticket.history = [
+      ...detail.ticket.history,
+      { at: "2026-09-27T17:27:33.112Z", from: "independent_review", to: "changes_requested", note: "the gate closed: escalated" },
+    ];
+    detail.verdicts = [];
+    return detail;
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it("asks it as one question, the executor's reason whole beside it, with the three answers and Answer primary", () => {
+    const request = vi.spyOn(sampleBridge, "request").mockImplementation((async () => new Promise(() => undefined)) as never);
+    const detail = declinedDetail();
+    const workspace = structuredClone(sample.workspace);
+    workspace.refreshingRepos = [];
+    workspace.jobs = [
+      {
+        id: "run-20",
+        repoId: sample.repoId,
+        key: "PRB-412",
+        kind: "run",
+        label: "Run engineering loop",
+        state: "completed",
+        outcome: "escalated",
+        startedAt: "2026-09-27T17:18:09.326Z",
+        endedAt: "2026-09-27T17:27:34.000Z",
+        log: "",
+        error: null,
+        resultKey: null,
+        result: null,
+      },
+    ];
+    render(
+      <QueryClientProvider client={client}>
+        <LoopScreen workspace={workspace} detail={detail} repoId={sample.repoId} navigate={vi.fn()} show={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("heading", { name: "Paused for a decision" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+    expect(dialog.textContent).toContain("1 of 1");
+    expect(within(dialog).getByRole("heading", { name: "No execution result establishes the flappy test." })).toBeTruthy();
+    expect(dialog.querySelector(".decision-declined p")?.textContent).toBe(REASON);
+    expect(within(dialog).getByRole("textbox", { name: "Your approach" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Let it decide" })).toBeTruthy();
+    expect(within(dialog).getByRole("radio", { name: /^Ship as it is/ })).toBeTruthy();
+    const options = request.mock.calls.map(([call]) => call).filter((call) => call.kind === "decisionOptions");
+    expect(options).toEqual([{ kind: "decisionOptions", repoId: sample.repoId, key: "PRB-412", findings: [DECLINED] }]);
+    const row = [...document.querySelector(".loop-actions")!.querySelectorAll("button")];
+    expect(row.at(-1)!.textContent).toBe("Answer");
+    expect(row.at(-1)!.className).toMatch(/primary/);
+    const row412 = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
+    const projected = projectTicket(workspace, { ...row412, ticket: detail.ticket }, detail);
+    expect([projected.tone, projected.paused, projected.recoverable]).toEqual(["yellow", true, false]);
   });
 });

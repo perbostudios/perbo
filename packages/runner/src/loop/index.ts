@@ -30,7 +30,9 @@ import {
   attemptsThatSealed,
   branchStillAt,
   confirmContinuation,
+  answersBefore,
   decidedDelivery,
+  declinesOfRecord,
   decisionsOn,
   remediationToContinue,
   stillWithPerson,
@@ -349,6 +351,9 @@ async function runLockedTicket(
   let detail = "";
   const decided = args.decided ?? [];
   const history = args.history ?? [];
+  // D-065: what the executor declined on this ticket's earlier attempts, which
+  // makes a finding the person's once it has.
+  const declines = declinesOfRecord(priorAttempts);
   let decidedOn: DecidedFinding[] = [];
 
   // D-132: a delivery on a person's
@@ -363,6 +368,7 @@ async function runLockedTicket(
           repository_id: contract.scope.repository_id,
           decided,
           history,
+          declines,
         });
   const delivering =
     decidedNow !== null &&
@@ -391,7 +397,7 @@ async function runLockedTicket(
   const continuing =
     resumeSource !== null || config.relevel || delivering !== null
       ? null
-      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided, history });
+      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided, history, declines });
   if (continuing !== null) {
     progress(
       `${config.ticket_key}'s last review left ${continuing.findings.length} finding(s) open on ` +
@@ -407,7 +413,13 @@ async function runLockedTicket(
    * one more attempt of it is bought, or the round is re-entered as the
    * resolution of a base conflict — so the loop cannot spin.
    */
-  let state = initialRoundState(workspace, continuing);
+  let state = initialRoundState(
+    workspace,
+    continuing,
+    resumeSource !== null || config.relevel || delivering !== null
+      ? []
+      : answersBefore({ bundles, ticket_id: contract.ticket_id, decided, history, declines }),
+  );
   if (delivering !== null) {
     decidedOn = delivering.decided;
     state = { ...state, finalReview: delivering.review, nodeReviews: delivering.node_reviews };

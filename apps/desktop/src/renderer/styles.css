@@ -1872,6 +1872,17 @@ textarea {
 .decision-intro .section-label {
   margin-bottom: 8px;
 }
+/* The executor's reason for declining a finding (D-065): its words, shown whole,
+   set apart from the question as data. */
+.decision-declined {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+.decision-declined p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .decision-question {
   font-size: calc(19px * var(--text-scale));
   font-weight: 600;

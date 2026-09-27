@@ -71,7 +71,7 @@ function writeVerification(
 
 describe("the remediation a re-run continues", () => {
   it("has nothing to continue where no review is on record", () => {
-    expect(remediationToContinue({ bundles: store(), ticket_id: TICKET, decided: [], history: [] })).toBeNull();
+    expect(remediationToContinue({ bundles: store(), ticket_id: TICKET, decided: [], history: [], declines: [] })).toBeNull();
   });
 
   it("continues what the verifications left open, from the commit the last one judged", () => {
@@ -89,7 +89,7 @@ describe("the remediation a re-run continues", () => {
       "2026-08-27T01:00:00.000Z",
     );
 
-    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] });
+    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [], declines: [] });
 
     expect(continuing?.findings.map((entry) => entry.key)).toEqual([open.key]);
     expect(continuing?.head_commit).toBe("fed4321");
@@ -103,7 +103,7 @@ describe("the remediation a re-run continues", () => {
       "2026-08-27T00:00:00.000Z",
     );
 
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] })?.head_commit).toBe("def5678");
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [], declines: [] })?.head_commit).toBe("def5678");
   });
 
   it("refuses a verification that never recorded what was still open", () => {
@@ -115,7 +115,7 @@ describe("the remediation a re-run continues", () => {
     );
     writeVerification(bundles, { head_commit: "fed4321" }, "2026-08-27T01:00:00.000Z");
 
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] })).toBeNull();
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [], declines: [] })).toBeNull();
   });
 });
 
@@ -136,7 +136,7 @@ describe("the delivery a person's answers take without a round", () => {
     decided_at: at,
   });
   const delivery = (bundles: BundleStore, at: string) =>
-    decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [answer(at)], history: [] });
+    decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [answer(at)], history: [], declines: [] });
 
   it("counts a finding the executor closed, as a verification recorded it, beside the answered one", () => {
     const bundles = store();
@@ -205,7 +205,7 @@ describe("the delivery a person's answers take without a round", () => {
     );
     const at = "2026-08-27T02:00:00.000Z";
     const both = [answer(at), { ...answer(at), finding_key: remediable.key }];
-    expect(decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: both, history: [] })).toBeNull();
+    expect(decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: both, history: [], declines: [] })).toBeNull();
   });
 
   it("delivers nothing where no standing finding was answered by a person", () => {
@@ -244,6 +244,7 @@ describe("the delivery a person's answers take without a round", () => {
         repository_id: "repo_fixture",
         decided: [{ ...answer("2026-08-27T02:00:00.000Z"), review_id }],
         history: [],
+        declines: [],
       });
     expect(named("rev_0000000000000001")).toBeNull();
     expect(named("rev_0000000000000002")?.decided).toHaveLength(1);
@@ -260,11 +261,11 @@ describe("the delivery a person's answers take without a round", () => {
       { findings_given: forPerson.key, findings_open: "", head_commit: "fed4321" },
       "2026-08-27T02:00:00.000Z",
     );
-    const again = decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed], history: [] });
+    const again = decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed], history: [], declines: [] });
     expect(again?.head_commit).toBe("fed4321");
     expect(again?.decided).toEqual([handed]);
     expect(again?.review.findings[0]).toMatchObject({ status: "resolved", outcome: "fixed" });
-    expect(judgedOnRecord({ bundles, ticket_id: TICKET, history: [] })?.head_commit).toBe("fed4321");
+    expect(judgedOnRecord({ bundles, ticket_id: TICKET, history: [], declines: [] })?.head_commit).toBe("fed4321");
   });
 
   it("does not hand a finding a round verified closed to the executor again", () => {
@@ -282,9 +283,9 @@ describe("the delivery a person's answers take without a round", () => {
       "2026-08-27T02:00:00.000Z",
     );
     const shipped = { ...answer("2026-08-27T03:00:00.000Z"), finding_key: other.key };
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [handed, shipped], history: [] })).toBeNull();
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [handed, shipped], history: [], declines: [] })).toBeNull();
     expect(
-      decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed, shipped], history: [] })
+      decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed, shipped], history: [], declines: [] })
         ?.decided.map((row) => row.choice),
     ).toEqual(["approach", "ship_as_is"]);
   });
@@ -317,7 +318,7 @@ describe("the delivery a person's answers take without a round", () => {
         }),
         "2026-08-27T00:00:00.000Z",
       );
-      const input = { bundles, ticket_id: TICKET, decided: [handed], history: [] };
+      const input = { bundles, ticket_id: TICKET, decided: [handed], history: [], declines: [] };
       return {
         continuing: remediationToContinue(input),
         delivered: decidedDelivery({ ...input, repository_id: "repo_fixture" }),
