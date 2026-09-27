@@ -42,19 +42,19 @@ describe("the loop page, live from the run's log and rebuilt from its records", 
 
   it("lists the same stages, in the same order and with the same detail, once the run has ended", () => {
     const shown = (steps: ReturnType<typeof loopSteps>) => steps.map(({ text, reason }) => ({ text, reason }));
-    const during = loopSteps({ history: [], jobs: [live], active: live, attempts: [], log: new StageLog(), now: "2026-09-27T00:37:40.000Z" });
-    const after = loopSteps({ history: [], jobs: [ended], active: undefined, attempts, log: new StageLog(), now: "2026-09-27T00:39:00.000Z" });
+    const during = loopSteps({ history: [], jobs: [live], active: live, attempts: [], verdicts: [], log: new StageLog(), now: "2026-09-27T00:37:40.000Z" });
+    const after = loopSteps({ history: [], jobs: [ended], active: undefined, attempts, verdicts: [], log: new StageLog(), now: "2026-09-27T00:39:00.000Z" });
     expect(attempts).toHaveLength(2);
     expect(shown(during).map(({ text }) => text).reverse()).toEqual([
       "Provisioning the worktree",
       "Executing",
       "Sealing the change set",
       "Running check unit",
-      "Review round 1",
+      "Independent review",
       "Refinement round 1",
       "Sealing the change set",
       "Running check unit",
-      "Verifying closures",
+      "Verification",
     ]);
     // The same list: every stage, and a review round's count of what it left open.
     // A check's result is on its record and not on the line announcing it, so
@@ -63,7 +63,7 @@ describe("the loop page, live from the run's log and rebuilt from its records", 
     expect(shown(after).map(({ text, reason }) => (text.startsWith("Running check") ? null : reason))).toEqual(
       shown(during).map(({ reason }) => reason),
     );
-    expect(shown(during).find(({ text }) => text === "Review round 1")?.reason).toBe("The review left one finding open.");
+    expect(shown(during).find(({ text }) => text === "Independent review")?.reason).toBe("The review left one finding open.");
     for (const { text, reason } of shown(after).filter(({ text }) => text.startsWith("Running check")))
       expect(reason, text).toMatch(/^Result: passed\./);
   });

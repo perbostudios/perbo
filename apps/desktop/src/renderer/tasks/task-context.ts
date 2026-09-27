@@ -1,7 +1,8 @@
-import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, type Cost } from "@perbo/contracts/browser";
+import { z } from "zod";
+import { costOf, DECISION_CHOICES, formatUsd, gateClosedNote, rollCosts, runEndedOn, type Cost } from "@perbo/contracts/browser";
 import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
-import { ATTEMPT_STARTS, runnerStages, runnerTally, spokenByAttempt, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
+import { ATTEMPT_STARTS, overTheTicket, runnerStages, runnerTally, spokenByAttempt, spokenWords, verificationWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
 import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
@@ -308,11 +309,12 @@ export function stageWords(stage: RunnerStage): string {
       return "Sealing the change set";
     case "check":
       return `Running check ${stage.name}`;
-    // The runner counts its rounds from 0; a person counts reviews from 1.
+    // A run's first review is the review; a later one verifies a refinement,
+    // as a closure verification does, said with its pass (`overTheTicket`).
     case "review":
-      return `Review round ${stage.round + 1}`;
+      return stage.round === 0 ? "Independent review" : verificationWords(stage.round);
     case "verify":
-      return "Verifying closures";
+      return verificationWords(stage.round);
     case "delivery":
       return "Opening the pull request";
     // D-137: the pause, and how it ended.
@@ -460,19 +462,28 @@ export function gateClosedReasons(
 /** The ticket states a run moves through, so a move from one of them to `pr_open` is the run's own delivery. */
 const RUN_STATES = new Set(["provisioning", "executing", "verifying", "independent_review"]);
 
+/** One stage the steps list, before the ticket's count words it. */
+interface Stage {
+  stage: RunnerStage;
+  reason: string | null;
+  at: string | null;
+  /** When it sorts: its time, or for a stage read before the page was open, its run's start. */
+  key: string;
+}
+
 /**
  * Every stage the attempts on record went through, oldest first, each at the
  * time its record holds and with the runner's detail where the record has
  * it: the check's result, and the findings a review left open.
  */
-function recordedStages(attempts: readonly AttemptView[]): LoopStep[] {
+function recordedStages(attempts: readonly AttemptView[]): Stage[] {
   return recordedRunnerStages(attempts).flatMap((stages) => {
     // Each stage no earlier than the one before it, as the attempt ran them.
     let floor = stages[0]!.at;
     return stages.map(({ stage, at, check, open }) => {
       floor = Date.parse(at) > Date.parse(floor) ? at : floor;
       return {
-        text: stageWords(stage),
+        stage,
         reason:
           check !== undefined
             ? `Result: ${check.status}.` + (check.detail ? `\n\n${check.detail}` : "")
@@ -480,33 +491,85 @@ function recordedStages(attempts: readonly AttemptView[]): LoopStep[] {
               ? findingsLeft(open)
               : null,
         at: floor,
+        key: floor,
       };
     });
   });
 }
 
+/** A person's answer to a finding, as the verdicts record holds it (D-132). */
+const DecidedSchema = z.object({
+  finding_key: z.string(),
+  decision: z.literal("decide"),
+  choice: z.enum(DECISION_CHOICES),
+  note: z.string().nullable(),
+  decided_at: z.string(),
+});
+/** Answers taken this close together were given at one sitting, as the decision screen records them. */
+const ONE_SITTING_MS = 5 * 60_000;
 /**
- * What the loop page's steps list, newest first: every stage the runner went
- * through and every state the ticket was moved to, each where its time puts
- * it.
+ * The person's decisions, each sitting one step at the time it was taken:
+ * how many findings it answered, with each answer behind the `i`.
+ */
+function decisionSteps(verdicts: readonly unknown[]): (LoopStep & { key: string })[] {
+  const rows = verdicts
+    .flatMap((row) => {
+      const parsed = DecidedSchema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    })
+    .sort((left, right) => Date.parse(left.decided_at) - Date.parse(right.decided_at));
+  const sittings: (typeof rows)[] = [];
+  for (const row of rows) {
+    const sitting = sittings.at(-1);
+    const last = sitting?.at(-1);
+    if (sitting !== undefined && last !== undefined && Date.parse(row.decided_at) - Date.parse(last.decided_at) <= ONE_SITTING_MS)
+      sitting.push(row);
+    else sittings.push([row]);
+  }
+  const said = (row: (typeof rows)[number]): string =>
+    row.choice === "ship_as_is"
+      ? "Ship as it is."
+      : row.choice === "let_it_decide"
+        ? "Let it decide."
+        : `Your approach: ${row.note ?? ""}`;
+  return sittings.map((sitting) => {
+    const at = sitting.at(-1)!.decided_at;
+    return {
+      text: `You answered ${sitting.length === 1 ? "one finding" : `${sitting.length} findings`}`,
+      reason: sitting.map((row, index) => `${index + 1}. ${said(row)}`).join("\n"),
+      at,
+      key: at,
+    };
+  });
+}
+
+/**
+ * What the loop page's steps list, newest first: every stage the ticket's
+ * loop went through, every state the ticket was moved to and every decision
+ * the person took, each where its time puts it.
  *
- * While a run is live, its stages are read from its log as the CLI announces
- * them, beside the stages of the attempts on record from before it. Once none
- * is, they are rebuilt from the records of every attempt, so a page opened
- * again lists the same stages; the last run's log stands in where it recorded
- * no attempt, as a run that ended before its first did. Only the runner's own
- * stage lines are read: never the executor's or the reviewer's words, and
- * never a tool call, which are the Watch page's.
+ * The steps follow the ticket's loop, not a run (D-129): rounds and passes are
+ * counted over the ticket (`overTheTicket`), so a run continued after a
+ * decision goes on from where the loop was, and each thing that happened is
+ * listed once — from the attempt that recorded it, or from the log of the run
+ * that recorded none of it yet. While a run is live, its stages are read from
+ * its log as the CLI announces them, beside the stages of the attempts on
+ * record from before it. Once none is, they are rebuilt from the records of
+ * every attempt, so a page opened again lists the same stages; the last run's
+ * log stands in where it recorded no attempt, as a run that ended before its
+ * first did. Only the runner's own stage lines are read: never the executor's
+ * or the reviewer's words, and never a tool call, which are the Watch page's.
  */
 export function loopSteps(input: {
   history: Detail["ticket"]["history"];
   jobs: readonly Job[];
   active: Job | undefined;
   attempts: readonly AttemptView[];
+  verdicts: readonly unknown[];
   log: StageLog;
   now: string;
 }): LoopStep[] {
-  const { history, jobs, active, attempts, log, now } = input;
+  const { history, jobs, active, attempts, verdicts, log, now } = input;
   const last = jobs.filter(isRun).at(-1);
   const since = (job: Job) => (attempt: AttemptView) => Date.parse(attempt.startedAt) >= Date.parse(job.startedAt);
   const logged =
@@ -516,9 +579,9 @@ export function loopSteps(input: {
         ? last
         : undefined;
   const recorded = recordedStages(logged === undefined ? attempts : attempts.filter((attempt) => !since(logged)(attempt)));
-  const stages = (job: Job): (LoopStep & { key: string })[] =>
+  const announced = (job: Job): Stage[] =>
     log.read(job, now).map(({ stage, at }) => ({
-      text: stageWords(stage.stage),
+      stage: stage.stage,
       // A review's count is the whole of it once a later stage followed, or the run ended.
       reason: stage.stage.kind === "review" && (stage.settled || !isLive(job)) ? findingsLeft(stage.findings) : null,
       at,
@@ -526,6 +589,9 @@ export function loopSteps(input: {
       // after the run started.
       key: at ?? job.startedAt,
     }));
+  // The recorded stages come before the logged run's: counted over the ticket in that order.
+  const stages = [...recorded, ...(logged === undefined ? [] : announced(logged))];
+  const counted = overTheTicket(stages.map(({ stage }) => stage));
   const moves = history.flatMap((entry): LoopStep[] => [
     // The run's delivery, where its log is not the one read.
     ...(entry.to === "pr_open" &&
@@ -536,9 +602,9 @@ export function loopSteps(input: {
     { text: rowWords(entry), reason: null, at: entry.at },
   ]);
   return [
-    ...recorded.map((step) => ({ ...step, key: step.at! })),
-    ...(logged === undefined ? [] : stages(logged)),
+    ...stages.map(({ reason, at, key }, index) => ({ text: stageWords(counted[index]!), reason, at, key })),
     ...moves.map((step) => ({ ...step, key: step.at! })),
+    ...decisionSteps(verdicts),
   ]
     .map((step, order) => ({ step, time: Date.parse(step.key), order }))
     .sort((left, right) => left.time - right.time || left.order - right.order)

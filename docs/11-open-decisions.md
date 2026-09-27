@@ -911,7 +911,26 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the stage the run had reached, why it stopped — one line each, read from the records as the loop
   page's ended card is, the whole of each behind an `i` — and its three ways out — **Delete this
   work**, **Plan it again** and **Continue the task** — as buttons named and nothing else, beside
-  **View the paused loop**, which opens the ticket's loop page and has the way back.
+  **View the paused loop**, which opens the ticket's loop page and has the way back. The progress
+  wheel — the ring on a Home card and the bar on the loop page, which read one fill — has six stages
+  in equal slices, in the order the loop runs them: contract, which fills nothing; execution, which
+  holds the worktree, the executor, sealing and the deterministic checks; review, the ticket's first
+  independent review; refinement, a remediation round; verification, each closure verification and
+  each later review, said with its pass from the second ("Verification 2"); and completed, which
+  fills the whole: the journey's end waiting on the person — a pull request open or a local run
+  finished with its review on record — and a merged or closed ticket. A decision is no stage: where
+  the loop asks the person (D-132), or a run waits on their answer about a host (D-137), the stage that
+  asked is shown in the decision colour with "Decision required" under it, and the loop goes on from
+  refinement after the answer. Within one ticket's journey the wheel never moves back: it shows the
+  furthest stage the ticket reached over every run, read from the attempts on record and every run's
+  log, so it holds through a restart, and what the loop is doing now is said by the title and the
+  steps — a continued run materialising its worktree reads "Materialising the worktree", a second
+  refinement round after a verification "Refining the change, round 2" — with the wheel where it
+  was; a stopped run keeps the stage it reached, in the stopped colour, and only Plan it again, a new
+  ticket, starts from contract. The steps follow the ticket's loop too, not a run: each thing that
+  happened listed once, whether the records or a run's log says it, refinement rounds and
+  verification passes counted over the ticket, and each decision the person took a step where they
+  took it, "You answered 3 findings", with the answers behind its `i`.
   **Continue the task** is offered only after the person's own stop or Perbo closing while the run
   was going — quit or crashed, one event, recorded `interrupted` either way — and carries on where
   they left off; after any other stop — a limit, a refusal, an error — it is disabled, saying that
@@ -950,7 +969,10 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Why: the person's own stop is a pause they take back, and Perbo closing stops nothing about the
   plan, so carrying on from either is the work resuming; every other stop is a reason another
   attempt against the same frozen contract meets again, so carrying on from it only spends; changing
-  the spec or the plan is what gets past it, and that is Plan it again. A verdict the review put to
+  the spec or the plan is what gets past it, and that is Plan it again. The wheel's stages are the
+  founder's: the checks are part of the execution, a re-review is a verification, and the end
+  waiting on the person is completed; a wheel that moved back after a decision, or steps that listed
+  the review again, read as the loop starting over when it had gone on. A verdict the review put to
   the person is the loop asking them, and reading it as a failure would colour it red and put an error in
   front of the question; red is for an error or the person's stop, and the question opens itself; the contract itself is frozen,
   so a way to it from here would offer nothing to change. A planning deleted without its spec leaves the writing reachable only through a record that
@@ -997,8 +1019,13 @@ This is the one home for the decisions that govern Perbo. Every other document c
   ended card and the stopped page, and `carriesOn` beside it, which offers Continue after that stop or
   Perbo closing; the host's `shutdown`, which ends what it cuts off `interrupted` with the words a
   crash leaves; the run route's `verdict` read of `perbo run`'s exit, which completes the job with its
-  `outcome`, and `ticketRun`'s `paused`, which every colour, wheel and title reads; `stageReached` there, which keeps a
-  stopped run's wheel on Home, the loop page and the stopped page at the stage the run had reached;
+  `outcome`, and `ticketRun`'s `paused`, which every colour, wheel and title reads; `WHEEL_STEPS`, `wheelFill`,
+  `furthestAt` and `overTheTicket` in `shared/runner-progress.ts`, the stages, the one fill the ring
+  and the bar read, the furthest stage and the ticket's own count of rounds and passes;
+  `ticketStages` and `stageReached` in `ticket-workspace.ts`, the ticket's loop and the furthest
+  stage it reached, which Home, the loop page and the stopped page show; `LoopStages`, which marks
+  the stage waiting on the person or stopped; `loopSteps`' decision steps, read from the verdicts
+  record;
   `publish` on a run's job, which **Continue the task** carries; `removeSpecFolder` and
   `deleteDraftedFromSpec`, which take the ticket and the folder with the planning and hold the
   slug to one folder name in the configured spec folder (D-103), because an admission record is a file in the repository and this ends

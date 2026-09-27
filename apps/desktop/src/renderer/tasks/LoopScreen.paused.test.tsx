@@ -34,10 +34,12 @@ afterEach(() => {
 });
 
 /** PRB-412, whose review put a question to the person, with the run a case ends and the state its records say. */
-function mount(run: Partial<Job>, state: Detail["ticket"]["state"] = "changes_requested"): void {
+function mount(run: Partial<Job>, state: Detail["ticket"]["state"] = "changes_requested", recorded = true): void {
   const workspace = structuredClone(sample.workspace);
   const detail = structuredClone(sample.detail);
   detail.ticket.state = state;
+  // A first run, before anything is on record.
+  if (!recorded) detail.attempts = [];
   workspace.refreshingRepos = [];
   workspace.jobs = [
     {
@@ -70,14 +72,15 @@ describe("a run paused for the person", () => {
     expect(screen.getByRole("heading", { name: "Paused for a decision" })).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Decisions required" })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "The run ended" })).toBeNull();
-    // The decisions are the step after the review.
-    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("decisions required");
+    // A decision is no stage: the review that asked it waits on the person, in the decision colour.
+    const asking = document.querySelector(".stage-labels .current")!;
+    expect(asking.textContent).toBe("Decision required");
+    expect(asking.classList.contains("is-decision")).toBe(true);
     expect([...document.querySelectorAll(".stage-labels .complete")].map((step) => step.textContent)).toEqual([
       "contract",
       "execution",
-      "checks",
-      "review",
     ]);
+    expect((document.querySelector(".progress-track > span") as HTMLElement).style.width).toBe("40%");
   });
 
   it("is the pause from the moment it ends, while the records still say the stage the run started at", () => {
@@ -112,16 +115,22 @@ describe("a run waiting on the person's answer about a host", () => {
   const question = { key: "egq_0123456789abcdef", host: "registry.example.com", command: "curl https://registry.example.com" };
   const ran = "  worktree /tmp/w on ayo/task at 123\n  executing\n  check test: passed\n";
   it("is paused for a decision while the question is open, and back at the step the log names once answered", () => {
-    mount({ state: "running", endedAt: null, log: ran + `  ${egressQuestionLine(question)}\n` }, "verifying");
+    mount({ state: "running", endedAt: null, log: ran + `  ${egressQuestionLine(question)}\n` }, "verifying", false);
     expect(screen.getByRole("heading", { name: "Paused for a decision" })).toBeTruthy();
-    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("decisions required");
+    // Asked mid-execution: the execution waits on the person.
+    const asking = document.querySelector(".stage-labels .current")!;
+    expect(asking.textContent).toBe("Decision required");
+    expect(asking.classList.contains("is-decision")).toBe(true);
+    expect([...document.querySelectorAll(".stage-labels .complete")].map((step) => step.textContent)).toEqual(["contract"]);
     cleanup();
     mount(
       { state: "running", endedAt: null, log: ran + `  ${egressQuestionLine(question)}\n  ${egressSettledLine(question, "allowed")}\n` },
       "verifying",
+      false,
     );
     expect(screen.getByRole("heading", { name: "Running deterministic checks" })).toBeTruthy();
-    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("checks");
+    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("execution");
+    expect(document.querySelector(".stage-labels .is-decision")).toBeNull();
   });
 });
 
@@ -266,7 +275,7 @@ describe("a refinement that stalled", () => {
     expect(within(dialog).getByRole("radio", { name: /^Ship as it is/ })).toBeTruthy();
     const options = request.mock.calls.map(([call]) => call).filter((call) => call.kind === "decisionOptions");
     expect(options).toEqual([{ kind: "decisionOptions", repoId: sample.repoId, key: "PRB-412", findings: asked }]);
-    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("decisions required");
+    expect(document.querySelector(".stage-labels .current")?.textContent).toBe("Decision required");
   });
 
   it("puts the decision rightmost as the primary, with Review the result beside it", () => {
