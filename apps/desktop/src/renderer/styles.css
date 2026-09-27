@@ -3018,6 +3018,19 @@ textarea {
   width: 8px;
   height: 8px;
 }
+/* The stage that asked a decision waits on the person, in the decision
+   colour; a stopped run's stage, in the stopped colour (D-129). */
+.stage-labels .current.is-decision {
+  color: var(--amber);
+}
+.stage-labels .current.is-stopped {
+  color: var(--red);
+}
+.stage-labels .current.is-stopped i,
+.loop-stages--stopped .progress-track > span {
+  background: var(--red);
+  border-color: var(--red);
+}
 .loop-body .section-label {
   margin-bottom: 9px;
 }

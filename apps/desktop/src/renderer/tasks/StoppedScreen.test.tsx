@@ -299,15 +299,17 @@ describe("the stopped page", () => {
     expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
   });
 
-  it("keeps the wheel where a run stopped at review round 2 had taken it, here and on the paused loop", () => {
+  it("keeps the wheel at the verification a run stopped after its second review had reached, in the stopped colour, here and on the paused loop", () => {
     const log =
       "  worktree /tmp/w on ayo/task at 123\n  executing\n  sealing the change set\n  check test: passed\n  review round 0\n" +
       "  remediation round 1 of at most 6\n  sealing the change set\n  check test: passed\n  review round 1\n";
     mount(stopped({ state: "cancelled", log }));
-    expect(wheel()).toBe("review");
-    expect(document.querySelectorAll(".stage-labels .complete")).toHaveLength(3);
+    expect(wheel()).toBe("verification");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+    expect(document.querySelectorAll(".stage-labels .complete")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: "View the paused loop" }));
-    expect(wheel()).toBe("review");
+    expect(wheel()).toBe("verification");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
   });
 });
 

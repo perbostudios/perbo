@@ -173,7 +173,7 @@ export function StoppedScreen(context: TaskContext) {
           <InkIcon name="locked" size={32} />
           <h1>The run was stopped</h1>
         </div>
-        <LoopStages stage={projection.stage} />
+        <LoopStages stage={projection.stage} mark="stopped" />
         <ul className="stopped-reasons" aria-label="Why the run stopped">
           {reasons.map((reason, index) => (
             <li key={index}>
