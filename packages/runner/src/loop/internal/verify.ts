@@ -397,6 +397,9 @@ function recordVerification(
         .map((row) => row.finding_key)
         .join(","),
       findings_open: verification.open_keys.join(","),
+      // D-065: what the round's executor declined, which no answer of the
+      // person's closes (`loopOnRecord`).
+      findings_declined: args.declines.map((decline) => decline.finding_key).join(","),
     },
     context_manifest: [],
     versions: refused

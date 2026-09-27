@@ -62,6 +62,22 @@ const DEFINITIONS = [
   "export GIT_CONFIG_COUNT=1; git x main",
   "GIT_CONFIG_GLOBAL=aliases.cfg git x main",
   "GIT_CONFIG_SYSTEM=aliases.cfg git x main",
+  // Handed to `env` past its own options, which the environment walk steps over.
+  "env -i GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  "env -u X GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  "env --unset=X GIT_CONFIG_SYSTEM=/tmp/cfg git status",
+  "env -i -u X GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='branch -D' git x main",
+  "env -i GIT_CONFIG_PARAMETERS=\"'alias.x=branch -D'\" git x main",
+  "env -- GIT_CONFIG_GLOBAL=/tmp/cfg git status",
+  // GIT_CONFIG_PARAMETERS in both of git's forms: `'key=value'` and `'key'='value'`.
+  "GIT_CONFIG_PARAMETERS=\"'alias.x'='branch -D'\" git x main",
+  "GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'alias.x'='branch -D'\" git x main",
+  "GIT_CONFIG_PARAMETERS=\"'core.x=it'\\''s' 'alias.x'='branch -D'\" git x main",
+  "GIT_CONFIG_PARAMETERS=\"'alias.x'\" git x main",
+  // A value git's grammar does not read is one the guard cannot vouch for.
+  "GIT_CONFIG_PARAMETERS=\"'color.ui=always\" git x main",
+  // The key as the shell hands it over, its quotes and escapes applied.
+  "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=ali\\as.x GIT_CONFIG_VALUE_0='branch -D' git x main",
   // An alias written for the lines after this one.
   "git config alias.x 'branch -D'",
   "git config --local alias.x 'branch -D'",
@@ -102,6 +118,8 @@ describe("a git line that sets config and defines no alias", () => {
     "git -c color.ui=false status",
     "git --config-env=color.ui=COLOR log --oneline",
     "GIT_CONFIG_PARAMETERS=\"'color.ui=always'\" git status",
+    "GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'core.pager'='less -R'\" git status",
+    "GIT_CONFIG_PARAMETERS=\"'core.x=alias.y'\" git status",
     "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=color.ui GIT_CONFIG_VALUE_0=always git status",
     "git config --get alias.x",
     "git config get alias.x",
@@ -113,6 +131,13 @@ describe("a git line that sets config and defines no alias", () => {
       expect(claude(line).rule, line).toBeNull();
     });
   }
+
+  it("admits `env -i git status` on the hook, where the allow list is what decides it", () => {
+    const line = "env -i git status";
+    expect(claude(line)).toMatchObject({ decision: "allowed", rule: null });
+    expect(codex(line).rule).not.toBe(ADMISSION_RULES.git_alias);
+    expect(opencode(line)).not.toMatchObject({ rule: ADMISSION_RULES.git_alias });
+  });
 
   it("leaves the plain -c listing to the allow list on Codex and OpenCode", () => {
     // A prefix names the words in front, so `git -c … branch` is outside the

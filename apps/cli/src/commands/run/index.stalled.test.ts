@@ -205,7 +205,7 @@ async function run(
   at: ReturnType<typeof fixture>,
   deps: Partial<ExecuteDeps>,
   argv: readonly string[] = [],
-): Promise<{ code: number; err: string }> {
+): Promise<{ code: number; err: string; out: string }> {
   const streams = recordStreams();
   process.env.PATH = `${at.gh}:${originalPath ?? ""}`;
   try {
@@ -215,7 +215,7 @@ async function run(
       cwd: at.repo,
       deps: { preflight: okPreflight, ...deps },
     });
-    return { code, err: streams.err() };
+    return { code, err: streams.err(), out: streams.out() };
   } finally {
     process.env.PATH = originalPath;
   }
@@ -230,7 +230,75 @@ async function decide(at: ReturnType<typeof fixture>, key: string, choice: strin
   });
 }
 
+/** Run 1 on a fresh ticket: round 1 closes CLOSED_EARLY, round 2 closes nothing, and the run stalls. */
+async function stalledTicket(): Promise<ReturnType<typeof fixture>> {
+  const at = fixture();
+  const rounds: string[][] = [];
+  const first = await run(at, {
+    hooks: {
+      review: remediable as never,
+      verify: verifier(rounds, (round) => (round === 1 ? [CLOSED_EARLY] : [])),
+    },
+  });
+  expect(first.code, first.err).toBe(2);
+  expect(readTicket(storeDir(at.repo, null), at.key).history.at(-1)?.note).toBe(gateClosedNote("remediation_stalled"));
+  return at;
+}
+
+/** Every port that would execute, review or verify fails the test. */
+const nothingRuns = {
+  agent: (async () => {
+    throw new Error("a refused run executes nothing");
+  }) as never,
+  review: noReview,
+  verify: (async () => {
+    throw new Error("a refused run verifies nothing");
+  }) as never,
+};
+
 describe("perbo run after a refinement that stalled", () => {
+  it("is refused before the ticket moves while what it left open is unanswered, and keeps an answer already given", async () => {
+    const at = await stalledTicket();
+    const store = storeDir(at.repo, null);
+    const before = readTicket(store, at.key);
+
+    const refused = await run(at, { hooks: nothingRuns });
+    expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
+    expect(refused.err).toContain(
+      `error: ${at.key}'s last run finished trying and left 2 finding(s) for you to answer ` +
+        `(${SHIPPED.slice(0, 12)}, ${HANDED.slice(0, 12)}), none of them handed to the executor, so this run does not ` +
+        `start: answer each with \`perbo verdict ${at.key} --decide <finding> --choice approach|let-it-decide|ship-as-is\`, ` +
+        `and \`perbo options ${at.key} --finding <finding>\` offers answers to pick`,
+    );
+    expect(readTicket(store, at.key)).toEqual(before);
+
+    // One shipped as it is and the other unanswered: nothing is handed on, so
+    // the run is still refused, and the answer given stands for the next.
+    expect(await decide(at, SHIPPED, "ship-as-is")).toBe(0);
+    const still = await run(at, { hooks: nothingRuns });
+    expect(still.code, still.err).toBe(EXIT_CODES.did_not_complete);
+    expect(still.err).toContain(`left 1 finding(s) for you to answer (${HANDED.slice(0, 12)})`);
+    expect(readTicket(store, at.key)).toEqual(before);
+
+    expect(await decide(at, HANDED, "ship-as-is")).toBe(0);
+    const delivered = await run(at, { hooks: nothingRuns });
+    expect(delivered.code, delivered.err).toBe(0);
+    expect(readTicket(store, at.key).state).toBe("pr_open");
+  }, 300_000);
+
+  it("continues only the finding handed on, and leaves the unanswered one with the person", async () => {
+    const at = await stalledTicket();
+    expect(await decide(at, HANDED, "let-it-decide")).toBe(0);
+    const rounds: string[][] = [];
+    const second = await run(at, { hooks: { review: noReview, verify: verifier(rounds, () => [HANDED]) } });
+    expect(rounds).toEqual([[HANDED]]);
+    expect(second.code, second.err).toBe(2);
+    expect((JSON.parse(second.out) as { outcome: string; detail: string }).outcome).toBe("escalated");
+    expect((JSON.parse(second.out) as { detail: string }).detail).toContain(SHIPPED);
+    expect(readTicket(storeDir(at.repo, null), at.key).state).toBe("changes_requested");
+  }, 300_000);
+
+
   it("continues only the finding the person handed on, and delivers once it is closed", async () => {
     const at = fixture();
     const store = storeDir(at.repo, null);

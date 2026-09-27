@@ -467,27 +467,38 @@ const OpenCodeServedModel = z.object({
 });
 const OpenCodeServed = <T extends z.ZodType>(data: T) => z.object({ data });
 /**
- * The model list, each entry read on its own: one OpenCode reports in a shape
- * this reader does not know is left out, rather than failing the whole list.
+ * A list OpenCode serves, each entry read on its own: one OpenCode reports in
+ * a shape this reader does not know is left out, rather than failing the
+ * whole list.
  */
-const OpenCodeModelList = OpenCodeServed(
-  z
-    .array(z.unknown())
-    .max(5000)
-    .transform((entries) =>
-      entries.flatMap((entry) => {
-        const model = OpenCodeServedModel.safeParse(entry);
-        return model.success ? [model.data] : [];
-      }),
-    ),
+const OpenCodeServedList = <T extends z.ZodType>(entry: T, max: number) =>
+  OpenCodeServed(
+    z
+      .array(z.unknown())
+      .max(max)
+      .transform((entries) =>
+        entries.flatMap((each) => {
+          const read = entry.safeParse(each);
+          return read.success ? [read.data as z.infer<T>] : [];
+        }),
+      ),
+  );
+const OpenCodeModelList = OpenCodeServedList(OpenCodeServedModel, 5000);
+const OpenCodeProviderList = OpenCodeServedList(
+  z.object({ id: z.string(), integrationID: z.string().optional() }).loose(),
+  1000,
 );
-const OpenCodeProviderList = OpenCodeServed(
-  z.array(z.object({ id: z.string(), integrationID: z.string().optional() }).loose()).max(1000),
+const OpenCodeIntegrationList = OpenCodeServedList(
+  z.object({ id: z.string(), connections: z.array(z.unknown()) }).loose(),
+  1000,
 );
-const OpenCodeIntegrationList = OpenCodeServed(
-  z.array(z.object({ id: z.string(), connections: z.array(z.unknown()) }).loose()).max(1000),
+/** The default model, where OpenCode names one in a shape this reader knows; none otherwise. */
+const OpenCodeDefault = OpenCodeServed(
+  z.unknown().transform((value) => {
+    const read = z.object({ id: z.string(), providerID: z.string() }).loose().safeParse(value);
+    return read.success ? read.data : null;
+  }),
 );
-const OpenCodeDefault = OpenCodeServed(z.object({ id: z.string(), providerID: z.string() }).loose().nullish());
 
 /** How long apart two readings of OpenCode's model list are, to see it has settled. */
 const OPENCODE_SETTLE_MS = 500;
@@ -564,15 +575,26 @@ async function openCodeModels(options: {
       /* Already gone. */
     }
   };
-  /** Its stdin closed and SIGTERM, then SIGKILL where it is still there 1.5 s later. */
-  const stop = (): void => {
+  /** Whether the server has ended, or never started. */
+  const ended = (): boolean => child.pid === undefined || child.exitCode !== null || child.signalCode !== null;
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  /**
+   * Its stdin closed and SIGTERM, then SIGKILL where it is still there 1.5 s
+   * later, answered once it has exited: OpenCode writes its database under
+   * the scratch home as it stops, and the home is removed only after that.
+   */
+  const stop = async (): Promise<void> => {
     child.stdin.end();
+    if (ended()) return;
     signal("SIGTERM");
-    const force = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
-    }, 1_500);
-    force.unref();
-    child.once("exit", () => clearTimeout(force));
+    const bound = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref());
+    await Promise.race([exited, bound(1_500)]);
+    if (ended()) return;
+    signal("SIGKILL");
+    await Promise.race([exited, bound(1_500)]);
   };
   try {
     const address = await new Promise<string>((resolve, reject) => {
@@ -635,7 +657,15 @@ async function openCodeModels(options: {
       }
       if (!response.ok) throw new Error(`OpenCode answered ${path} with HTTP ${response.status}.`);
       if (body.length > limit) throw new Error("OpenCode's answer exceeded the output limit.");
-      return schema.parse(JSON.parse(body));
+      let parsed: z.infer<T>;
+      try {
+        parsed = schema.parse(JSON.parse(body));
+      } catch (error) {
+        throw new Error(`OpenCode answered ${path} with something Perbo cannot read. Update it and refresh.`, {
+          cause: error,
+        });
+      }
+      return parsed;
     };
     const integrations = (await read("/api/integration", OpenCodeIntegrationList)).data;
     let models = (await read("/api/model", OpenCodeModelList)).data;
@@ -667,6 +697,6 @@ async function openCodeModels(options: {
       efforts: [],
     }));
   } finally {
-    stop();
+    await stop();
   }
 }

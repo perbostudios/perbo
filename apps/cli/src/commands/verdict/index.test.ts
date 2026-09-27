@@ -320,18 +320,22 @@ function storeWith(
  * AYO-7 as PRB-15 left it: a review that routed its three findings to the
  * executor, a remediation round that closed STOP_THREE, a second that closed
  * nothing, and — where `outcome` is given — the row the run wrote as it ended.
+ * With `declined`, the second round's executor declined STOP_ONE (D-065)
+ * rather than being given it to close.
  */
-function stalledStore(name: string, outcome: string | null): { repo: string; store: string } {
+function stalledStore(name: string, outcome: string | null, declined = false): { repo: string; store: string } {
   const made = storeWith(name, { decision: "remediable", toExecutor: true });
   const bundles = new BundleStore({ root: join(made.store, "bundles"), retainContext: true });
   const attempts = join(made.store, "state", `${TICKET_ID}.attempts.json`);
   const rounds = [
-    { round: 1, given: [STOP_ONE!, STOP_TWO!, STOP_THREE!], open: [STOP_ONE!, STOP_TWO!] },
-    { round: 2, given: [STOP_ONE!, STOP_TWO!], open: [STOP_ONE!, STOP_TWO!] },
+    { round: 1, given: [STOP_ONE!, STOP_TWO!, STOP_THREE!], open: [STOP_ONE!, STOP_TWO!], declines: [] as string[] },
+    declined
+      ? { round: 2, given: [STOP_TWO!], open: [STOP_TWO!], declines: [STOP_ONE!] }
+      : { round: 2, given: [STOP_ONE!, STOP_TWO!], open: [STOP_ONE!, STOP_TWO!], declines: [] as string[] },
   ];
   const recorded = [attempt];
-  for (const { round, given, open } of rounds) {
-    const remediation = makeAttempt({
+  for (const { round, given, open, declines } of rounds) {
+    const recordedAttempt = makeAttempt({
       attempt_id: `att_verdict0000000${round + 1}`,
       ticket_id: TICKET_ID,
       created_at: `2026-09-03T12:${round}0:00.000Z`,
@@ -340,12 +344,21 @@ function stalledStore(name: string, outcome: string | null): { repo: string; sto
       changeset_id: "cs_verdict0001",
       head_commit: "b2c3d4e",
     });
+    const remediation = {
+      ...recordedAttempt,
+      declines: declines.map((finding_key) => ({ finding_key, reason: "which page size is right is a product call" })),
+    };
     recorded.push(remediation);
     bundles.write({
       kind: "review",
       subject_id: `cv_${remediation.attempt_id}`,
       ticket_id: TICKET_ID,
-      inputs: { head_commit: "b2c3d4e", findings_given: given.join(","), findings_open: open.join(",") },
+      inputs: {
+        head_commit: "b2c3d4e",
+        findings_given: given.join(","),
+        findings_open: open.join(","),
+        findings_declined: declines.join(","),
+      },
       context_manifest: [],
       versions: { code: "stage-3", prompt: "closure_verify_v1", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
       usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
@@ -1469,6 +1482,18 @@ describe("perbo verdict --decide records a person's answer that closes the findi
         [STOP_TWO, "approach"],
       ]);
     }
+  });
+
+  it("refuses an answer to a finding the executor declined before the stall, and takes one to the finding beside it", async () => {
+    const { repo, store } = stalledStore("decide-declined", "remediation_stalled", true);
+    for (const choice of ["approach", "let-it-decide", "ship-as-is"]) {
+      expect(() => decide(repo, STOP_ONE!, "Use fifty.", ["--choice", choice], LATER), choice).toThrow(
+        /is a finding the executor declined \(D-065\), and no choice closes it: `perbo principle add` carries your answer/,
+      );
+    }
+    expect(existsSync(join(store, "verdicts.json"))).toBe(false);
+    expect(await decide(repo, STOP_TWO!, null, ["--choice", "ship-as-is"], LATER)).toBe(0);
+    expect(decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => row.finding_key)).toEqual([STOP_TWO]);
   });
 
   it("refuses an answer to a finding routed to the executor while the loop is still trying it", async () => {

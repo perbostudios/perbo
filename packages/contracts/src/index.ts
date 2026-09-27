@@ -141,6 +141,7 @@ export {
   INTERVIEW_SAID_MAX_CHARS,
   InterviewEventSchema,
   InterviewQuestionGroupSchema,
+  InterviewQuestionPartSchema,
   interviewSaidMessage,
   InterviewTurnSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
@@ -148,7 +149,13 @@ export {
   PART_LETTERS,
   sameQuestion,
 } from "./interview-protocol.js";
-export type { InterviewEvent, InterviewQuestionGroup, InterviewQuestionPart, QuestionPut } from "./interview-protocol.js";
+export type {
+  InterviewEvent,
+  InterviewQuestionGroup,
+  InterviewQuestionPart,
+  InterviewTurn,
+  QuestionPut,
+} from "./interview-protocol.js";
 export {
   assertProviderEnabled,
   assertWithinLimits,
@@ -310,10 +317,12 @@ export {
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  leftToPrinciple,
   loopOnRecord,
   loopOnReview,
   NEVER_HANDED_FAMILIES,
   NOTHING_TRIED,
+  owedAnswers,
   routedToPerson,
 } from "./decision.js";
 export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";

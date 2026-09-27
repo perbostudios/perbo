@@ -1,5 +1,10 @@
+import { realpathSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES, judgeCommand } from "./admission.js";
+import { codexCommandDecision } from "./codex/index.js";
+import { opencodeDecision } from "./opencode/index.js";
+import { judgePreToolCall, type PreToolGuardState } from "./pretool.js";
 import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "./profile.js";
 
 /**
@@ -256,6 +261,90 @@ describe("the credential key however the line spells its place", () => {
       expect(admission.decision).toBe("denied");
       expect(admission.rule).toBe(ADMISSION_RULES.git_credential_config);
       expect(admission.target).toBe(key);
+    });
+  }
+});
+
+/**
+ * The same refusals on Claude Code's hook, Codex's approvals and OpenCode's
+ * permission requests, however the environment reaches git — past `env`'s
+ * own options, and through `GIT_CONFIG_PARAMETERS` in either of git's forms
+ * — and git's `--exec-path=<dir>`, which chooses the programs git runs as
+ * `GIT_EXEC_PATH` does.
+ */
+describe("on every executor, however the line reaches git", () => {
+  const ROOT = realpathSync(scratchDirectories("perbo-runner-")("perbo-git-credential-"));
+  const state: PreToolGuardState = {
+    root: ROOT,
+    cwd: ROOT,
+    tmpdir: null,
+    paths_allowed: ["**"],
+    paths_prohibited: [],
+    allow_list: [...DEFAULT_COMMAND_ALLOW_LIST],
+    deny_list: [...DEFAULT_COMMAND_DENY_LIST],
+  };
+  const claude = (line: string) =>
+    judgePreToolCall({ tool_name: "Bash", tool_use_id: "t", tool_input: { command: line } }, state, new Date(0))
+      .decision;
+  const codex = (line: string) => codexCommandDecision(line, ROOT, state);
+  const opencode = (line: string) =>
+    opencodeDecision({ toolCallId: "t", kind: "execute", rawInput: { command: line, cwd: ROOT } }, state);
+
+  const REFUSED: Array<[string, string]> = [
+    // Past `env`'s own options.
+    ["env -i GIT_CONFIG_PARAMETERS=\"'credential.helper=store'\" git fetch", "credential.helper"],
+    ["env -u X GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=store GIT_CONFIG_COUNT=1 git fetch", "credential.helper"],
+    ["env --unset=X GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0=x GIT_CONFIG_COUNT=1 git fetch", "core.sshCommand"],
+    ["env -i -u X GIT_SSH_COMMAND='ssh -i /tmp/k' git fetch", "GIT_SSH_COMMAND"],
+    ["env -i GIT_EXEC_PATH=/tmp/x git submodule status", "GIT_EXEC_PATH"],
+    // GIT_CONFIG_PARAMETERS in git's `'key'='value'` form, alone and among others.
+    ["GIT_CONFIG_PARAMETERS=\"'credential.helper'='store'\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'credential.helper'='store'\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"'color.ui=always' 'core.x=it'\\''s' 'credential.helper'='store'\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"'credential.helper'=\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"' credential.helper =store'\" git fetch", "credential.helper"],
+    // The key as the shell hands it over.
+    ["GIT_CONFIG_KEY_0=cred\\ential.helper GIT_CONFIG_VALUE_0=store GIT_CONFIG_COUNT=1 git fetch", "credential.helper"],
+    ["GIT_CONFIG_KEY_0='credential'.helper GIT_CONFIG_VALUE_0=store GIT_CONFIG_COUNT=1 git fetch", "credential.helper"],
+    // git's own --exec-path, attached as git reads it.
+    ["git --exec-path=/tmp/x submodule status", "--exec-path"],
+    ['git "--exec-path=/tmp/x" submodule status', "--exec-path"],
+    ["git -C . --exec-path=/tmp/x bisect start", "--exec-path"],
+    ["env -i git --exec-path=/tmp/x submodule status", "--exec-path"],
+  ];
+
+  for (const [line, target] of REFUSED) {
+    it(`refuses ${JSON.stringify(line)} as a credential refusal`, () => {
+      expect(claude(line), line).toMatchObject({
+        decision: "denied",
+        answer: "deny",
+        rule: ADMISSION_RULES.git_credential_config,
+        target,
+      });
+      expect(codex(line), line).toMatchObject({ decision: "denied", rule: ADMISSION_RULES.git_credential_config });
+      expect(opencode(line), line).toMatchObject({
+        decision: "denied",
+        rule: ADMISSION_RULES.git_credential_config,
+      });
+    });
+  }
+
+  it("names --exec-path as the program choice GIT_EXEC_PATH is", () => {
+    expect(claude("git --exec-path=/tmp/x submodule status").reason).toBe(
+      "--exec-path=/tmp/x chooses the programs git runs, as GIT_EXEC_PATH does, " +
+        "which the credential rule refuses regardless of how it is set",
+    );
+  });
+
+  for (const line of [
+    "env -i git status",
+    "git --exec-path",
+    "GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git status",
+  ]) {
+    it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_credential_config);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_credential_config });
     });
   }
 });

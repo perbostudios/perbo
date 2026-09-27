@@ -138,6 +138,42 @@ describe("the review's session and OpenCode's catalogue", () => {
   );
 });
 
+describe("an OpenCode that stops", () => {
+  it(
+    "fails the review with why OpenCode stopped, as soon as it stops opening the catalogue's session or the review's",
+    async () => {
+      // The first session is the catalogue's scratch one, the second the review's own.
+      for (const nth of [1, 2]) {
+        const fake = fakeOpenCodeReviewer([{ text: verdict }], { exit: { method: "session/new", nth, answered: false } });
+        const started = Date.now();
+        await expect(openCodeCliModel({ submitSchema, binary: fake.binary }).turn(request())).rejects.toThrow(
+          "OpenCode exited before the review completed (3): opencode crashed",
+        );
+        // No session asked for after the process was gone.
+        expect(logOf(fake.log).lines.filter((line) => line["method"] === "session/new")).toHaveLength(nth);
+        expect(Date.now() - started).toBeLessThan(5_000);
+      }
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a request made after OpenCode stopped at once, with why it stopped, rather than wait out its timeout",
+    async () => {
+      const fake = fakeOpenCodeReviewer([{ text: read }, { text: verdict }], {
+        exit: { method: "session/prompt", nth: 1, answered: true },
+      });
+      const model = openCodeCliModel({ submitSchema, binary: fake.binary });
+      expect((await model.turn(request())).toolCalls.map((call) => call.name)).toEqual(["read_file"]);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const started = Date.now();
+      await expect(model.turn(request())).rejects.toThrow("OpenCode exited before the review completed (3): opencode crashed");
+      expect(Date.now() - started).toBeLessThan(5_000);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+});
+
 describe("openCodeStructured", () => {
   it("reads one JSON object, bare or alone in one fenced block, and nothing else", () => {
     expect(openCodeStructured(verdict)).toMatchObject({ next: "submit_review" });

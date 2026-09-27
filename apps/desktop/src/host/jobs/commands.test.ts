@@ -7,6 +7,7 @@ import {
   admitFromSpecArgs,
   approveArgs,
   assertEditable,
+  assertNothingOwed,
   assertResumable,
   doctorArgs,
   doctorConfig,
@@ -21,7 +22,7 @@ import {
   writePrivate,
 } from "./commands.js";
 import type { Detail, Draft, RequestOf } from "../../shared/protocol.js";
-import type { PlanContract } from "@perbo/contracts";
+import { NOTHING_TRIED, type PlanContract } from "@perbo/contracts";
 import type { LimitsTableSchema } from "@perbo/contracts";
 import type { z } from "zod";
 
@@ -305,6 +306,26 @@ describe("the guards a job runs before it starts", () => {
       expect(() => assertResumable(detail, id)).toThrow(
         "The recovery bundle does not belong to this task.",
       );
+  });
+
+  it("refuses a run that owes the person's answers after the loop finished trying, and no other", () => {
+    const open = { key: "y", rule_id: "product.preference", status: "open", routing: "remediable", closure: "executor", statement: "s", blocking_reason: null };
+    const review = { decision: "remediable", findings: [open] } as never;
+    const finished = { finished: true, closed: new Set<string>(), declined: new Set<string>() };
+    const settled = (over: Record<string, unknown>) =>
+      ({ keys: new Set<string>(), refusal: null, loop: finished, answers: new Map<string, string>(), ...over }) as never;
+    expect(() => assertNothingOwed({ review, settled: settled({}) }, "PRB-1")).toThrow(
+      "PRB-1's last run finished trying and left 1 question for you to answer, none of them handed to the executor, so the loop does not start: answer them on its decision card.",
+    );
+    expect(() => assertNothingOwed({ review, settled: settled({ answers: new Map([["y", "approach"]]) }) }, "PRB-1")).not.toThrow();
+    expect(() =>
+      assertNothingOwed({ review, settled: settled({ keys: new Set(["y"]), answers: new Map([["y", "ship_as_is"]]) }) }, "PRB-1"),
+    ).not.toThrow();
+    expect(() => assertNothingOwed({ review, settled: settled({ loop: NOTHING_TRIED }) }, "PRB-1")).not.toThrow();
+    expect(() =>
+      assertNothingOwed({ review, settled: settled({ loop: { ...finished, declined: new Set(["y"]) } }) }, "PRB-1"),
+    ).not.toThrow();
+    expect(() => assertNothingOwed(null, "PRB-1")).not.toThrow();
   });
 });
 

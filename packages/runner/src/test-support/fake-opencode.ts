@@ -44,6 +44,8 @@ export interface FakeOpenCodeScript {
    * is refused `model not found` there however often it is asked for.
    */
   staleSnapshots?: number;
+  /** The `session/new`, counted from 1, at which the process ends with code 3 and a line on stderr, unanswered. */
+  exitAtSession?: number;
   /** Each turn's steps, and how it ends where nothing refused it. */
   turns: ReadonlyArray<{ steps: readonly FakeOpenCodeStep[]; stop?: string; usage?: Record<string, number> }>;
 }
@@ -103,6 +105,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   if (m.method === undefined && waiting.has(m.id)) { const resolve = waiting.get(m.id); waiting.delete(m.id); resolve(m.result); return; }
   if (m.method === 'initialize') send({ id: m.id, result: { protocolVersion: 1, agentCapabilities: {} } });
+  if (m.method === 'session/new' && sessions + 1 === script.exitAtSession) { process.stderr.write('opencode crashed\n'); setTimeout(() => process.exit(3), 20); return; }
   if (m.method === 'session/new') {
     cwd = m.params.cwd;
     if (!snapshots.has(cwd)) snapshots.set(cwd, snapshots.size < (script.staleSnapshots ?? 0) ? 'stale' : 'settled');

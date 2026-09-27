@@ -18,10 +18,22 @@ import { z } from "zod";
  * {@link interviewSaidMessage} writes.
  */
 
-/** One turn from the person. */
+/**
+ * One turn, which the session answers as it answers the person.
+ *
+ * `asking` is what the turn does to the questions the session has put and is
+ * still waiting on, where the host has read that itself (D-117). `kept` is a
+ * turn that is not the person's word on them: the host's own sentence, or the
+ * person's answer to a question of the host's standing in front of them. `ended`
+ * is the person saying something of their own past a question of the host's,
+ * which ends the questions waiting behind it as much as the host's own. With
+ * none, the turn is the person's to the first group waiting, and read against
+ * it ({@link groupAnswers}).
+ */
 export const InterviewTurnSchema = z.strictObject({
   type: z.literal("turn"),
   text: z.string().min(1),
+  asking: z.enum(["kept", "ended"]).optional(),
 });
 export type InterviewTurn = z.infer<typeof InterviewTurnSchema>;
 
@@ -239,13 +251,16 @@ export const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
  * order they were read, for more than one.
  *
  * Read back rather than flagged on the way in, so a person who types the
- * wording out themselves is answering as much as one who picked it, and so
- * nothing has to be threaded through the turn the host writes down. A part
+ * wording out themselves is answering as much as one who picked it. A part
  * answered in the person's own words has no offered label to match, so a
- * lettered line counts on anything said under its letter. A single part has no
- * letter to hang that on: its own words are a sentence like any other, and a
- * sentence the card cannot tell from talking past the question ends the asking,
- * which is what puts an unclosed problem between the plan and the spec again.
+ * lettered line counts on anything said under its letter but word for word an
+ * answer one of the `others` offers and its own part does not: that line is
+ * the other question's answer, and the turn answers a group other than this
+ * one. `others` are the groups still waiting behind this one, which is where
+ * such a turn comes from. A single part has no letter to hang its own words
+ * on: they are a sentence like any other, and a sentence the card cannot tell
+ * from talking past the question ends the asking, which is what puts an
+ * unclosed problem between the plan and the spec again.
  *
  * It lives here, beside the shape of the question it reads, because more than
  * one surface counts on it and a second copy would drift: the desktop host
@@ -254,19 +269,12 @@ export const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
  * counted answers its own way would let a plan be drafted around a question
  * the person can still see on screen.
  */
-export function answersGroup(group: InterviewQuestionGroup, text: string): boolean {
-  if (group.parts.length === 1)
-    return [
-      ...group.parts[0]!.options.map((option) => option.label),
-      LEAVE_IT_TO_THE_INTERVIEW,
-    ].includes(text.trim());
-  const lines = text.trim().split("\n");
-  if (lines.length !== group.parts.length) return false;
-  return group.parts.every((_part, index) => {
-    const prefix = `${PART_LETTERS[index] ?? index + 1})`;
-    const line = lines[index]!.trim();
-    return line.startsWith(prefix) && line.slice(prefix.length).trim().length > 0;
-  });
+export function answersGroup(
+  group: InterviewQuestionGroup,
+  text: string,
+  others: readonly InterviewQuestionGroup[],
+): boolean {
+  return groupAnswers(group, text, others) !== null;
 }
 
 /**
@@ -275,13 +283,30 @@ export function answersGroup(group: InterviewQuestionGroup, text: string): boole
  * ({@link answersGroup}): the turn whole for a single part, and each lettered
  * line past its letter for more than one.
  */
-export function groupAnswers(group: InterviewQuestionGroup, text: string): string[] | null {
-  if (!answersGroup(group, text)) return null;
-  if (group.parts.length === 1) return [text.trim()];
-  return text
-    .trim()
-    .split("\n")
-    .map((line, index) => line.trim().slice(`${PART_LETTERS[index] ?? index + 1})`.length).trim());
+export function groupAnswers(
+  group: InterviewQuestionGroup,
+  text: string,
+  others: readonly InterviewQuestionGroup[],
+): string[] | null {
+  const offered = (part: InterviewQuestionPart): string[] => [
+    ...part.options.map((option) => option.label.trim()),
+    LEAVE_IT_TO_THE_INTERVIEW,
+  ];
+  if (group.parts.length === 1)
+    return offered(group.parts[0]!).includes(text.trim()) ? [text.trim()] : null;
+  const lines = text.trim().split("\n");
+  if (lines.length !== group.parts.length) return null;
+  const elsewhere = new Set(others.flatMap((other) => other.parts.flatMap(offered)));
+  const answers: string[] = [];
+  for (const [index, part] of group.parts.entries()) {
+    const prefix = `${PART_LETTERS[index] ?? index + 1})`;
+    const line = lines[index]!.trim();
+    const said = line.slice(prefix.length).trim();
+    if (!line.startsWith(prefix) || said.length === 0) return null;
+    if (elsewhere.has(said) && !offered(part).includes(said)) return null;
+    answers.push(said);
+  }
+  return answers;
 }
 
 /** A question as {@link sameQuestion} reads it: its words, and the labels of the answers it offers. */

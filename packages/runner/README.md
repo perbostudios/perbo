@@ -102,8 +102,8 @@ The half of execution that is not the agent.
   - `internal/start.ts` — everything a run can be refused for before it has cost anything.
   - `internal/provision.ts` — the worktree a round's attempt runs in.
   - `internal/continuation.ts` — the remediation a re-run continues, the delivery a person's answers
-    take without a round (D-132), and whether the branch
-    is still the one that review judged.
+    take without a round (D-132), the refusal of a run that owes the person's answers
+    (`refuseOwedAnswers`), and whether the branch is still the one that review judged.
   - `internal/relevel.ts` — a re-level: the branch put back to what the pull request has, and the
     judgement of the merged result where no executor ran.
   - `internal/level.ts` — the three points the base branch's tip is merged into the attempt's branch.

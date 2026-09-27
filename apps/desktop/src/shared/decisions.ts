@@ -5,7 +5,9 @@ import {
   decisionChoicesFor,
   loopOnRecord,
   NOTHING_TRIED,
+  owedAnswers,
   routedToPerson,
+  type DecisionChoice,
   type HistoryRow,
   type LoopOnReview,
   type RecordedBundle,
@@ -63,7 +65,7 @@ export function decisionQuestions(
       })
     | null
     | undefined,
-  settled: SettledFindings = { keys: new Set(), refusal: null, loop: NOTHING_TRIED },
+  settled: SettledFindings = NOTHING_SETTLED,
 ): DecisionQuestion[] {
   const decides = (finding: Pick<Finding, "key" | "status" | "routing">): boolean =>
     review != null && decidable(review, settled.loop) && routedToPerson(finding, settled.loop);
@@ -89,6 +91,21 @@ export function decisionQuestions(
     }));
 }
 
+/**
+ * The questions a run of the ticket would start without an answer to, as the
+ * loop reads them (`owedAnswers`): the loop refuses such a run, the host
+ * refuses it before starting one, and the contract page offers the questions
+ * instead of Start the loop.
+ */
+export function owedQuestions(
+  review: Parameters<typeof decisionQuestions>[0],
+  settled: SettledFindings = NOTHING_SETTLED,
+): DecisionQuestion[] {
+  if (review == null) return [];
+  const owed = new Set(owedAnswers({ review, loop: settled.loop, answers: settled.answers }));
+  return decisionQuestions(review, settled).filter((question) => owed.has(question.id));
+}
+
 /** Text as a sentence that stands on its own: a capital first, and a stop at the end where it has none. */
 function asSentence(text: string): string {
   const trimmed = text.trim();
@@ -96,11 +113,11 @@ function asSentence(text: string): string {
   return /[.!?]$/.test(capital) ? capital : `${capital}.`;
 }
 
-const ShippedSchema = z.object({
+const AnsweredSchema = z.object({
   review: z.object({ reference: z.string() }),
   finding_key: z.string(),
   decision: z.literal("decide"),
-  choice: z.literal("ship_as_is"),
+  choice: z.enum(["approach", "let_it_decide", "ship_as_is"]),
   decided_at: z.string(),
   superseded_at: z.null(),
 });
@@ -121,7 +138,12 @@ export interface SettledFindings {
   refusal: { sentence: string; open: ReadonlySet<string> } | null;
   /** What the loop has done on the review (`loopOnRecord`), which says who each finding is asked of. */
   loop: LoopOnReview;
+  /** Each standing answer that answers the review (`answersReview`), by finding. */
+  answers: ReadonlyMap<string, DecisionChoice>;
 }
+
+/** A review nothing has settled or tried. */
+const NOTHING_SETTLED: SettledFindings = { keys: new Set(), refusal: null, loop: NOTHING_TRIED, answers: new Map() };
 
 /**
  * The findings of the ticket's last review that are settled without another
@@ -141,7 +163,7 @@ export function settledFindings(detail: {
 }): SettledFindings {
   const at = detail.attempts.findLastIndex((attempt) => attempt.review !== null);
   const review = detail.attempts[at]?.review;
-  if (review === undefined || review === null) return { keys: new Set(), refusal: null, loop: NOTHING_TRIED };
+  if (review === undefined || review === null) return NOTHING_SETTLED;
   const verified = detail.attempts.slice(at + 1).flatMap((attempt) => {
     const parsed = VerifiedSchema.safeParse(attempt.verification);
     return parsed.success ? [parsed.data] : [];
@@ -170,17 +192,18 @@ export function settledOnRecord(input: {
   verification: { open_keys: readonly string[]; deterministic_failure: string | null } | null;
 }): SettledFindings {
   const onRecord = loopOnRecord({ review_id: input.review_id, bundles: input.bundles, history: input.history });
-  if (onRecord === null) return { keys: new Set(), refusal: null, loop: NOTHING_TRIED };
-  const shipped = input.verdicts.flatMap((row) => {
-    const parsed = ShippedSchema.safeParse(row);
+  if (onRecord === null) return NOTHING_SETTLED;
+  const answered = input.verdicts.flatMap((row) => {
+    const parsed = AnsweredSchema.safeParse(row);
     if (!parsed.success) return [];
-    const { review: named, finding_key, decided_at } = parsed.data;
+    const { review: named, decided_at } = parsed.data;
     // A decision names a review by its id, or the ticket or its pull request.
     const review_id = named.reference.startsWith("rev_") ? named.reference : null;
     return answersReview({ decided_at, review_id }, { review_id: input.review_id, recorded_at: onRecord.reviewed_at })
-      ? [finding_key]
+      ? [parsed.data]
       : [];
   });
+  const shipped = answered.filter((row) => row.choice === "ship_as_is").map((row) => row.finding_key);
   const last = input.verification;
   return {
     keys: new Set([...shipped, ...onRecord.loop.closed]),
@@ -189,6 +212,7 @@ export function settledOnRecord(input: {
         ? null
         : { sentence: last.deterministic_failure, open: new Set(last.open_keys) },
     loop: onRecord.loop,
+    answers: new Map(answered.map((row) => [row.finding_key, row.choice])),
   };
 }
 
@@ -204,4 +228,10 @@ export function questionsOnRecord(detail: {
 }): DecisionQuestion[] {
   const review = detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
   return decisionQuestions(review, settledFindings(detail));
+}
+
+/** The questions a run of the ticket would start without an answer to, as its record puts them (`owedQuestions`). */
+export function owedOnRecord(detail: Parameters<typeof questionsOnRecord>[0]): DecisionQuestion[] {
+  const review = detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
+  return owedQuestions(review, settledFindings(detail));
 }

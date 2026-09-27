@@ -95,6 +95,31 @@ describe("the remediation a re-run continues", () => {
     expect(continuing?.head_commit).toBe("fed4321");
   });
 
+  it("never gives a finding the executor declined again, though an earlier round was given it", () => {
+    const bundles = store();
+    const declined = finding({ key: "a".repeat(64) });
+    const open = finding({ key: "b".repeat(64) });
+    writeReview(
+      bundles,
+      makeReview({ decision: "remediable", findings: [declined, open] }),
+      "2026-08-27T00:00:00.000Z",
+    );
+    writeVerification(
+      bundles,
+      { findings_given: `${declined.key},${open.key}`, findings_open: `${declined.key},${open.key}`, head_commit: "fed4321" },
+      "2026-08-27T01:00:00.000Z",
+    );
+    writeVerification(
+      bundles,
+      { findings_given: open.key, findings_open: open.key, findings_declined: declined.key, head_commit: "fed4322" },
+      "2026-08-27T02:00:00.000Z",
+    );
+
+    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] });
+
+    expect(continuing?.findings.map((entry) => entry.key)).toEqual([open.key]);
+  });
+
   it("reads the commit from the review itself where no round has verified yet", () => {
     const bundles = store();
     writeReview(

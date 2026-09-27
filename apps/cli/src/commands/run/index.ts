@@ -56,6 +56,7 @@ import {
 } from "@perbo/workspace";
 import {
   AGENT_PROVIDERS,
+  AnswersOwedError,
   DEFAULT_DELIVERED_CHECKS_BOUND_MS,
   ResumeRefusedError,
   RunRefusedError,
@@ -66,6 +67,7 @@ import {
   readDeliveredChecks,
   renderPreflight,
   publishRetained,
+  refuseOwedAnswers,
   resolveResumeSource,
   resumeNote,
   runTicket,
@@ -1066,6 +1068,29 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     }
   }
 
+  // D-132: the answers a person gave to findings routed to them, which close
+  // those findings, read from this store's verdicts record; a record that
+  // cannot be read is named on stderr and closes nothing. And a ticket whose
+  // last run finished trying, with what it left open unanswered and nothing
+  // handed on, is refused here, before the machine is checked and before the
+  // ticket is moved, in the loop's own words (`refuseOwedAnswers`); the loop
+  // asks again under the run lock.
+  const decisionsStore = admitted?.dir ?? local?.store ?? null;
+  const decided =
+    decisionsStore === null
+      ? null
+      : decidedFindings(readLocalVerdictsOrWarn(decisionsStore, streams).verdicts, contract.ticket_id);
+  const history = admitted === null ? null : readTicket(admitted.dir, admitted.key).history;
+  if (retained === null && history !== null) {
+    try {
+      await refuseOwedAnswers({ config: { ...config, relevel: args.relevel }, contract, decided: decided ?? [], history });
+    } catch (error) {
+      if (!(error instanceof AnswersOwedError)) throw error;
+      streams.stderr(`error: ${physicalLine(error.message)}\n`);
+      return EXIT_CODES.did_not_complete;
+    }
+  }
+
   // What a run installs a worktree with, resolved before the machine is checked
   // because the binary that runs it is one of the things the machine can lack.
   const install = config.materialization_manifest?.install ?? proposedInstall(config.repository_root);
@@ -1247,7 +1272,6 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     );
   }
 
-  const decisionsStore = admitted?.dir ?? local?.store ?? null;
   if (admitted !== null && retained !== null) {
     return await publishRetainedTicket({
       options,
@@ -1271,22 +1295,11 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
         delivery_checks_bound_ms: deliveryBoundMs,
       },
       contract,
-      // D-132: the answers a person
-      // gave to findings routed to them, which close those findings. Read from
-      // this store's verdicts record; a record that cannot be read is named on
-      // stderr and closes nothing.
-      ...(decisionsStore === null
-        ? {}
-        : {
-            decided: decidedFindings(
-              readLocalVerdictsOrWarn(decisionsStore, streams).verdicts,
-              contract.ticket_id,
-            ),
-          }),
-      // The ticket's rows, which say whether a run since its last review
-      // finished trying and so put what it left open to the person
-      // (`loopOnReview`).
-      ...(admitted === null ? {} : { history: readTicket(admitted.dir, admitted.key).history }),
+      // D-132: the answers read above, and the ticket's rows, which say
+      // whether a run since its last review finished trying and so put what it
+      // left open to the person (`loopOnReview`).
+      ...(decided === null ? {} : { decided }),
+      ...(history === null ? {} : { history }),
       ...(options.hooks ? { hooks: options.hooks } : {}),
       ...(progress ? { onProgress: progress } : {}),
       // A run with no ticket has nowhere else to put the pull request: the

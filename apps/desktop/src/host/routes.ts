@@ -33,6 +33,7 @@ import {
   approveArgs,
   assertEditable,
   assertDecidable,
+  assertNothingOwed,
   assertResumable,
   decisionArgs,
   doctorArgs,
@@ -1014,6 +1015,19 @@ function loop(
       const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
       if (resumeFrom)
         assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
+      // A run that owes the person's answers is refused before the CLI starts
+      // (D-132); an explicit resume carries an attempt's work into a fresh
+      // review, and an approval starts a ticket no run has tried.
+      if (request.kind === "run" && !request.approve && !resumeFrom)
+        assertNothingOwed(
+          reviewOnRecord({
+            bundles: await m.tickets.bundles(repo),
+            ticket: await m.tickets.ticket(repo, request.key),
+            objectsDirectory: objectsPath(repo),
+            verdictsPath: verdictsPath(repo),
+          }),
+          request.key,
+        );
       if (request.kind === "decide") {
         // Each answer closes its finding
         // (D-132); the principle

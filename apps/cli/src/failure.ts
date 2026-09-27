@@ -1,6 +1,7 @@
 import { EXIT_CODES, LimitExceededError } from "@perbo/contracts";
 import {
   AgentConfigurationPresentError,
+  AnswersOwedError,
   DeliveryError,
   RecordLockedError,
   ResumeRefusedError,
@@ -37,6 +38,7 @@ export function describeFailure(command: string, error: unknown): { message: str
     command === "review" ? "the review" : command === "run" ? "the run" : `\`perbo ${command}\``;
   const code = EXIT_CODES.did_not_complete;
   if (error instanceof RunRefusedError) return { message: refusalReport(noun, error), code };
+  if (error instanceof AnswersOwedError) return { message: error.message, code };
   if (error instanceof LimitExceededError) {
     const raise =
       error.reason === "limit_exceeded" && error.resource

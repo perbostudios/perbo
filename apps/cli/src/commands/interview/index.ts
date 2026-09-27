@@ -21,6 +21,7 @@ import {
   encodeInterviewEvent,
   type InterviewEvent,
   type InterviewQuestionGroup,
+  type InterviewTurn,
 } from "@perbo/contracts";
 import {
   ADMISSION_RULES,
@@ -49,7 +50,13 @@ import {
   type Grammar,
 } from "../../command-line/grammar.js";
 import { edit, type EditInput } from "../edit/index.js";
-import { askingRecord, type AskingRecord } from "./asking.js";
+import {
+  AskingStateSchema,
+  NOTHING_ASKED,
+  askingRecord,
+  type AskingRecord,
+  type AskingState,
+} from "./asking.js";
 import { withoutNextStep } from "../../next-step.js";
 import { carryDrift, driftKeyFor, type DriftKey } from "../../store/drift.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
@@ -1880,6 +1887,11 @@ interface InterviewSessionRecord {
   model: string | null;
   /** The provider whose id this is: the two keep separate namespaces. */
   provider: InterviewProvider;
+  /**
+   * What the session has put to the person and what they answered, kept as
+   * it changes so a resumed session refuses a question it asked before (D-117).
+   */
+  asking: AskingState;
 }
 
 /**
@@ -2053,6 +2065,20 @@ export async function interview(
   let carry: Carry | null = null;
   /** A tool that may write was admitted since the pair was last looked at. */
   let written = false;
+  /** The folder the spec is in, where the session's record is kept beside it. */
+  const specFolderPath = join(repositoryRoot, dirname(spec));
+  /** The session's record once it has an id, kept beside the spec as it changes. */
+  let sessionRecord: InterviewSessionRecord | null = null;
+  /** Write the session's record, or say why it was not written. */
+  const keepSession = (record: InterviewSessionRecord): void => {
+    const unrecorded = recordSession(repositoryRoot, specFolderPath, record);
+    if (unrecorded !== null) {
+      streams.stderr(
+        `this session was not recorded beside its spec, so --session ${record.session_id} will not ` +
+          `find it or what it asked: ${unrecorded}\n`,
+      );
+    }
+  };
   const toolContext: InterviewContext = {
     cwd: context.cwd,
     repo: args.repo,
@@ -2062,7 +2088,14 @@ export async function interview(
     spec,
     specWrittenThisTurn: permission.specWrittenThisTurn,
     beforePlanEdit: () => look(),
-    asking: askingRecord(),
+    asking: askingRecord(
+      args.session === null ? NOTHING_ASKED : recordedAsking(specFolderPath, args.session, streams),
+      (asking) => {
+        if (sessionRecord === null) return;
+        sessionRecord = { ...sessionRecord, asking };
+        keepSession(sessionRecord);
+      },
+    ),
     planMoved: () => {
       if (carry === null) return;
       carry.moved = true;
@@ -2161,18 +2194,15 @@ export async function interview(
       `interview ${id} in ${repositoryRoot}, writing ${spec}, CONTEXT.md and ${adr}; anything else ` +
         "is refused rather than asked, and it cannot approve, publish or merge\n",
     );
-    const unrecorded = recordSession(repositoryRoot, join(repositoryRoot, dirname(spec)), {
+    sessionRecord = {
       session_id: id,
       spec,
       started_at: context.now.toISOString(),
       model: args.model,
       provider: args.provider,
-    });
-    if (unrecorded !== null) {
-      streams.stderr(
-        `this session was not recorded beside its spec, so --session ${id} will not find it: ${unrecorded}\n`,
-      );
-    }
+      asking: toolContext.asking.state(),
+    };
+    keepSession(sessionRecord);
   };
 
   const transport =
@@ -2205,7 +2235,7 @@ export async function interview(
       }
       return decided;
     },
-    turns: answering(turnsAsText(context.turns), (turn) => {
+    turns: answering(turnsOf(context.turns), (turn) => {
       // Read against what was asked before the session has it, so a question
       // it puts again while it reads the answer is known to be answered.
       toolContext.asking.heard(turn);
@@ -2427,27 +2457,50 @@ function isSymlink(path: string): boolean {
 }
 
 /**
- * The person's turns, with `began` run on each before it is handed on, so the
- * readings the turn's own writes are measured against are taken before it can
- * make them.
+ * The turns' text, with `began` run on each turn before it is handed on, so
+ * the readings the turn's own writes are measured against are taken before it
+ * can make them.
  */
 async function* answering(
-  turns: AsyncGenerator<string>,
-  began: (turn: string) => void,
+  turns: AsyncGenerator<InterviewTurn>,
+  began: (turn: InterviewTurn) => void,
 ): AsyncGenerator<string> {
   for await (const turn of turns) {
     began(turn);
-    yield turn;
+    yield turn.text;
   }
 }
 
-/** The person's turns, as text, one line of stdin each. */
-async function* turnsAsText(turns: AsyncIterable<string> | undefined): AsyncGenerator<string> {
+/** The turns, one line of stdin each. */
+async function* turnsOf(turns: AsyncIterable<string> | undefined): AsyncGenerator<InterviewTurn> {
   for await (const line of turns ?? linesOfStdin()) {
     const turn = decodeInterviewTurn(line);
-    if (turn === null) continue;
-    yield turn.text;
+    if (turn !== null) yield turn;
   }
+}
+
+/**
+ * What the session resumed asked before, from its record beside the spec, or
+ * nothing where the record is another session's. A record of this session's
+ * whose asking cannot be read is said, and read as nothing asked: the session
+ * goes on, and may ask again what it asked before.
+ */
+function recordedAsking(folder: string, session: string, streams: Streams): AskingState {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(join(folder, INTERVIEW_SESSION_FILE), "utf8"));
+  } catch {
+    return NOTHING_ASKED;
+  }
+  const found = FoundSessionSchema.safeParse(raw);
+  if (!found.success || found.data.session_id !== session) return NOTHING_ASKED;
+  const asking = AskingStateSchema.safeParse((raw as { asking?: unknown }).asking);
+  if (asking.success) return asking.data;
+  streams.stderr(
+    `what the session ${session} asked could not be read from ${INTERVIEW_SESSION_FILE} beside its spec, ` +
+      "so a question it asked before is not refused if it asks it again\n",
+  );
+  return NOTHING_ASKED;
 }
 
 /** stdin, one line at a time. */

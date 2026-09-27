@@ -755,7 +755,7 @@ export class ContractEditing {
       const standing = standingAsked(session);
       if (standing === null) return;
       const group = standing.line.groups[standing.asking.answered];
-      const answers = group === undefined ? null : groupAnswers(group, text);
+      const answers = standingAnswers(session, standing, text);
       if (group === undefined || answers === null) {
         session.asking = null;
         session.askingNext = [];
@@ -776,20 +776,20 @@ export class ContractEditing {
   }
 
   /**
-   * End the interview's own asking where its session has gone on without it:
-   * a turn that wrote the spec and put no question of its own has finished
-   * with whatever it asked before, and a card left up for that would hold
-   * Generate plan back for questions nobody is waiting on. Every asking waiting
-   * behind it goes too. The lines stay in the conversation to be read. Only
-   * ever called on a planning with no plan yet, which is when the spec is
-   * handed over, so what stands is the interview's own: a problem between the
-   * plan and the spec needs a plan to be read against.
+   * What a turn about to go to the interview does to the questions its session
+   * is waiting on, where that is the host's to say rather than the session's
+   * to read off the turn (D-117): a problem between the plan and the spec is
+   * the host's own question, and the session never saw it put. The person
+   * answering it leaves the session's questions where they are, and saying
+   * something of their own past it ends them with it, as {@link answerAsking}
+   * does. Undefined where the session's own group is in front of the person,
+   * or nothing is, which the interview reads off the turn as the host does.
    */
-  leaveAsking(id: string): void {
-    this.update(id, (session) => {
-      session.asking = null;
-      session.askingNext = [];
-    });
+  turnOnAsking(id: string, text: string): "kept" | "ended" | undefined {
+    const session = this.read(id);
+    const standing = standingAsked(session);
+    if (standing === null || standing.line.drift === undefined) return undefined;
+    return standingAnswers(session, standing, text) === null ? "ended" : "kept";
   }
 
   /**
@@ -1526,6 +1526,28 @@ function standingAsked(
     putNextAsking(session);
   }
   return null;
+}
+
+/**
+ * What a turn said to each part of the group in front of the person, read
+ * against the groups waiting behind it as the interview reads it against its
+ * own ({@link groupAnswers}); null where it is not that group's answer.
+ */
+function standingAnswers(
+  session: EditingSession,
+  standing: NonNullable<ReturnType<typeof standingAsked>>,
+  text: string,
+): string[] | null {
+  const group = standing.line.groups[standing.asking.answered];
+  if (group === undefined) return null;
+  const behind = [
+    ...standing.line.groups.slice(standing.asking.answered + 1),
+    ...session.askingNext.flatMap((entry) => {
+      const line = session.conversation.find((each) => each.n === entry)?.line;
+      return line?.kind === "asked" ? line.groups : [];
+    }),
+  ];
+  return groupAnswers(group, text, behind);
 }
 
 /** Put the first asking waiting behind the one in front, or nothing where none waits. */

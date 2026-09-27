@@ -5,10 +5,14 @@ import {
   decisionChoicesFor,
   DECISION_CHOICES,
   FINISHED_TRYING,
+  leftToPrinciple,
+  loopOnRecord,
   loopOnReview,
   NEVER_HANDED_FAMILIES,
   NOTHING_TRIED,
+  owedAnswers,
   routedToPerson,
+  type DecisionChoice,
 } from "./decision.js";
 import { gateClosedNote } from "./retained.js";
 import { FINDING_ROUTINGS, REVIEW_DECISIONS } from "./review.js";
@@ -23,7 +27,11 @@ import { FINDING_ROUTINGS, REVIEW_DECISIONS } from "./review.js";
 const KEY = "a".repeat(64);
 const REVIEWED_AT = "2026-09-27T12:48:05.305Z";
 const ended = (outcome: string, at = "2026-09-27T12:53:04.517Z") => ({ at, note: gateClosedNote(outcome) });
-const finished = (closed: readonly string[] = []) => ({ finished: true, closed: new Set(closed) });
+const finished = (closed: readonly string[] = [], declined: readonly string[] = []) => ({
+  finished: true,
+  closed: new Set(closed),
+  declined: new Set(declined),
+});
 
 describe("which findings are a person's to answer", () => {
   it("is an open finding routed blocks or escalates while the executor is still trying", () => {
@@ -37,11 +45,62 @@ describe("which findings are a person's to answer", () => {
     expect(routedToPerson({ key: KEY, status: "open", routing: "remediable" }, finished([KEY]))).toBe(false);
   });
 
+  it("is never one the executor declined, whatever its routing: a principle answers that (D-065)", () => {
+    for (const routing of ["blocks", "escalates", "remediable"] as const) {
+      expect(routedToPerson({ key: KEY, status: "open", routing }, finished([], [KEY])), routing).toBe(false);
+    }
+    const other = "b".repeat(64);
+    expect(routedToPerson({ key: other, status: "open", routing: "remediable" }, finished([], [KEY]))).toBe(true);
+  });
+
   it("is never one already resolved or waived", () => {
     for (const status of ["resolved", "waived"] as const) {
       expect(routedToPerson({ key: KEY, status, routing: "blocks" }, NOTHING_TRIED), status).toBe(false);
       expect(routedToPerson({ key: KEY, status, routing: "remediable" }, finished()), status).toBe(false);
     }
+  });
+});
+
+describe("which findings are left to a principle", () => {
+  it("is an open finding the executor declined, which no choice answers, and no other", () => {
+    expect(leftToPrinciple({ key: KEY, status: "open", routing: "remediable" }, finished([], [KEY]))).toBe(true);
+    expect(leftToPrinciple({ key: KEY, status: "open", routing: "blocks" }, finished([], [KEY]))).toBe(true);
+    expect(leftToPrinciple({ key: KEY, status: "resolved", routing: "remediable" }, finished([], [KEY]))).toBe(false);
+    expect(leftToPrinciple({ key: KEY, status: "open", routing: "remediable" }, finished())).toBe(false);
+  });
+});
+
+describe("the findings a run would start without an answer to", () => {
+  const [x, y, z] = ["a", "b", "c"].map((digit) => digit.repeat(64)) as [string, string, string];
+  const open = (key: string, rule_id = "product.preference") =>
+    ({ key, status: "open", routing: "remediable", rule_id }) as const;
+  const owed = (
+    loop: ReturnType<typeof finished> | typeof NOTHING_TRIED,
+    answers: Array<[string, DecisionChoice]> = [],
+    findings = [open(x), open(y)],
+  ) => owedAnswers({ review: { decision: "remediable", findings }, loop, answers: new Map(answers) });
+
+  it("is every finding a finished loop left the person unanswered, where none is handed on", () => {
+    expect(owed(finished())).toEqual([x, y]);
+    expect(owed(finished(), [[x, "ship_as_is"]])).toEqual([y]);
+    expect(owed(finished(), [[x, "ship_as_is"], [y, "ship_as_is"]])).toEqual([]);
+  });
+
+  it("is none where one is handed to the executor, since the run is the round on it", () => {
+    expect(owed(finished(), [[x, "approach"]])).toEqual([]);
+    expect(owed(finished(), [[x, "let_it_decide"]])).toEqual([]);
+  });
+
+  it("counts an answer the finding does not take as none", () => {
+    expect(owed(finished(), [[z, "approach"]], [open(z, "security.secret_in_diff")])).toEqual([z]);
+  });
+
+  it("leaves out what a round closed and what the executor declined", () => {
+    expect(owed(finished([x], [y]), [], [open(x), open(y), open(z)])).toEqual([z]);
+  });
+
+  it("is none while the loop is still trying", () => {
+    expect(owed(NOTHING_TRIED)).toEqual([]);
   });
 });
 
@@ -80,9 +139,9 @@ describe("what the loop has done on a review", () => {
       reviewed_at: REVIEWED_AT,
       history: [],
       verifications: [
-        { given: [a!, b!, c!], open: [a!, b!] },
+        { given: [a!, b!, c!], open: [a!, b!], declined: [] },
         // A round scoped to one finding says nothing of the others.
-        { given: [a!], open: [] },
+        { given: [a!], open: [], declined: [] },
       ],
     });
     expect([...loop.closed].sort()).toEqual([a, c]);
@@ -90,11 +149,38 @@ describe("what the loop has done on a review", () => {
       reviewed_at: REVIEWED_AT,
       history: [],
       verifications: [
-        { given: [a!], open: [] },
-        { given: [a!], open: [a!] },
+        { given: [a!], open: [], declined: [] },
+        { given: [a!], open: [a!], declined: [] },
       ],
     });
     expect([...reopened.closed]).toEqual([]);
+  });
+
+  it("holds every finding a round since the review declined", () => {
+    const [a, b] = ["a", "b"].map((digit) => digit.repeat(64));
+    const loop = loopOnReview({
+      reviewed_at: REVIEWED_AT,
+      history: [],
+      verifications: [
+        { given: [b!], open: [b!], declined: [a!] },
+        // A later round given only the other finding does not take the decline back.
+        { given: [b!], open: [b!], declined: [] },
+      ],
+    });
+    expect([...loop.declined]).toEqual([a]);
+  });
+
+  it("reads the declines off each closure verification's bundle", () => {
+    const [a, b] = ["a", "b"].map((digit) => digit.repeat(64));
+    const review = { kind: "review" as const, subject_id: "rev_0000000000000001", created_at: REVIEWED_AT, inputs: {} };
+    const verification = {
+      kind: "review" as const,
+      subject_id: "cv_att_1",
+      created_at: "2026-09-27T12:50:00.000Z",
+      inputs: { findings_given: b!, findings_open: b!, findings_declined: a! },
+    };
+    const onRecord = loopOnRecord({ review_id: review.subject_id, bundles: [review, verification], history: [] });
+    expect([...onRecord!.loop.declined]).toEqual([a]);
   });
 });
 

@@ -17,9 +17,11 @@ export {
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  leftToPrinciple,
   loopOnRecord,
   loopOnReview,
   NOTHING_TRIED,
+  owedAnswers,
   routedToPerson,
 } from "./decision.js";
 export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";

@@ -103,9 +103,13 @@ export const ADMISSION_RULES = {
    */
   prohibited_path: "write_prohibited_path",
   /**
-   * A `git config` write to git's own credential wiring — `credential.*`,
+   * A write to git's own credential wiring — `credential.*`,
    * `core.sshCommand`, a `url.*.insteadOf`/`pushInsteadOf`, or
-   * `include.*`/`includeIf.*` — at any scope (SCP-201). Not a write-target
+   * `include.*`/`includeIf.*` — at any scope, through `git config`, `-c`,
+   * `--config-env`, `GIT_CONFIG_PARAMETERS` or `GIT_CONFIG_KEY_<n>`; and the
+   * program git runs chosen for it — `GIT_SSH_COMMAND`, `GIT_SSH`,
+   * `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_EXEC_PATH` or `--exec-path=<dir>`
+   * (SCP-201). Not a write-target
    * rule: there is no path to resolve, only a key to read, and `git config
    * user.name` has to stay admitted while `git config credential.helper` does
    * not.
@@ -486,8 +490,8 @@ const ALIAS_BECAUSE = "so the verb git runs is not the one the line names";
 
 /**
  * Why one command line defines a git alias on the way in, or null where it
- * defines none. The environment the line gives git — a leading assignment,
- * or one handed to `env`, `export` or `declare -x` — and then, where the
+ * defines none. The environment the line gives git (`lineEnvironment`) —
+ * `GIT_CONFIG_PARAMETERS` read by git's own grammar for it — and then, where the
  * command is `git`, every `-c`/`--config-env` before the verb, and the key a
  * `git config` write names. A `-c` that sets no alias (`git -c core.pager=cat
  * branch -a`) is no definition.
@@ -500,21 +504,23 @@ function gitAliasDefinition(text: string): string | null {
   const words = splitWords(text.trim());
   const keysSet = new Set<number>();
   let count: string | null = null;
-  for (let i = envAssignmentIntroducerWidth(words); i < words.length; i += 1) {
-    const match = ENV_ASSIGNMENT.exec(words[i]!);
-    if (match === null) break;
-    const name = match[1]!;
-    const value = unquote(match[2]!);
+  for (const { name, value } of lineEnvironment(words)) {
     if (name === "GIT_CONFIG_COUNT") count = value;
     if (GIT_CONFIG_KEY_VAR.test(name)) keysSet.add(Number(name.slice("GIT_CONFIG_KEY_".length)));
     if (GIT_CONFIG_FILE_ENV_VARS.has(name)) {
       return `${name} points git at a config file the line chooses, which can define a git alias, ${ALIAS_BECAUSE}`;
     }
-    if (name === GIT_CONFIG_PARAMETERS_VAR || GIT_CONFIG_KEY_VAR.test(name)) {
-      const keys = name === GIT_CONFIG_PARAMETERS_VAR ? [value] : [value.replace(/["']/g, "")];
-      if (BUILT.test(value) || keys.some((key) => /(^|['"\s])alias\./i.test(key))) {
+    if (name === GIT_CONFIG_PARAMETERS_VAR) {
+      const keys = keysInGitConfigParameters(value);
+      if (BUILT.test(value) || keys === null) {
+        return `${name} cannot be read off the line the way git reads it, so it can define a git alias through the environment, ${ALIAS_BECAUSE}`;
+      }
+      if (keys.some(isAliasKey)) {
         return `${name} defines a git alias through the environment, ${ALIAS_BECAUSE}`;
       }
+    }
+    if (GIT_CONFIG_KEY_VAR.test(name) && (BUILT.test(value) || isAliasKey(value))) {
+      return `${name} defines a git alias through the environment, ${ALIAS_BECAUSE}`;
     }
   }
   // `GIT_CONFIG_COUNT` switches on `GIT_CONFIG_KEY_0` up to one below it, and
@@ -825,8 +831,6 @@ const GIT_REPOSITORY_ENV_VARS = new Set([
 ]);
 /** git's global options that do the same from its own command line. */
 const GIT_REPOSITORY_FLAGS = new Set(["--git-dir", "--work-tree", "--namespace"]);
-/** `env`'s options that take the next word as their value. */
-const ENV_VALUE_OPTIONS = new Set(["-u", "-C", "-S", "-P", "--unset", "--chdir", "--split-string"]);
 
 /** Whether one command line's own program is `git`. */
 function runsGit(text: string): boolean {
@@ -845,15 +849,9 @@ function runsGit(text: string): boolean {
  */
 function gitRepositoryRedirect(text: string): string | null {
   const words = splitWords(text.trim());
-  let i = envAssignmentIntroducerWidth(words);
-  while (words[0] === "env" && i < words.length && words[i]!.startsWith("-") && !ENV_ASSIGNMENT.test(words[i]!)) {
-    i += ENV_VALUE_OPTIONS.has(words[i]!) ? 2 : 1;
-  }
-  for (; i < words.length; i += 1) {
-    const match = ENV_ASSIGNMENT.exec(words[i]!);
-    if (match === null) break;
-    if (GIT_REPOSITORY_ENV_VARS.has(match[1]!)) {
-      return `${match[1]} points git at a repository or config file the line picks rather than the worktree's own, whose aliases the line does not show`;
+  for (const { name } of lineEnvironment(words)) {
+    if (GIT_REPOSITORY_ENV_VARS.has(name)) {
+      return `${name} points git at a repository or config file the line picks rather than the worktree's own, whose aliases the line does not show`;
     }
   }
   if (!runsGit(text)) return null;
@@ -869,18 +867,57 @@ function gitRepositoryRedirect(text: string): string | null {
 }
 
 /**
- * The single-quoted `'key=value'` pairs `GIT_CONFIG_PARAMETERS` carries —
- * git's own format for passing config through the environment — read for
- * their keys alone.
+ * The keys `GIT_CONFIG_PARAMETERS` sets, read by git's own grammar for it:
+ * entries apart by blanks, each a single-quoted span — `'key=value'`, whose
+ * key ends at its first `=`, or `'key'` alone — or a quoted key joined by `=`
+ * to a quoted value or to none, `'key'='value'` and `'key'=`. A span goes on
+ * past `'\''` and `'\!'`, each of which stands for the character it escapes,
+ * and git trims the blanks around an old-style key. Null where the value
+ * does not keep to that grammar, since what a reading of it sets is then not
+ * one this guard can vouch for.
  */
-function keysInGitConfigParameters(value: string): string[] {
+function keysInGitConfigParameters(value: string): string[] | null {
   const keys: string[] = [];
-  const re = /'([^']*)'/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(value)) !== null) {
-    const pair = match[1]!;
-    const eq = pair.indexOf("=");
-    if (eq !== -1) keys.push(pair.slice(0, eq));
+  let i = 0;
+  /** The single-quoted span at `i`, its escapes applied, with `i` moved past it; null where there is none. */
+  const span = (): string | null => {
+    if (value[i] !== "'") return null;
+    let out = "";
+    for (i += 1; i < value.length; ) {
+      const ch = value[i]!;
+      i += 1;
+      if (ch !== "'") {
+        out += ch;
+        continue;
+      }
+      const escaped = value[i + 1];
+      if (value[i] === "\\" && (escaped === "'" || escaped === "!") && value[i + 2] === "'") {
+        out += escaped;
+        i += 3;
+        continue;
+      }
+      return out;
+    }
+    return null;
+  };
+  const atBlankOrEnd = (): boolean => i >= value.length || /\s/.test(value[i]!);
+  while (i < value.length) {
+    if (/\s/.test(value[i]!)) {
+      i += 1;
+      continue;
+    }
+    const first = span();
+    if (first === null) return null;
+    if (value[i] === "=") {
+      i += 1;
+      if (value[i] === "'" && span() === null) return null;
+      if (!atBlankOrEnd()) return null;
+      keys.push(first.trim());
+      continue;
+    }
+    if (!atBlankOrEnd()) return null;
+    const eq = first.indexOf("=");
+    keys.push((eq === -1 ? first : first.slice(0, eq)).trim());
   }
   return keys;
 }
@@ -909,35 +946,103 @@ function envAssignmentIntroducerWidth(words: readonly string[]): number {
   return 0;
 }
 
+/** `env`'s options that take the next word as their value, GNU's and the BSD `env` macOS ships. */
+const ENV_VALUE_OPTIONS = new Set(["-u", "-C", "-S", "-P", "-a", "--unset", "--chdir", "--split-string", "--argv0"]);
+
+/**
+ * One word's value as the shell hands it over: its quotes removed and its
+ * backslash escapes applied, with an expansion (`$X`, a backtick) left as
+ * written so a caller can still see the value is built when the line runs.
+ */
+function shellValue(word: string): string {
+  let value = "";
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < word.length; i += 1) {
+    const ch = word[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else value += ch;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\" && i + 1 < word.length && '$`"\\\n'.includes(word[i + 1]!)) value += word[(i += 1)];
+      else value += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "\\" && i + 1 < word.length) value += word[(i += 1)];
+    else value += ch;
+  }
+  return value;
+}
+
+/** One variable a command line puts in the environment of the program it runs. */
+interface EnvAssignment {
+  name: string;
+  /** As the shell hands it over (`shellValue`). */
+  value: string;
+}
+
+/**
+ * The environment one command line hands the program it runs: every
+ * `NAME=value` in front of it — bare, behind `export` or `declare -x`/
+ * `typeset -x`, or handed to `env` past env's own options (`-i`, `-u NAME`,
+ * `--unset=NAME`, `--`, …). The alias, credential and repository rules each
+ * read the line's environment through this one walk, so none of them stops
+ * where another reads on.
+ */
+function lineEnvironment(words: readonly string[]): EnvAssignment[] {
+  let i = envAssignmentIntroducerWidth(words);
+  while (words[0] === "env" && i < words.length && words[i]!.startsWith("-")) {
+    i += ENV_VALUE_OPTIONS.has(words[i]!) ? 2 : 1;
+  }
+  const assignments: EnvAssignment[] = [];
+  for (; i < words.length; i += 1) {
+    const match = ENV_ASSIGNMENT.exec(words[i]!);
+    if (match === null) break;
+    assignments.push({ name: match[1]!, value: shellValue(match[2]!) });
+  }
+  return assignments;
+}
+
 /**
  * The credential-shaping environment variable one command line sets, however
  * it sets it — a leading `NAME=value` before the program, the same shape
- * handed to `env`, or one `export`/`declare -x`/`typeset -x` away from it —
+ * handed to `env` past env's options, or one `export`/`declare -x`/`typeset
+ * -x` away from it (`lineEnvironment`) —
  * and the reason, or null where the leading run of assignments names none of
  * them (SCP-201 round 2: `git` reads `GIT_CONFIG_PARAMETERS`/
  * `GIT_CONFIG_KEY_<n>` and the SSH/askpass/exec-path variables from the
  * environment as readily as from the command line).
  */
 function gitCredentialEnvAssignment(text: string): { name: string; key: string | null } | null {
-  const words = splitWords(text.trim());
-  let i = envAssignmentIntroducerWidth(words);
-  while (i < words.length) {
-    const match = ENV_ASSIGNMENT.exec(words[i]!);
-    if (match === null) break;
-    const name = match[1]!;
-    const value = unquote(match[2]!);
+  for (const { name, value } of lineEnvironment(splitWords(text.trim()))) {
     if (GIT_PROGRAM_ENV_VARS.has(name)) return { name, key: null };
     if (name === GIT_CONFIG_PARAMETERS_VAR) {
-      for (const key of keysInGitConfigParameters(value)) {
-        if (isCredentialConfigKey(key)) return { name, key };
-      }
+      const key = keysInGitConfigParameters(value)?.find(isCredentialConfigKey);
+      if (key !== undefined) return { name, key };
     }
     if (GIT_CONFIG_KEY_VAR.test(name) && isCredentialConfigKey(value)) {
       return { name, key: value };
     }
-    i += 1;
   }
   return null;
+}
+
+/**
+ * The `--exec-path=<dir>` one `git` invocation is given, or null: the same
+ * choice of the programs git runs that `GIT_EXEC_PATH` makes, from git's own
+ * command line. Bare `--exec-path` prints the path and runs nothing, and git
+ * reads no separate-word form. Read past the global options, and on the rest
+ * of the line where the walk stops at an option it does not know.
+ */
+function gitExecPathChosen(text: string): string | null {
+  const words = splitWords(text.trim()).map(shellValue);
+  if (words.length === 0 || words[0]!.split("/").pop() !== "git") return null;
+  const { verbIndex } = gitGlobalOptions(words);
+  const before = words[verbIndex]?.startsWith("-") === true ? words.length : verbIndex;
+  return words.slice(1, before).find((word) => word.startsWith("--exec-path=")) ?? null;
 }
 
 /** An entry as Claude Code writes them: `Read`, `Bash(git status:*)`, `Bash(ls)`. */
@@ -1101,7 +1206,8 @@ function decide(
   // through `gh` (SCP-201) — or through `-c`/`--config-env` on any
   // subcommand, or through the environment `git` itself reads
   // (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_KEY_<n>`, and the variables that
-  // choose the SSH/askpass/exec-path program it runs). Not a deny-list entry:
+  // choose the SSH/askpass/exec-path program it runs), or through git's own
+  // `--exec-path=<dir>`. Not a deny-list entry:
   // `git config user.name` and `git -c color.ui=false status` have to stay
   // admitted, so the refusal is keyed on the config key named rather than on
   // the command's spelling.
@@ -1128,6 +1234,14 @@ function decide(
           env.key !== null
             ? `${env.name} names the credential key ${env.key} through the environment, which the credential rule refuses at any scope`
             : `${env.name} chooses the program git runs, which the credential rule refuses regardless of how it is set`,
+        );
+      }
+      const execPath = gitExecPathChosen(text);
+      if (execPath !== null) {
+        return denied(
+          ADMISSION_RULES.git_credential_config,
+          "--exec-path",
+          `${execPath} chooses the programs git runs, as GIT_EXEC_PATH does, which the credential rule refuses regardless of how it is set`,
         );
       }
     }

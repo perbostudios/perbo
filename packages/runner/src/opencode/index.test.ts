@@ -280,6 +280,19 @@ describe("the OpenCode executor", () => {
   );
 
   it(
+    "ends an OpenCode that stopped while its catalogue was waited for as the agent's error, saying why it stopped",
+    async () => {
+      const { fake, run } = attempt({ exitAtSession: 1, turns: [{ steps: [] }] });
+      const result = await run;
+      expect(result.termination.reason).toBe("agent_error");
+      expect(result.termination.detail).toContain("OpenCode stopped before completing (3): opencode crashed");
+      // No session was asked for after the process was gone.
+      expect(fake.received().filter((line) => line["method"] === "session/new")).toHaveLength(1);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "refuses a session that loaded an agent definition of its own",
     async () => {
       const { run } = attempt({ modes: ["build", "plan", "repository-agent"], turns: [{ steps: [] }] });

@@ -193,7 +193,7 @@ export class DesktopService {
         architectTitled: (id, title) => this.editing.architectTitled(id, title),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
-        leaveAsking: (id) => this.editing.leaveAsking(id),
+        turnOnAsking: (id, text) => this.editing.turnOnAsking(id, text),
         countNodes: (id, nodes, digest, plan) => this.editing.countNodes(id, nodes, digest, plan),
         adopt: (id, detail, nodes) => this.editing.adopt(id, detail, nodes),
       },
