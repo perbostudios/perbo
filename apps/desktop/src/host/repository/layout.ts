@@ -7,6 +7,7 @@ import {
   bundleObjectsDir,
   configPath as configSegments,
   contractPath,
+  decisionOptionsPath,
   draftPath,
   driftPath,
   principlesPath as principlesSegments,
@@ -36,6 +37,7 @@ const TICKET_FILE = {
   ".draft.json": draftPath,
   ".approach.json": approachPath,
   ".drift.json": driftPath,
+  ".options.json": decisionOptionsPath,
 } as const;
 
 export function perboPath(repo: RegisteredRepository): string {

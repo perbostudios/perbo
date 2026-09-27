@@ -34,7 +34,7 @@ import {
   SPEC,
   SPEC_FOLDER,
 } from "./test-support/contract.js";
-import { claudeHarness, codexHarness } from "./test-support/harness.js";
+import { claudeHarness, codexHarness, openCodeHarness } from "./test-support/harness.js";
 import { scriptedSdk, type ScriptStep } from "./test-support/fake-sdk.js";
 import { BUILT_ENTRY, REPO_ROOT } from "../../test-support/paths.js";
 import { runCommandLine } from "../../command-line/terminal.js";
@@ -71,6 +71,7 @@ const repository = () => makeRepository(scratch);
 
 describeInterviewContract(claudeHarness(), () => scratch);
 describeInterviewContract(codexHarness(() => scratch), () => scratch);
+describeInterviewContract(openCodeHarness(() => scratch), () => scratch);
 
 const writeSpec = (content = SPEC): ScriptStep => ({
   kind: "tool",
@@ -144,11 +145,12 @@ describe("the line an interview is asked for by", () => {
       provider: "claude",
     });
     expect(interviewLine(["--provider", "codex"]).provider).toBe("codex");
-    expect(() => interviewLine(["--provider", "gemini"])).toThrow(/claude or codex/);
+    expect(interviewLine(["--provider", "opencode"]).provider).toBe("opencode");
+    expect(() => interviewLine(["--provider", "gemini"])).toThrow(/claude or codex or opencode/);
     expect(() => interviewLine(["--approve"])).toThrow(UsageError);
     expect(() => interviewLine(["--spec"])).toThrow(/requires a value/);
-    // The two the interview runs on, spelled as `perbo agent` spells them.
-    expect([...INTERVIEW_PROVIDERS]).toEqual(["claude", "codex"]);
+    // The three the interview runs on (D-NEW-opencode-is-a-provider).
+    expect([...INTERVIEW_PROVIDERS]).toEqual(["claude", "codex", "opencode"]);
   });
 
   it("resumes into the folder the record sits in, not the path it names", async () => {
@@ -1180,6 +1182,29 @@ describe("the orientation", () => {
     expect(oriented).toMatch(/the interview ends when the spec is\nwritten and they generate the plan from it/);
     expect(oriented).toMatch(/From then on you are a chat/);
     expect(oriented).toMatch(/every turn is a change to the pair/);
+  });
+
+  // What the chat says is only what needs the person (D-102), held to a
+  // measure the session can count: a length it is told to stay under is a
+  // length it writes up to, and a card beside a message that repeats it is
+  // the card read twice.
+  it("holds every message to two sentences, and one beside a card to one that restates nothing", () => {
+    const flat = oriented.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "A message is two sentences at most, none where nothing needs them, and a question is one sentence.",
+    );
+    expect(flat).toContain(
+      "No preamble, no recap, no list of what you wrote or read, and no offer of what you could do next.",
+    );
+    expect(flat).toContain(
+      "the message beside it is at most one sentence on why the questions arise, and never restates a " +
+        "question, an option or your pick.",
+    );
+    // An overlong message is still handed back rather than cut
+    // (D-NEW-nothing-shown-is-cut), and the session is told so without a
+    // number of characters to write towards.
+    expect(flat).toContain("A message longer than the chat holds is handed back to you to condense.");
+    expect(flat).not.toMatch(/\d[\d,]* characters/);
   });
 });
 

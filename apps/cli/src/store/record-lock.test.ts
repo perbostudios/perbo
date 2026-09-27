@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { exitForThrown } from "../command-line/terminal.js";
-import { RecordLockedError, recordLockPath, withRecordLock, type RecordLock } from "./record-lock.js";
+import { RecordLockedError, recordLockPath, withRecordLock, type RecordLock } from "@perbo/runner";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-record-lock-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

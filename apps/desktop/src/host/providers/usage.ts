@@ -39,7 +39,7 @@ export async function usageReport(deps: UsageDeps): Promise<UsageReport> {
   }
   const settings = deps.settings();
   const roleOf = (
-    id: "claude-cli" | "codex-cli" | "anthropic",
+    id: "claude-cli" | "codex-cli" | "opencode-cli" | "anthropic",
   ): string | null =>
     [
       settings.executorProvider === id && "default executor",
@@ -63,6 +63,17 @@ export async function usageReport(deps: UsageDeps): Promise<UsageReport> {
     providers: [
       { id: "claude", name: "Claude Code", role: roleOf("claude-cli"), connected: signedIn("claude"), ...claude },
       { id: "codex", name: "Codex", role: roleOf("codex-cli"), connected: signedIn("codex"), ...codex },
+      {
+        id: "opencode",
+        name: "OpenCode",
+        role: roleOf("opencode-cli"),
+        connected: signedIn("opencode"),
+        plan: null,
+        windows: null,
+        detail: signedIn("opencode")
+          ? "OpenCode reports what each run cost; it reports no plan window."
+          : "OpenCode 2 is not installed on this machine.",
+      },
       {
         id: "anthropic",
         name: "Anthropic API",

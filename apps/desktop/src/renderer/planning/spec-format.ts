@@ -66,13 +66,50 @@ const REQUIREMENT = /^(R[1-9]\d*):\s*(.*)$/;
 /**
  * Inline marks, in the order they bind: a code span is literal, so it is taken
  * first and nothing inside it is read as a mark; `**` before `*`, so the longer
- * mark is never read as two of the shorter one.
+ * mark is never read as two of the shorter one. `_word_` is emphasis as `*word*`
+ * is, but only where no letter, digit or underscore touches either mark, so a
+ * `snake_case_name` is a name and not a word in italics.
  */
-const INLINE = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*/g;
+const INLINE =
+  /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu;
 
 /** How deep a heading inside a section may look, whatever depth it claims. */
 const TOP = 2;
 const BOTTOM = 4;
+
+/** A stretch of a line under one inline mark, or under none. */
+export interface InlineRun {
+  mark: SpecRun["mark"];
+  /** What is shown, with the marking characters taken off. */
+  text: string;
+  /** Where `text` begins in the line it was cut from. */
+  at: number;
+}
+
+/**
+ * A line cut at its inline marks, every stretch a slice of the line, empty
+ * stretches dropped. The spec's reading and the chat both read marks through
+ * this, so the two never disagree about what a writer marked.
+ */
+export function inlineRuns(text: string): InlineRun[] {
+  const runs: InlineRun[] = [];
+  INLINE.lastIndex = 0;
+  let plain = 0;
+  for (let match = INLINE.exec(text); match !== null; match = INLINE.exec(text)) {
+    if (match.index > plain) runs.push({ mark: null, text: text.slice(plain, match.index), at: plain });
+    const [inner, mark] =
+      match[1] !== undefined
+        ? ([match[1], "code"] as const)
+        : match[2] !== undefined
+          ? ([match[2], "strong"] as const)
+          : ([match[3] ?? match[4]!, "emphasis"] as const);
+    // Past the opening mark, so the offset is the first character shown.
+    runs.push({ mark, text: inner, at: match.index + match[0].indexOf(inner) });
+    plain = match.index + match[0].length;
+  }
+  if (plain < text.length) runs.push({ mark: null, text: text.slice(plain), at: plain });
+  return runs;
+}
 
 /**
  * A line's marks, and the `@Symbol` references inside each of them.
@@ -89,36 +126,20 @@ const BOTTOM = 4;
  */
 function runsOf(text: string, from: number): SpecRun[] {
   const runs: SpecRun[] = [];
-  /** One stretch under one mark, split again into its references and its prose. */
-  const under = (body: string, at: number, mark: SpecRun["mark"]): void => {
-    let cursor = at;
-    for (const run of markSpecSymbols(body)) {
+  for (const stretch of inlineRuns(text)) {
+    let cursor = from + stretch.at;
+    for (const run of markSpecSymbols(stretch.text)) {
       if (run.text.length > 0) {
         runs.push({
           kind: run.name === null ? "text" : "symbol",
-          mark,
+          mark: stretch.mark,
           text: run.text,
           at: cursor,
         });
       }
       cursor += run.text.length;
     }
-  };
-  INLINE.lastIndex = 0;
-  let plain = 0;
-  for (let match = INLINE.exec(text); match !== null; match = INLINE.exec(text)) {
-    if (match.index > plain) under(text.slice(plain, match.index), from + plain, null);
-    const [inner, mark] =
-      match[1] !== undefined
-        ? ([match[1], "code"] as const)
-        : match[2] !== undefined
-          ? ([match[2], "strong"] as const)
-          : ([match[3]!, "emphasis"] as const);
-    // Past the opening mark, so the offset is the first character shown.
-    under(inner, from + match.index + match[0].indexOf(inner), mark);
-    plain = match.index + match[0].length;
   }
-  if (plain < text.length) under(text.slice(plain), from + plain, null);
   return runs;
 }
 

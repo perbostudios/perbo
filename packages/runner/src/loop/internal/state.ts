@@ -273,7 +273,9 @@ export interface RoundState {
   /** Filled after each round's checks; excluded from the next round's seal. */
   readonly checkArtifacts: string[];
   /**
-   * The change set the round before this one sealed, by path (SCP-194).
+   * The change set the round before this one sealed, by path, or for a
+   * continued run's first round the change set of the commit it continues
+   * from (SCP-194).
    *
    * What a widening is measured against: a remediation round given a scope
    * escape is asked to bring the change set back inside the contract's globs,

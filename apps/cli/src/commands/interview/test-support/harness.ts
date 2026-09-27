@@ -7,6 +7,8 @@ const CLAUDE = "/usr/local/bin/claude";
 import { codexInterviewTransport } from "../codex.js";
 import { interviewCommandLine } from "../index.js";
 import { fakeAppServer, type ServerStep } from "./fake-app-server.js";
+import { openCodeInterviewTransport } from "../opencode.js";
+import { fakeOpenCode, type OpenCodeStep } from "./fake-opencode.js";
 import {
   refusals,
   SPEC_FOLDER,
@@ -144,6 +146,70 @@ export function codexHarness(scratch: () => string): InterviewHarness {
           behavior,
           result: answer.text,
           isError: behavior === "allow" && answer.success === false,
+        };
+      });
+      return { code, streams, decisions };
+    },
+  };
+}
+
+/**
+ * OpenCode, driven through the same contract. A step it asks about and the
+ * interview refuses ends OpenCode's turn; the transport starts the next one
+ * and the fake goes on from the step after, so every step is still tried in
+ * its order.
+ */
+export function openCodeHarness(scratch: () => string): InterviewHarness {
+  return {
+    name: "opencode",
+    async run(input): Promise<ContractRun> {
+      const streams = recordStreams();
+      const fake = fakeOpenCode({
+        root: mkdtempSync(join(scratch(), "opencode-")),
+        steps: input.steps as readonly OpenCodeStep[],
+        sessionId: input.sessionId ?? "ses-0001",
+      });
+      const code = await runCommandLine(interviewCommandLine, {
+        argv: [
+          "--repo",
+          input.repo,
+          "--spec",
+          input.spec ?? SPEC_FOLDER,
+          "--provider",
+          "opencode",
+          ...(input.argv ?? []),
+        ],
+        streams,
+        cwd: input.repo,
+        deps: {
+          transport: openCodeInterviewTransport({
+            binary: fake.binary,
+            dataDirectory: mkdtempSync(join(scratch(), "opencode-data-")),
+          }),
+          turns: oneTurn(),
+        },
+      });
+      // A tool call the interview refused is answered with the refusal's own
+      // words, as on the other transports, so what says it was refused is the
+      // `refused` event the protocol carries it on.
+      const refused = new Set(refusals(streams).map((event) => event.tool));
+      const asked = input.steps.filter((step) => step.kind !== "say");
+      const decisions: ContractDecision[] = fake.answers().map((answer, at) => {
+        const step = asked[at];
+        const tool = step?.kind === "call" ? step.tool : step?.kind === "command" ? "Bash" : "Write";
+        const behavior: "allow" | "deny" =
+          answer.decision !== null
+            ? answer.decision === "once"
+              ? "allow"
+              : "deny"
+            : refused.has(tool) || refused.has(`mcp__perbo_interview__${tool}`)
+              ? "deny"
+              : "allow";
+        return {
+          tool,
+          behavior,
+          result: answer.text,
+          isError: behavior === "allow" && answer.isError === true,
         };
       });
       return { code, streams, decisions };

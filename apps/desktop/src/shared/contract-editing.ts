@@ -9,6 +9,7 @@ import {
   standingGlob,
   type StandingProhibitedEntry,
 } from "@perbo/contracts/browser";
+import { offeredPreferredModel } from "@perbo/model/defaults";
 import type { DriftFinding, DriftVerdict } from "@perbo/planning/browser";
 import {
   DraftSchema,
@@ -159,6 +160,28 @@ export function problemsHoldApproval(
   );
   return held
     ? `${key} is not approved while its plan and its spec no longer promise the same thing: resolve each problem on the Problems tab, or change the plan, and confirm again.`
+    : null;
+}
+
+/**
+ * Why approving a ticket is refused while the chat on a planning over it owes
+ * the person a turn, or null where none does. The confirm waits for the
+ * Architect to finish, as Generate plan does (D-102): a turn in flight may
+ * still be moving the plan approving would freeze, and a press that slips past
+ * the page is refused here by both hosts. `working` is the host's own count of
+ * the turns each planning's chat owes (D-119).
+ */
+export function turnHoldsApproval(
+  records: readonly EditingSession[],
+  repoId: string,
+  key: string,
+  working: (id: string) => boolean,
+): string | null {
+  const held = records.some(
+    (record) => record.phase !== "discarded" && record.repoId === repoId && record.key === key && working(record.id),
+  );
+  return held
+    ? `${key} is not approved while the chat is still talking on its planning: confirm it once the chat has finished this turn.`
     : null;
 }
 
@@ -1406,29 +1429,96 @@ function putNextAsking(session: EditingSession): void {
 export { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, answersGroup };
 
 /**
- * The model the chat runs on wherever its provider offers it (D-102): Claude
- * Opus 5.5, on Claude Code.
+ * A catalog's rows as a model picker lists them: every row, the ones naming
+ * Claude Opus 5.5 first and the rest in the provider's own order.
  */
-export const CHAT_MODEL = "claude-opus-5-5";
+export function pickerOrder<T extends { id: string }>(models: readonly T[]): T[] {
+  const first = (model: T): boolean => offeredPreferredModel([model.id]) !== undefined;
+  return [...models.filter(first), ...models.filter((model) => !first(model))];
+}
 
 /**
- * The model `perbo interview` is started on: {@link CHAT_MODEL} where this
- * planning drafts on Claude Code and that provider's catalog lists it, under
- * its own id or its 1M-context one, and otherwise the planning's executor
- * model, which is the model its spec is drafted with. `offered` is the
- * catalog's ids, or null where none could be read, which offers nothing.
+ * The model a role takes where nothing is chosen for it yet: Claude Opus 5.5
+ * where the catalog offers it, and otherwise the row the provider marks its
+ * default, or its first. Empty where the catalog lists nothing.
+ */
+export function catalogDefault(models: readonly { id: string; isDefault: boolean }[]): string {
+  const ids = models.map((model) => model.id);
+  return offeredPreferredModel(ids) ?? models.find((model) => model.isDefault)?.id ?? ids[0] ?? "";
+}
+
+/**
+ * The defaults a new profile starts with once Claude Code's catalog is read:
+ * an executor on Claude Code takes Claude Opus 5.5 where the catalog offers
+ * it, and keeps the model it has otherwise. The reviewer keeps its own
+ * default, `DEFAULT_CLAUDE_MODEL`, until a regression-suite run on another
+ * model makes that the default (D-010).
+ */
+export function withOfferedDefaults<T extends TaskModels>(models: T, offered: readonly string[]): T {
+  const model = offeredPreferredModel(offered);
+  if (model === undefined || models.executorProvider !== "claude-cli") return models;
+  return { ...models, executorModel: model };
+}
+
+/**
+ * The model `perbo interview` is started on: the Architect's model the person
+ * chose, where they chose one on the provider this planning drafts with, and
+ * otherwise the Architect's rule — Claude Opus 5.5 where this planning
+ * drafts on Claude Code and that provider's catalog lists it, under its own id
+ * or its 1M-context one, and otherwise the planning's executor model, which is
+ * the model its spec is drafted with (D-102). `offered` is the catalog's ids,
+ * or null where none could be read, which offers nothing.
  */
 export function interviewModelFor(
+  models: {
+    draftingProvider: string;
+    executorModel: string;
+    architectProvider: string | null;
+    architectModel: string | null;
+  },
+  offered: readonly string[] | null,
+): string {
+  if (models.architectModel !== null && models.architectProvider === models.draftingProvider) return models.architectModel;
+  return architectRule(models, offered);
+}
+
+/**
+ * The Architect's rule, which a planning takes where the person chose no
+ * Architect model of their own (D-102): Claude Opus 5.5 where the planning
+ * drafts on Claude Code and its catalog offers it, and otherwise the
+ * planning's executor model.
+ */
+export function architectRule(
   models: { draftingProvider: string; executorModel: string },
   offered: readonly string[] | null,
 ): string {
   if (models.draftingProvider !== "claude-cli" || offered === null) return models.executorModel;
-  return [CHAT_MODEL, CHAT_MODEL + "[1m]"].find((id) => offered.includes(id)) ?? models.executorModel;
+  return offeredPreferredModel(offered) ?? models.executorModel;
 }
 
+/**
+ * The name a person reads for a model provider, wherever the desktop names
+ * one: a picker's option, the Architect's section and the chat's header.
+ */
+export const providerName = (id: string): string =>
+  id === "codex-cli"
+    ? "Codex"
+    : id === "opencode-cli"
+      ? "OpenCode"
+      : id === "anthropic"
+        ? "Anthropic API"
+        : "Claude Code";
+
+/** The sessions `perbo interview --provider` names. */
+export type InterviewProviderName = "claude" | "codex" | "opencode";
+
 /** Which session a planning's interview runs on, from the models it drafts with. */
-export function interviewProviderFor(models: { draftingProvider: string }): "claude" | "codex" {
-  return models.draftingProvider === "codex-cli" ? "codex" : "claude";
+export function interviewProviderFor(models: { draftingProvider: string }): InterviewProviderName {
+  return models.draftingProvider === "codex-cli"
+    ? "codex"
+    : models.draftingProvider === "opencode-cli"
+      ? "opencode"
+      : "claude";
 }
 
 /**
@@ -1436,8 +1526,8 @@ export function interviewProviderFor(models: { draftingProvider: string }): "cla
  * the provider this planning drafts with, and the session to continue where
  * there is one of that provider's (D-102, SCP-312).
  *
- * A recorded id belongs to the provider that reported it and the two keep
- * separate namespaces, so a planning whose drafting choice has changed since
+ * A recorded id belongs to the provider that reported it and each keeps a
+ * namespace of its own, so a planning whose drafting choice has changed since
  * starts a session of its own rather than asking the new provider to continue
  * a conversation it has never had. An id recorded before the provider was
  * written down is Claude's, which is how `perbo interview` reads the record
@@ -1447,8 +1537,8 @@ export function interviewProviderFor(models: { draftingProvider: string }): "cla
  */
 export function interviewSessionArgs(session: {
   interviewSession: string | null;
-  interviewProvider: "claude" | "codex" | null;
-}, provider: "claude" | "codex"): string[] {
+  interviewProvider: InterviewProviderName | null;
+}, provider: InterviewProviderName): string[] {
   const carries =
     session.interviewSession !== null && (session.interviewProvider ?? "claude") === provider;
   return carries ? ["--session", session.interviewSession!] : [];

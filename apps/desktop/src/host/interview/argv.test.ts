@@ -95,6 +95,13 @@ describe("interviewArgv", () => {
     ]);
     expect(interviewProvider(onCodex())).toBe("codex");
     expect(interviewProvider(session())).toBe("claude");
+    const onOpenCode = session({ form: editingForm({ ...models, draftingProvider: "opencode-cli" }) });
+    expect(interviewProvider(onOpenCode)).toBe("opencode");
+    const opencode = interviewArgv(repository(), onOpenCode, "opencode/big-pickle");
+    expect(opencode.slice(opencode.indexOf("--provider"), opencode.indexOf("--provider") + 2)).toEqual([
+      "--provider",
+      "opencode",
+    ]);
     // A session id belongs to the provider that reported it, so a planning
     // whose drafting choice has changed starts its own rather than asking the
     // other to continue a conversation it has never had.

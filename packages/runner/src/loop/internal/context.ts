@@ -1,5 +1,6 @@
 import { runAgent } from "../../adapter.js";
 import { runCodexAgent } from "../../codex/index.js";
+import { runOpenCodeAgent } from "../../opencode/index.js";
 import { runPinnedChecks } from "../../checks/index.js";
 import { createPullRequest, existingPullRequest, pushAttemptBranch } from "../../delivery.js";
 import { mergeLoopPullRequest } from "../../merge.js";
@@ -48,7 +49,13 @@ export function resolvePorts(
   hooks: Partial<LoopPorts> | undefined,
 ): LoopPorts {
   return {
-    agent: hooks?.agent ?? (config.agent_provider === "codex-cli" ? runCodexAgent : runAgent),
+    agent:
+      hooks?.agent ??
+      (config.agent_provider === "codex-cli"
+        ? runCodexAgent
+        : config.agent_provider === "opencode-cli"
+          ? runOpenCodeAgent
+          : runAgent),
     review: hooks?.review ?? runReview,
     verify: hooks?.verify ?? verifyClosures,
     checks: hooks?.checks ?? runPinnedChecks,

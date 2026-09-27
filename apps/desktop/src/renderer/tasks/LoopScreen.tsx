@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { DECISION_CHOICES, DECISION_WORDS, type DecisionChoice } from "@perbo/contracts/browser";
 import { Button, InfoHint, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
@@ -7,10 +8,13 @@ import { inTheWay, isRun } from "../../shared/jobs.js";
 import { decisionQuestions, settledFindings } from "../../shared/decisions.js";
 import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
-import { displayKey, stageName } from "./ticket-workspace.js";
+import { displayKey, stageName, stageOf } from "./ticket-workspace.js";
+import { WHEEL_STEPS } from "../../shared/runner-progress.js";
 import { loopSteps, loopTally, runEnding, StageLog, taskRecords } from "./task-context.js";
 import type { RunEnding, TaskContext } from "./task-context.js";
 import { TYPED_TEXT_MAX_CHARS, type DecisionQuestion } from "../../shared/protocol.js";
+import { pendingEgressQuestion } from "../../shared/egress-question.js";
+import { EgressCard } from "./EgressCard.js";
 
 export function TaskHeader(context: TaskContext) {
   const { ticket, title, repo } = taskRecords(context);
@@ -31,6 +35,41 @@ export function TaskHeader(context: TaskContext) {
     </PageHeader>
   );
 }
+/**
+ * The progress wheel: its steps (`WHEEL_STEPS`), those passed ticked and the
+ * one reached marked. A stopped run's is the stage it had reached, and a
+ * journey that ended is past every step (`projectTicket`).
+ */
+export function LoopStages({ stage }: { stage: number }) {
+  return (
+    <div className="loop-stages">
+      <div className="progress-track">
+        <span
+          style={{
+            width: ((stage - 1) / WHEEL_STEPS.length) * 100 + "%",
+          }}
+        />
+      </div>
+      <div className="stage-labels">
+        {WHEEL_STEPS.map((_step, index) => index + 1).map((number) => (
+          <span
+            key={number}
+            className={
+              number === stage
+                ? "current"
+                : number < stage
+                  ? "complete"
+                  : ""
+            }
+          >
+            {number < stage ? <InkIcon name="approve" size={14} /> : <i />}
+            {stageName(number)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   const { detail, repoId, show } = context;
   const {
@@ -49,19 +88,26 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   // What ended the last command, where it failed: said once in a card that is
   // confirmed, then kept at the top of the steps in the same words. Not while
   // the records it is read from are still being read after the command ended.
-  const ending = active || projection.refreshing ? null : runEnding(jobs, latest, ticket.state);
+  // A run the person stopped is theirs to know already, so it heads the steps
+  // with no card.
+  const ending = active || projection.refreshing ? null : runEnding(jobs, latest);
   const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(() => new Set());
-  const acknowledged = ending !== null && (confirmed.has(ending.job.id) || endingConfirmed(ending.job.id));
+  const acknowledged =
+    ending !== null && (ending.byPerson || confirmed.has(ending.job.id) || endingConfirmed(ending.job.id));
   const whyLabel = ending?.title === "The run ended" ? "Why the run ended" : "Why it failed";
   const questions: DecisionQuestion[] = decisionQuestions(review, settledFindings(detail));
   const observed = projection.observed;
   const paused = ticket.state === "changes_requested" && !active && questions.length > 0,
     stage = paused
-      ? 4
+      ? stageOf("changes_requested")
       : projection.stage;
+  // A run that ended on a verdict for the person is paused for them from the
+  // moment it ends, before the records it wrote are read, and a run waiting on
+  // the person's answer about a host is paused for them until they give it.
+  const waiting = paused || projection.asking || (projection.paused && ticket.state !== "changes_requested");
   const title = recoverable
     ? "Ready to recover this task"
-    : paused
+    : waiting
     ? "Paused for a decision"
     : (observed?.title ??
       (
@@ -71,6 +117,8 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           verifying: "Running deterministic checks",
           independent_review: "Independent review",
           pr_open: "The review is ready",
+          merged: "Merged",
+          closed: "Closed without merge",
           failed: "The loop stopped",
           changes_requested: "Refinement needs attention",
           cancelled: "The loop was stopped",
@@ -115,6 +163,10 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   // to a person who just pressed the one button that freezes their work.
   const approving =
     active !== undefined && !recoverable && ["plan_review", "ready"].includes(ticket.state);
+  // D-NEW-an-unlisted-host-asks: the question the run is waiting on, where the
+  // projection says it is asking — a run still going, never one being stopped —
+  // so the card and Home agree.
+  const asking = projection.asking && active !== undefined ? pendingEgressQuestion(active.log) : null;
   useShortcut("output", () => show("output"));
   // The wait offers no stop, so the shortcut offers none either: there is no
   // run yet to call off, and the stopped page is not about a ticket still
@@ -147,38 +199,13 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             <p>
               {recoverable
                 ? "This desktop session has no running command for the task. The run was stopped, and its work and evidence have been retained."
-                : paused
+                : waiting
                 ? "The loop stops here until you answer. Nothing is spending while it waits."
                 : "The agent owns the approach. You will only be interrupted if it reaches a real choice."}
             </p>
           </div>
         </div>
-        <div className="loop-stages">
-          <div className="progress-track">
-            <span
-              style={{
-                width: ((stage - 1) / 6) * 100 + "%",
-              }}
-            />
-          </div>
-          <div className="stage-labels">
-            {[1, 2, 3, 4, 5, 6].map((number) => (
-              <span
-                key={number}
-                className={
-                  number === stage
-                    ? "current"
-                    : number < stage
-                      ? "complete"
-                      : ""
-                }
-              >
-                {number < stage ? <InkIcon name="approve" size={14} /> : <i />}
-                {stageName(number)}
-              </span>
-            ))}
-          </div>
-        </div>
+        <LoopStages stage={stage} />
         <div>
           <SectionLabel>Task description</SectionLabel>
           <div className="loop-description">
@@ -284,7 +311,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           <span className="spacer" />
           {recoverable && (
             <Button disabled={busy} onClick={() => show("stopped")}>
-              See the stopped run
+              Back to the stopped loop
             </Button>
           )}
           {!active &&
@@ -331,6 +358,14 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
       ) : (
         paused &&
         questions.length > 0 && <DecisionOverlay {...context} questions={questions} />
+      )}
+      {asking !== null && (
+        <EgressCard
+          repoId={repoId}
+          ticketKey={ticket.key}
+          question={asking}
+          stallMinutes={detail.effective.stallMinutes}
+        />
       )}
     </section>
   );
@@ -426,6 +461,34 @@ function decisionText(
       .join("\n\n")
   );
 }
+/** Whether a question takes the person's words: a finding the executor is never handed takes only Ship as it is. */
+const takesWords = (question: DecisionQuestion): boolean =>
+  question.choices.length === 0 || question.choices.includes("approach");
+/** The keys that move a pick through a question's answers without making it. */
+const ARROW_KEYS: ReadonlySet<string> = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+/** Why an offered answer cannot be picked: the message every answer goes down in has no room left for it. */
+export const ANSWER_TOO_LONG =
+  "This answer cannot be picked: it is longer than the room your other answers leave in the one message the executor is handed, so shorten one of them or write your own.";
+/** What the card says when the Architect's answers could not be had, in one sentence (D-NEW-decision-options). */
+export const OPTIONS_FAILED = "The Architect’s suggested answers could not be fetched, so write your own below.";
+/**
+ * The Architect's answers to each question that takes the person's words,
+ * asked for once as the card opens and kept for the page's life
+ * (D-NEW-decision-options). The host keeps them beside the ticket for the
+ * review they answer, so reopening the card later spends nothing either.
+ */
+function useDecisionOptions(repoId: string, key: string, reviewId: string | null, asked: readonly string[]) {
+  return useQuery({
+    queryKey: ["decisionOptions", repoId, key, reviewId, ...asked],
+    queryFn: () => bridge.request({ kind: "decisionOptions", repoId, key, findings: [...asked] }),
+    enabled: asked.length > 0,
+    networkMode: "always",
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
 function DecisionOverlay(
   context: TaskContext & { questions: DecisionQuestion[] },
 ) {
@@ -449,16 +512,39 @@ function DecisionOverlay(
     [pending, setPending] = useState<string | null>(null);
   const card = useRef<HTMLDivElement>(null);
   const own = useRef<HTMLTextAreaElement>(null);
+  // Set on the pick of Something else, and read once its box is there: the
+  // caret goes into the box the pick opened.
+  const wantsCaret = useRef(false);
+  // What the last key on an answer was. An arrow key moves the pick through a
+  // question's answers, and the browser reports each step as a click on the
+  // answer reached: that step moves the pick, and neither takes it back nor
+  // moves the caret into the box, or walking the answers would stop in it.
+  const keyed = useRef<"arrow" | "space" | null>(null);
   const action = useAction(),
     question = questions[index]!,
     selected = answers[question.id];
-  // A finding the executor is never handed takes only Ship as it is; a
-  // question that takes no choice takes the person's words for a principle.
-  const ownWords = question.choices.length === 0 || question.choices.includes("approach");
+  const ownWords = takesWords(question);
+  const offers = useDecisionOptions(
+    repoId,
+    detail.ticket.key,
+    taskRecords(context).review?.review_id ?? null,
+    questions.filter(takesWords).map((entry) => entry.id),
+  );
+  // The Architect's recommendation first, as the chat's card puts it, and its
+  // own order under that.
+  const offered = ownWords
+    ? [...(offers.data?.findings.find((finding) => finding.finding_key === question.id)?.options ?? [])].sort(
+        (left, right) => Number(right.recommended) - Number(left.recommended),
+      )
+    : [];
+  // Open while there is nothing to pick instead — the answers still coming,
+  // or none to be had — and otherwise once Something else is picked.
+  const fieldOpen = ownWords && (customSelected || offered.length === 0);
   // The person's words are held where they type them to the room the answer
   // has left: every answer goes down together as one principle, which holds
   // what a typed field holds, so nothing typed is refused when it is sent
-  // (D-NEW-nothing-shown-is-cut).
+  // (D-NEW-nothing-shown-is-cut). An offered answer longer than that room is
+  // not one to pick, for the same reason.
   const room = Math.max(
     0,
     TYPED_TEXT_MAX_CHARS -
@@ -486,15 +572,79 @@ function DecisionOverlay(
     };
   }, [error]);
   const questionId = question.id;
+  const hasOffered = offered.length > 0;
   useEffect(() => {
     const answer = answers[questionId];
     setCustom(answer?.custom ? answer.text : "");
-    setCustomSelected(answer?.custom ?? (question.options.length === 0 && ownWords));
+    setCustomSelected(answer?.custom ?? (!hasOffered && ownWords));
   }, [questionId]);
+  // The answers arrived while this question was open and nothing was written
+  // yet: the field closes into Something else, and the answers are there to
+  // pick. Words already written keep it open.
+  useEffect(() => {
+    if (hasOffered && !answers[questionId]?.custom) setCustomSelected(false);
+  }, [hasOffered]);
+  useEffect(() => {
+    if (!fieldOpen || !wantsCaret.current) return;
+    wantsCaret.current = false;
+    own.current?.focus();
+  }, [fieldOpen]);
   const choose = (text: string, isCustom: boolean, choice: DecisionChoice = "approach"): void => {
     setAnswers({ ...answers, [question.id]: { text, custom: isCustom, choice } });
     setCustomSelected(isCustom);
     setError(null);
+  };
+  /** Pick Something else: its box opens, and the caret goes into it unless an arrow key walked there. */
+  const pickOwn = (caret: boolean): void => {
+    setCustomSelected(true);
+    choose(custom, true);
+    if (!caret) return;
+    // Picking it is the request to type, so the caret goes with it. Done on
+    // the pick and not on the state, which also turns true when an earlier
+    // answer is restored — focus then would take the page off where it was.
+    if (fieldOpen) own.current?.focus();
+    else wantsCaret.current = true;
+  };
+  /** Nothing picked: a pick clicked again is taken back, as the chat's card takes it back. */
+  const unpick = (): void => {
+    setAnswers(Object.fromEntries(Object.entries(answers).filter(([id]) => id !== question.id)));
+    setCustomSelected(false);
+  };
+  /**
+   * One answer's radio, with the chat card's keys: an arrow key moves the pick
+   * without opening anything, Space or Enter makes it, and a click on the pick
+   * already made takes it back.
+   */
+  const radio = (checked: boolean, pick: (caret: boolean) => void, disabled = false) => {
+    const answer = (): void => {
+      const by = keyed.current;
+      keyed.current = null;
+      if (by === "arrow") {
+        if (!checked) pick(false);
+      } else if (by === "space" || !checked) pick(true);
+      else unpick();
+    };
+    return (
+      <input
+        type="radio"
+        name="decision-choice"
+        checked={checked}
+        disabled={disabled}
+        onClick={() => {
+          if (checked) answer();
+        }}
+        onChange={answer}
+        onKeyDown={(event) => {
+          keyed.current = ARROW_KEYS.has(event.key) ? "arrow" : event.key === " " ? "space" : null;
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          pick(true);
+        }}
+        onKeyUp={() => {
+          if (keyed.current === "arrow") keyed.current = null;
+        }}
+      />
+    );
   };
   const advance = (): void => {
     if (customSelected) {
@@ -543,6 +693,7 @@ function DecisionOverlay(
     if (questions.every((entry) => answers[entry.id]?.text.trim())) submit();
     else advance();
   });
+  const shipPicked = !customSelected && selected?.choice === "ship_as_is";
   return (
     <div className="decision-overlay" data-screen={confirm ? "s14" : "s13"}>
       <div
@@ -625,108 +776,76 @@ function DecisionOverlay(
                 <p>{question.context}</p>
               </div>
               <div className={cx("decision-choices", "t-input", error && "is-error", shaking && "is-shaking")}>
-                {question.options.map((option, position) => (
-                  <label
-                    className={
-                      "choice" +
-                      (!customSelected && selected?.text === option.title
-                        ? " selected"
-                        : "")
-                    }
-                    key={option.title}
-                  >
-                    <span className="choice-heading">
-                      <input
-                        type="radio"
-                        name="decision-choice"
-                        checked={
-                          !customSelected && selected?.text === option.title
-                        }
-                        onChange={() => choose(option.title, false)}
-                      />
-                      <span className="choice-number">
-                        Choice {position + 1}
+                {offered.map((option) => {
+                  const checked = !customSelected && selected?.choice === "approach" && selected.text === option.text;
+                  const tooLong = option.text.length > room;
+                  return (
+                    <label className={cx("choice", checked && "selected")} key={option.text}>
+                      <span className="choice-heading">
+                        {/* The Architect's words, picked: the person's answer
+                            exactly as if they had typed it. */}
+                        {radio(checked, () => choose(option.text, false), tooLong)}
+                        <strong>{option.text}</strong>
+                        {option.recommended && <span className="choice-recommended">recommended</span>}
                       </span>
-                      <strong>{option.title}</strong>
-                      {option.recommended && (
-                        <span className="choice-recommended">recommended</span>
-                      )}
+                      {tooLong && <p>{ANSWER_TOO_LONG}</p>}
+                    </label>
+                  );
+                })}
+                {ownWords && offers.isPending && offers.fetchStatus === "fetching" && (
+                  <p className="small muted" role="status">
+                    The Architect is suggesting answers. You can write your own meanwhile.
+                  </p>
+                )}
+                {ownWords && offers.isError && (
+                  <p className="small muted" role="status">
+                    {OPTIONS_FAILED}{" "}
+                    <InfoHint text={errorMessage(offers.error)} label="Why they could not be fetched" />
+                  </p>
+                )}
+                {question.choices.includes("ship_as_is") && (
+                  <label className={cx("choice", "choice--ship", shipPicked && "selected")}>
+                    <span className="choice-heading">
+                      {radio(shipPicked, () => choose(DECISION_WORDS.ship_as_is, false, "ship_as_is"))}
+                      <strong>Ship as it is</strong>
                     </span>
-                    <p>{option.detail}</p>
-                    {option.metadata && (
-                      <span className="choice-metadata">
-                        {option.metadata.map((item) => (
-                          <span key={item}>{item}</span>
-                        ))}
-                      </span>
-                    )}
+                    <p>Nothing is changed for this: the change is delivered as the review saw it.</p>
                   </label>
-                ))}
+                )}
                 {ownWords && (
-                  <label
-                    className={
-                      "choice choice--custom" +
-                      (customSelected ? " selected" : "")
-                    }
-                  >
+                  <label className={cx("choice", fieldOpen && "choice--custom", customSelected && "selected")}>
                     <span className="choice-heading">
-                      <input
-                        type="radio"
-                        name="decision-choice"
-                        checked={customSelected}
-                        onChange={() => {
-                          setCustomSelected(true);
-                          // Picking it is the request to type, so the caret goes
-                          // with it. Done on the pick and not on the state, which
-                          // also turns true when an earlier answer is restored —
-                          // focus then would take the page off where it was.
-                          own.current?.focus();
-                        }}
-                      />
+                      {radio(customSelected, pickOwn)}
                       <strong>
-                        {question.options.length
+                        {offered.length > 0
                           ? "Something else — tell it what to do"
                           : "Tell it what the product should do"}
                       </strong>
                     </span>
-                    <textarea
-                      ref={own}
-                      aria-label="Your approach"
-                      placeholder="Type the approach in a sentence…"
-                      maxLength={room}
-                      value={custom}
-                      onFocus={() => setCustomSelected(true)}
-                      onKeyDown={(event) => {
-                        // Enter sends what was typed, as Save and continue does;
-                        // Shift+Enter is a new line. Nothing typed, nothing sent.
-                        if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-                        event.preventDefault();
-                        if (custom.trim()) advance();
-                      }}
-                      onChange={(event) => {
-                        setCustom(event.target.value);
-                        choose(event.target.value, true);
-                      }}
-                    />
-                  </label>
-                )}
-                {question.choices.includes("ship_as_is") && (
-                  <label
-                    className={
-                      "choice choice--ship" +
-                      (!customSelected && selected?.choice === "ship_as_is" ? " selected" : "")
-                    }
-                  >
-                    <span className="choice-heading">
-                      <input
-                        type="radio"
-                        name="decision-choice"
-                        checked={!customSelected && selected?.choice === "ship_as_is"}
-                        onChange={() => choose(DECISION_WORDS.ship_as_is, false, "ship_as_is")}
+                    {fieldOpen && (
+                      <textarea
+                        ref={own}
+                        aria-label="Your approach"
+                        placeholder="Type the approach in a sentence…"
+                        maxLength={room}
+                        value={custom}
+                        onFocus={() => {
+                          setCustomSelected(true);
+                          choose(custom, true);
+                        }}
+                        onKeyDown={(event) => {
+                          // Enter sends what was typed, as Save and continue does;
+                          // Shift+Enter is a new line. Nothing typed, nothing sent.
+                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                          event.preventDefault();
+                          if (custom.trim()) advance();
+                        }}
+                        onChange={(event) => {
+                          setCustom(event.target.value);
+                          choose(event.target.value, true);
+                        }}
                       />
-                      <strong>Ship as it is</strong>
-                    </span>
-                    <p>Nothing is changed for this: the change is delivered as the review saw it.</p>
+                    )}
                   </label>
                 )}
               </div>
@@ -757,12 +876,7 @@ function DecisionOverlay(
                 {ownWords && (
                   <Button
                     onClick={() => {
-                      choose(
-                        question.options.find((option) => option.recommended)
-                          ?.title ?? DECISION_WORDS.let_it_decide,
-                        false,
-                        "let_it_decide",
-                      );
+                      choose(DECISION_WORDS.let_it_decide, false, "let_it_decide");
                       if (index + 1 === questions.length) setConfirm(true);
                       else setIndex(index + 1);
                     }}

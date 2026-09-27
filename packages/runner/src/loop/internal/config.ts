@@ -43,6 +43,17 @@ import { NetworkAllowListSchema } from "../../profile.js";
 export const BaseSourceSchema = z.enum(["branch", "config", "remote_default"]);
 export type BaseSource = z.infer<typeof BaseSourceSchema>;
 
+/** The executors a run can hand its brief to: Claude Code, Codex and OpenCode (D-NEW-opencode-is-a-provider). */
+export const AGENT_PROVIDERS = ["claude-cli", "codex-cli", "opencode-cli"] as const;
+export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
+
+/** The binary and the model each executor runs where the configuration names neither. */
+export const AGENT_DEFAULTS: Record<AgentProvider, { binary: string; model: string }> = {
+  "claude-cli": { binary: "claude", model: "claude-opus-5" },
+  "codex-cli": { binary: "codex", model: "gpt-5.6-terra" },
+  "opencode-cli": { binary: "opencode", model: "opencode/claude-opus-5" },
+};
+
 /** One merged ticket's approved contract, as the conflict brief states it (SCP-227). */
 export const MergedTicketContextSchema = z.strictObject({
   ticket_key: z.string().min(1),
@@ -145,7 +156,7 @@ export const TicketRunConfigSchema = z.strictObject({
    */
   spec_files: z.array(SpecFileSchema).default([]),
   agent_binary: z.string().min(1).optional(),
-  agent_provider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
+  agent_provider: z.enum(AGENT_PROVIDERS).default("claude-cli"),
   executor_skills: ExecutorSkillsSchema.default([]),
   model: z.string().min(1).optional(),
   reviewer_model: z.string().min(1).nullable().default(null),
@@ -252,10 +263,17 @@ export const TicketRunConfigSchema = z.strictObject({
       context.addIssue({
         code: "custom",
         path: [key],
-        message: `${provider} takes ${EFFORT_LEVELS[provider].join(", ")}, not ${effort}`,
+        message:
+          EFFORT_LEVELS[provider].length === 0
+            ? `${provider} takes no effort level, not ${effort}`
+            : `${provider} takes ${EFFORT_LEVELS[provider].join(", ")}, not ${effort}`,
       });
   }
-}).transform((value) => ({ ...value, agent_binary: value.agent_binary ?? (value.agent_provider === "codex-cli" ? "codex" : "claude"), model: value.model ?? (value.agent_provider === "codex-cli" ? "gpt-5.6-terra" : "claude-opus-5") }));
+}).transform((value) => ({
+  ...value,
+  agent_binary: value.agent_binary ?? AGENT_DEFAULTS[value.agent_provider].binary,
+  model: value.model ?? AGENT_DEFAULTS[value.agent_provider].model,
+}));
 export type TicketRunConfig = z.infer<typeof TicketRunConfigSchema>;
 
 /**

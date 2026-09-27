@@ -383,6 +383,8 @@ describe("each role's effort, beside its model", () => {
         reviewerModel: "claude-fable-5-1",
         reviewerEffort: "max",
         draftingProvider: "codex-cli",
+        architectProvider: null,
+        architectModel: null,
         executorSkills: [],
       },
     });
@@ -4671,6 +4673,46 @@ describe("UI v2 host behaviour", () => {
     });
   });
 
+  /**
+   * `perbo run` exits 2 on a verdict for the person, with its result on
+   * stdout: the run's job completes with that outcome and nothing as its
+   * error, and exit 3 is the run failing.
+   */
+  it.each([
+    [2, "escalated", "completed"],
+    [3, "terminated", "failed"],
+  ] as const)("records a run that exits %i on %s as %s", async (code, outcome, state) => {
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "approve") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      if (args[1] === "run")
+        return {
+          code,
+          stdout: JSON.stringify({ ticket_id: "tkt_1", outcome, detail: "the run's detail" }),
+          stderr: "  ceilings commands none\n  egress allow-list: registry.npmjs.org",
+          cancelled: false,
+        };
+      return runProcess(binary, args, options);
+    };
+    const { service, repo } = fixture(runner);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const detail = await service.detail(registered.id, "PRB-1");
+    const job = await service.request({
+      kind: "run",
+      repoId: registered.id,
+      key: "PRB-1",
+      digest: detail.digest,
+      approve: true,
+      publish: false,
+      resumeFrom: null,
+    });
+    await finished(service, job.id);
+    const ended = (await service.snapshot()).jobs.find((entry) => entry.id === job.id)!;
+    expect(ended.state).toBe(state);
+    expect(ended.outcome).toBe(state === "completed" ? outcome : undefined);
+    expect(ended.error === null).toBe(state === "completed");
+  });
+
   it("opens the worktree on the branch a ticket already has, whatever its key would derive", async () => {
     const { service, repo, root, options } = fixture();
     const registered = await service.registerRepository(repo);
@@ -5270,6 +5312,8 @@ readline.createInterface({ input: process.stdin })
         reviewerModel: "claude-opus-5",
         reviewerEffort: null,
         draftingProvider: "codex-cli",
+        architectProvider: null,
+        architectModel: null,
         executorSkills: [],
       },
     });
@@ -5558,6 +5602,39 @@ readline.createInterface({ input: process.stdin })
     expect(ran.error).toBeNull();
     expect((await service.detail(registered.id, "PRB-1")).ticket.approved_at).not.toBeNull();
     expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
+  });
+
+  it("refuses to approve while the chat on a planning over the ticket owes a turn, naming it, and approves once the turn is over (D-102)", async () => {
+    const root = scratchDirectory("perbo-drift-");
+    const { service, repo } = canned(verdict([]), fakeAnswering(root));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    // A turn the fake never ends: the chat owes the person its answer.
+    await service.request({ kind: "interviewTurn", id, text: "Change R1 in the spec to ask for two emails." });
+    expect((await service.snapshot()).working).toContain(id);
+    const detail = await service.detail(registered.id, "PRB-1");
+    const approve = async () =>
+      service.request({
+        kind: "run",
+        repoId: registered.id,
+        key: "PRB-1",
+        digest: detail.digest,
+        approve: true,
+        publish: false,
+        resumeFrom: null,
+      });
+    await expect(approve()).rejects.toThrow(
+      "PRB-1 is not approved while the chat is still talking on its planning: confirm it once the chat " +
+        "has finished this turn.",
+    );
+    expect((await service.snapshot()).jobs.filter((job) => job.kind === "run")).toEqual([]);
+    expect((await service.detail(registered.id, "PRB-1")).ticket.approved_at).toBeNull();
+    // Stopped, the turn is over as any turn ends, and the approval is the person's.
+    await service.request({ kind: "interviewStop", id });
+    await settled(service, id);
+    const ran = await finished(service, (await approve()).id);
+    expect(ran.error).toBeNull();
+    expect((await service.detail(registered.id, "PRB-1")).ticket.approved_at).not.toBeNull();
   });
 
   /** The problems put to the person so far: the asked lines that are the host's. */
@@ -6208,6 +6285,8 @@ describe("a stopped run's ticket", () => {
     reviewerModel: "claude-opus-5",
     reviewerEffort: null,
     draftingProvider: "codex-cli" as const,
+    architectProvider: null,
+    architectModel: null,
     executorSkills: [],
   };
   async function stopped(runner?: typeof runProcess) {
@@ -6984,11 +7063,19 @@ describe("what the host lets a person archive", () => {
 });
 
 describe("usage: who is connected, and why a provider has no windows", () => {
+  /**
+   * Claude Code and Codex signed in, and an OpenCode 2 installed, which is
+   * connected with no sign-in (D-NEW-opencode-is-a-provider). Answered here
+   * rather than by whatever `opencode` the machine has, so the row reads the
+   * same on every machine.
+   */
   const signedInToBoth = () =>
     fixture(async (binary, args, runOptions) =>
       binary === "codex" || binary === "claude"
         ? { code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "", cancelled: false }
-        : runProcess(binary, args, runOptions),
+        : binary === "opencode"
+          ? { code: 0, stdout: "opencode v2.0.14\n", stderr: "", cancelled: false }
+          : runProcess(binary, args, runOptions),
     );
 
   it("keys connected on sign-in, says not installed apart from not signed in, and asks only a signed-in CLI", async () => {
@@ -7018,7 +7105,23 @@ describe("usage: who is connected, and why a provider has no windows", () => {
       codex: async () => ({ plan: null, windows: null, detail: "No window." }),
     };
     const usage = await service.request({ kind: "usage" });
-    expect(usage.providers.filter((provider) => provider.id !== "anthropic").map((provider) => provider.connected)).toEqual([true, true]);
+    expect(usage.providers.map((provider) => [provider.id, provider.connected])).toEqual([
+      ["claude", true],
+      ["codex", true],
+      ["opencode", true],
+      ["anthropic", false],
+    ]);
+    // OpenCode reports what a run cost and no plan window, so its row is
+    // connected with none, and says so rather than reading as a failure.
+    expect(usage.providers.find((provider) => provider.id === "opencode")).toEqual({
+      id: "opencode",
+      name: "OpenCode",
+      role: null,
+      connected: true,
+      plan: null,
+      windows: null,
+      detail: "OpenCode reports what each run cost; it reports no plan window.",
+    });
   });
 
   it("asks both CLIs at once, so neither waits on the other", async () => {

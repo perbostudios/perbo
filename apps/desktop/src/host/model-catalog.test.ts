@@ -332,3 +332,42 @@ describe("each model's name and effort levels, as its provider reports them", ()
     ]);
   });
 });
+
+describe("OpenCode's catalog (D-NEW-opencode-is-a-provider)", () => {
+  it("opens one session under a home of its own, asks again while OpenCode has no catalogue yet, and lists what the session offers", async () => {
+    const test = fixture(`
+      if (message.method === 'initialize') reply({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } });
+      if (message.method === 'session/new' && message.id === 2) reply({ jsonrpc: '2.0', id: 2, error: { code: -32603, message: 'Internal error: Internal service failure' } });
+      if (message.method === 'session/new' && message.id === 3) {
+        trace({ opencode: { project: process.env.OPENCODE_DISABLE_PROJECT_CONFIG, config: process.env.XDG_CONFIG_HOME, key: process.env.OPENCODE_API_KEY ?? null } });
+        reply({ jsonrpc: '2.0', id: 3, result: { sessionId: 's', configOptions: [
+          { id: 'model', currentValue: 'opencode/big-pickle', options: [
+            { value: 'opencode/big-pickle', name: 'opencode/Big Pickle' },
+            { value: 'opencode/claude-opus-5', name: 'opencode/Claude Opus 5' },
+          ] },
+          { id: 'mode', currentValue: 'build', options: [{ value: 'build', name: 'build' }] },
+        ] } });
+      }`);
+    const result = await discoverModels("opencode-cli", {
+      ...test.options,
+      binaries: { ...test.options.binaries, opencode: test.options.binaries.claude },
+      env: { ...test.options.env, OPENCODE_API_KEY: "zen-key" },
+      timeoutMs: 10_000,
+    });
+    expect(result.provider).toBe("opencode-cli");
+    expect(result.source).toBe("opencode");
+    expect(result.models).toEqual([
+      { id: "opencode/big-pickle", label: "Big Pickle", description: "opencode/big-pickle", isDefault: true, efforts: [] },
+      { id: "opencode/claude-opus-5", label: "Claude Opus 5", description: "opencode/claude-opus-5", isDefault: false, efforts: [] },
+    ]);
+    const trace = test.trace();
+    expect(trace[0]).toMatchObject({ args: ["acp"], leaked: false });
+    // No turn is started: the handshake and the session, asked twice, and nothing else.
+    expect(trace.flatMap((entry) => (typeof entry["method"] === "string" ? [entry["method"]] : []))).toEqual([
+      "initialize",
+      "session/new",
+      "session/new",
+    ]);
+    expect(trace.find((entry) => "opencode" in entry)?.["opencode"]).toMatchObject({ project: "1", key: "zen-key" });
+  }, 20_000);
+});

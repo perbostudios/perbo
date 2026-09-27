@@ -9,8 +9,8 @@ import { useShortcut } from "../shell/shortcuts.js";
 import { useDiscardTicket } from "../shell/create.js";
 import { displayKey } from "./ticket-workspace.js";
 import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/browser";
-import { confirmRoute, contractState, curates, leftAt, planPaneFor, problemsOpen } from "../planning/panes.js";
-import { readingState } from "../../shared/contract-editing.js";
+import { chatStillTalking, confirmRoute, contractState, curates, leftAt, planPaneFor, problemsOpen } from "../planning/panes.js";
+import { readingNow, useChatTalking } from "../planning/turn-hold.js";
 import { inTheWay } from "../../shared/jobs.js";
 import { useSettled } from "../planning/settled.js";
 import { DriftVerdictSchema } from "@perbo/planning/browser";
@@ -79,7 +79,10 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   const [modelError, setModelError] = useState<string | null>(null);
   // Written straight to the ticket rather than through a contract edit: the
   // models are not part of the contract, and nothing about changing them
-  // touches what approving freezes.
+  // touches what approving freezes. Inside planning the choice is also the
+  // planning's own, because every write that planning makes — a basic
+  // ticket's criteria saved here, a plan drafted again — carries its models
+  // onto the ticket, and would otherwise put back the ones it started with.
   const setModels = (next: TaskModels): void => {
     setModelError(null);
     try {
@@ -90,6 +93,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
       // those settings, so the extra keys are refused at the boundary and the
       // choice is lost.
       const models = TaskModelsSchema.strip().parse(next);
+      planning?.editor.update({ models });
       void bridge
         .request({ kind: "taskModels", repoId, key: detail.ticket.key, models })
         .catch((failure: unknown) => setModelError(errorMessage(failure)));
@@ -189,8 +193,22 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     listed !== undefined &&
     session.specSlug !== null &&
     ticket.admission.spec !== null;
-  const readAt = reads ? readingState(listed.spec, session.form.draft) : null;
   const [confirming, setConfirming] = useState(false);
+  // The confirm asking the host for the state the plan is at, a round trip
+  // that reads nothing and so is not a wait worth a page.
+  const [settling, setSettling] = useState(false);
+  // The chat still talking on a planning over this ticket, from the moment a
+  // turn is sent until it is over: the confirm waits for the Architect to
+  // finish, as Generate plan does, and so does its shortcut, since a turn in
+  // flight may still be moving the plan approving would freeze (D-102). Both
+  // hosts refuse an approval meanwhile too.
+  const planningTalking = useChatTalking(workspace, session?.id ?? curating?.id);
+  const talking =
+    ticket.approved_at === null &&
+    (planningTalking ||
+      (workspace.drafts ?? []).some(
+        (draft) => draft.repoId === repoId && draft.key === ticket.key && (workspace.working ?? []).includes(draft.id),
+      ));
   const [holding, setHolding] = useState<string | null>(null);
   // Why the confirm's reading did not run, once the host tried it until it
   // ran and every try failed: said in a pop-up over this page, which puts the
@@ -214,9 +232,18 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // is untouched, so nothing else on this page would show it.
   const moved = new Set(detail.changedAssertions);
   // Read-only once approved: what runs is settled with the approval.
+  // Inside planning the models wait while its editor is writing: a choice
+  // made then would reach the ticket but not the planning, whose write would
+  // put the old models back on the ticket.
+  const modelsWait =
+    editor !== null &&
+    (editor.session === null ||
+      editor.submitting !== null ||
+      editor.session.phase === "working" ||
+      editor.session.phase === "discarded");
   const model = (role: "executor" | "reviewer", approved: string): ReactNode =>
     ticket.approved_at === null ? (
-      <ModelPicker role={role} models={models} onChange={setModels} connections={providers.data} compact />
+      <ModelPicker role={role} models={models} onChange={setModels} connections={providers.data} compact disabled={modelsWait} />
     ) : (
       approved
     );
@@ -263,28 +290,43 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // One whose spec or criteria moved since the last reading goes back that
   // way from here, so the reading runs as it does there, and the pane lands
   // on this tab again where it finds nothing open.
-  const epicUnread =
+  const epicRead =
     shows === "graph" &&
     ticket.approved_at === null &&
     planning !== undefined &&
     session !== null &&
     listed !== undefined &&
     session.specSlug !== null &&
-    ticket.admission.spec !== null &&
-    listed.read !== readingState(listed.spec, session.form.draft);
+    ticket.admission.spec !== null;
   const confirm = async (): Promise<void> => {
+    if (talking) return;
     if (unlisted) return setHolding(NOT_LISTED);
-    if (epicUnread && session !== null)
-      return navigate(confirmRoute({ repoId, key: ticket.key, sessionId: session.id, approved: false, basic: false }));
-    if (!reads || readAt === null || session === null || listed === undefined) {
+    if ((!reads && !epicRead) || session === null) {
       if (problemsHeld) setHolding(PROBLEMS_HOLD);
       else start();
       return;
     }
     setHolding(null);
+    // Whether anything the last reading judged has moved since is the host's
+    // to say at the press: this page's copy of the plan lands a round trip
+    // after the host's, and a copy from before a turn's edits landed would
+    // pass a plan nobody read.
+    let now: Awaited<ReturnType<typeof readingNow>>;
+    setSettling(true);
+    try {
+      now = await readingNow(session.id);
+    } catch (error) {
+      setFailedReading(errorMessage(error));
+      return;
+    } finally {
+      setSettling(false);
+    }
+    if (now === null) return setHolding(NOT_LISTED);
+    if (epicRead && now.read !== now.state)
+      return navigate(confirmRoute({ repoId, key: ticket.key, sessionId: session.id, approved: false, basic: false }));
     // Problems still open hold the confirm whatever else is true.
-    if (listed.read === readAt) {
-      if (problemsOpen(workspace.drafts, session.id)) setHolding(PROBLEMS_HOLD);
+    if (epicRead || now.read === now.state) {
+      if (problemsHeld) setHolding(PROBLEMS_HOLD);
       else start();
       return;
     }
@@ -292,7 +334,7 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     // and the next press reads again.
     setConfirming(true);
     try {
-      const job = await settled(await bridge.request({ kind: "driftCheck", id: session.id, state: readAt }));
+      const job = await settled(await bridge.request({ kind: "driftCheck", id: session.id, state: now.state }));
       const verdict = job.state === "completed" ? DriftVerdictSchema.safeParse(job.result) : null;
       if (verdict === null)
         setFailedReading(job.error ?? "The reading did not finish.");
@@ -329,7 +371,14 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // once (D-049, D-101).
   const turn = inTheWay(workspace.jobs, { repoId, key: ticket.key, kind: "run" });
   const approving =
-    busy || action.isPending || pending !== null || writing !== null || confirming || failedReading !== null;
+    busy ||
+    action.isPending ||
+    pending !== null ||
+    writing !== null ||
+    confirming ||
+    settling ||
+    talking ||
+    failedReading !== null;
   useShortcut("approve", approving ? null : () => void confirm());
   useShortcut("rename", () => setRenaming(true));
   // While the confirm's reading runs, that is the page: the contract is not
@@ -574,6 +623,11 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
                     : []),
                 ]}
               />
+              {modelsWait && ticket.approved_at === null && (
+                <p className="small muted" role="status">
+                  The models can be changed once the planning has written this contract.
+                </p>
+              )}
               {modelError !== null && <Notice tone="danger">{modelError}</Notice>}
             </section>
             <section>
@@ -644,6 +698,11 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
               {confirming && (
                 <p className="small muted" role="status">
                   Reading the plan against the spec…
+                </p>
+              )}
+              {talking && (
+                <p className="small muted" role="status">
+                  {chatStillTalking("Approve · start the loop")}
                 </p>
               )}
               {holding !== null && <Notice tone="warning">{holding}</Notice>}

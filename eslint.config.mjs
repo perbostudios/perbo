@@ -29,7 +29,7 @@ const NO_PROCESS_EXECUTION = {
 const NO_TRANSPORT_PROCESS_EXECUTION = {
   selector: PROCESS_EXECUTION,
   message:
-    "No process execution in the model package, outside its two named CLI transports. " +
+    "No process execution in the model package, outside its three named CLI transports. " +
     "Model output must never reach a command (ADR-0023).",
 };
 
@@ -251,23 +251,23 @@ export default tseslint.config(
     },
   },
   {
-    // The two named CLI transports are the only exception in the repository.
-    // They start a fixed provider binary while model and repository content
-    // travels as data and never selects a command. Both retain the
-    // shell-string ban.
-    files: ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts"],
+    // The three named CLI transports are the only exception in the
+    // repository. They start a fixed provider binary while model and
+    // repository content travels as data and never selects a command. Each
+    // retains the shell-string ban.
+    files: ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts", "packages/model/src/opencode.ts"],
     rules: {
       "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
     },
   },
   // One module starts every git and gh process, in every zone: the source at
-  // large, the reviewer's, the model's and the two transports', each keeping
+  // large, the reviewer's, the model's and the three transports', each keeping
   // what it already refused.
   startsNoGitOrGh(SOURCE, NO_SHELL_STRING, NO_EXPORT_ALL),
   startsNoGitOrGh(["packages/review/src/**"], NO_PROCESS_EXECUTION, NO_EXPORT_ALL),
   startsNoGitOrGh(["packages/model/src/**"], NO_TRANSPORT_PROCESS_EXECUTION, NO_EXPORT_ALL),
   startsNoGitOrGh(
-    ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts"],
+    ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts", "packages/model/src/opencode.ts"],
     NO_SHELL_STRING,
     NO_EXPORT_ALL,
   ),

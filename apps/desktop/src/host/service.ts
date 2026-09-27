@@ -303,6 +303,7 @@ export class DesktopService {
       marks: this.marks,
       drift: this.drift,
       catalogs: this.catalogs,
+      readingPause: options.readingPause ?? (async (ms) => void (await delay(ms))),
       // Read as each is asked, as the injected catalog is.
       usageProbe: {
         claude: (probe) => (this.options.usageProbe?.claude ?? claudeUsage)(probe),

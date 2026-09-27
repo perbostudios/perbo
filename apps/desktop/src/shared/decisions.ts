@@ -33,6 +33,13 @@ import type { AttemptView, DecisionQuestion } from "./protocol.js";
  * (D-132). Such a finding in
  * `settled` is not asked again. Every other question takes no choice: its
  * answer is recorded as a principle for the executor (D-065) and nothing else.
+ *
+ * A finding the last round's verification left open on its deterministic
+ * evidence — a check the round failed, or a scope it widened — is asked with
+ * that verification's sentence after the reason it stopped, as a sentence of
+ * its own: it is what the round was judged on, and it names the round itself.
+ * Every context is written as sentences, so the questions on one page read
+ * alike.
  */
 export function decisionQuestions(
   review:
@@ -44,7 +51,7 @@ export function decisionQuestions(
       })
     | null
     | undefined,
-  settled: ReadonlySet<string> = new Set(),
+  settled: SettledFindings = { keys: new Set(), refusal: null },
 ): DecisionQuestion[] {
   const decides = (finding: Pick<Finding, "status" | "routing">): boolean =>
     review != null && decidable(review) && routedToPerson(finding);
@@ -53,16 +60,28 @@ export function decisionQuestions(
       (finding) =>
         finding.status === "open" &&
         (decides(finding)
-          ? !settled.has(finding.key)
+          ? !settled.keys.has(finding.key)
           : routedToPerson(finding) || finding.closure === "human"),
     )
     .map((finding) => ({
       id: finding.key,
       title: finding.statement,
-      context: finding.blocking_reason ?? "",
-      options: [],
+      context: [
+        finding.blocking_reason ?? "",
+        settled.refusal?.open.has(finding.key) ? settled.refusal.sentence : "",
+      ]
+        .filter((text) => text.trim().length > 0)
+        .map(asSentence)
+        .join(" "),
       choices: decides(finding) ? decisionChoicesFor(finding.rule_id) : [],
     }));
+}
+
+/** Text as a sentence that stands on its own: a capital first, and a stop at the end where it has none. */
+function asSentence(text: string): string {
+  const trimmed = text.trim();
+  const capital = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
 }
 
 const ShippedSchema = z.object({
@@ -76,7 +95,20 @@ const ShippedSchema = z.object({
 const VerifiedSchema = z.object({
   open_keys: z.array(z.string()),
   per_finding: z.array(z.object({ finding_key: z.string() })),
+  deterministic_failure: z.string().nullable(),
 });
+
+/** What the answers and the rounds since the ticket's last review say of its findings. */
+export interface SettledFindings {
+  /** The findings settled without another answer. */
+  keys: ReadonlySet<string>;
+  /**
+   * The deterministic failure the last verification since the review stopped
+   * on, in its own words, with the findings it left open; null where it
+   * stopped on none.
+   */
+  refusal: { sentence: string; open: ReadonlySet<string> } | null;
+}
 
 /**
  * The findings of the ticket's last review that are settled without another
@@ -86,16 +118,18 @@ const VerifiedSchema = z.object({
  * answers answer the review is `answersReview`, the loop's rule, against the
  * review's own bundle — the one whose subject is its id — and the time it was
  * recorded, as the loop reads it. The review is immutable, so this is read
- * beside it.
+ * beside it, and so is the deterministic failure the last round since it was
+ * refused on.
  */
-export function settledFindings(detail: { attempts: readonly AttemptView[]; verdicts: readonly unknown[] }): Set<string> {
+export function settledFindings(detail: { attempts: readonly AttemptView[]; verdicts: readonly unknown[] }): SettledFindings {
+  const nothing: SettledFindings = { keys: new Set(), refusal: null };
   const at = detail.attempts.findLastIndex((attempt) => attempt.review !== null);
   const review = detail.attempts[at]?.review;
-  if (review === undefined || review === null) return new Set();
+  if (review === undefined || review === null) return nothing;
   const recorded = detail.attempts[at]!.bundles.find(
     (bundle) => bundle.kind === "review" && bundle.subject_id === review.review_id,
   );
-  if (recorded === undefined) return new Set();
+  if (recorded === undefined) return nothing;
   const shipped = detail.verdicts.flatMap((row) => {
     const parsed = ShippedSchema.safeParse(row);
     if (!parsed.success) return [];
@@ -110,9 +144,16 @@ export function settledFindings(detail: { attempts: readonly AttemptView[]; verd
     const parsed = VerifiedSchema.safeParse(attempt.verification);
     return parsed.success ? [parsed.data] : [];
   });
-  const open = new Set(verified.at(-1)?.open_keys ?? []);
+  const last = verified.at(-1);
+  const open = new Set(last?.open_keys ?? []);
   const closed = verified
     .flatMap((verification) => verification.per_finding.map((row) => row.finding_key))
     .filter((key) => !open.has(key));
-  return new Set([...shipped, ...closed]);
+  return {
+    keys: new Set([...shipped, ...closed]),
+    refusal:
+      last === undefined || last.deterministic_failure === null
+        ? null
+        : { sentence: last.deterministic_failure, open },
+  };
 }

@@ -7,11 +7,11 @@ import { bridge } from "../workspace/index.js";
 import { useContractEditing } from "../contract-editor.js";
 import { changeKey, chatChange, textMarks } from "./change-marks.js";
 import { SpecSection } from "./SpecSection.js";
-import { useTurnSending } from "./InterviewDock.js";
+import { useChatTalking } from "./turn-hold.js";
 import { INTERVIEW_WROTE_THE_SPEC, SPEC_TITLE_MAX_CHARS } from "../../shared/protocol.js";
 import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
-import { confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
+import { chatStillTalking, confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),
@@ -400,7 +400,7 @@ export function SpecPane({
   // moment the host says it is over. The press waits for it: whatever the
   // person last asked the chat for reaches the spec before the drafter reads
   // it (D-102).
-  const midTurn = useTurnSending(sessionId) || (workspace.working ?? []).includes(sessionId);
+  const midTurn = useChatTalking(workspace, sessionId);
   // The drafter reads the file, so the press is offered once a title and an
   // outcome are in it: `parseSpec` refuses a spec without either.
   const stated = Boolean(view?.slug) && (view?.sections.outcome.trim().length ?? 0) > 0;
@@ -413,7 +413,7 @@ export function SpecPane({
     asked !== null
       ? "Answer the chat's questions first — its answers change the spec this drafts from."
       : midTurn
-        ? "The chat is still talking. Generate plan is yours once it has finished this turn."
+        ? chatStillTalking("Generate plan")
         : null;
   const ready = stated && notReady === null;
   // What the drafter refused the last press with, said where the press was
@@ -664,7 +664,7 @@ export function SpecPane({
                   </button>
                   <span className="small muted">
                     {midTurn
-                      ? "Waiting for the chat to finish this turn…"
+                      ? chatStillTalking(flowFor(workspace, sessionId).shape === "basic" ? confirmLabel("basic") : "Open the plan")
                       : "After the first draft the plan changes by editing it. Starting over drafts it again."}
                   </span>
                 </>

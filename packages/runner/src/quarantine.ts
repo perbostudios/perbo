@@ -50,6 +50,9 @@ export const QUARANTINED_NAMES = [
   ".clinerules",
   ".roo",
   ".roomodes",
+  ".opencode",
+  "opencode.json",
+  "opencode.jsonc",
 ] as const;
 
 const QuarantineEntrySchema = z.strictObject({

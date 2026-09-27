@@ -51,7 +51,7 @@ describe("a run that ended on the reviewer's answer", () => {
   it.each(["verdict_rejected", "malformed_verdict", "unknown_criterion_id"] as const)(
     "says a %s answer could not be parsed, the recorded error only behind the i",
     (kind) => {
-      const ending = runEnding([job], attempt(error(kind, RECORDED)), "failed");
+      const ending = runEnding([job], attempt(error(kind, RECORDED)));
       expect(ending).toMatchObject({
         title: "The run ended",
         sentence: "The reviewer's answer could not be parsed.",
@@ -63,7 +63,7 @@ describe("a run that ended on the reviewer's answer", () => {
   );
 
   it("keeps its own sentence where the review failed for another reason", () => {
-    const ending = runEnding([job], attempt(error("provider_unavailable", "claude exited 1")), "failed");
+    const ending = runEnding([job], attempt(error("provider_unavailable", "claude exited 1")));
     expect(ending!.sentence).toBe("The run failed after the loop recorded its attempt.");
     expect(ending!.log).toBe(job.error);
   });

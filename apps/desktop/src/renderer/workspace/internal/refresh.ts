@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ChangeSchema } from "../../../shared/protocol.js";
 import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "../../../shared/read-generations.js";
+import { isLive, journal } from "../../../shared/jobs.js";
 import type { Change, DesktopBridge, Job, Snapshot } from "../../../shared/protocol.js";
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -45,7 +46,9 @@ export class WorkspaceRefresh {
     const power = this.power && this.power.sequence > (snapshot.sequence ?? -1) ? this.power.power : undefined;
     const opened = this.opened && this.opened.sequence > (snapshot.sequence ?? -1) ? this.opened.lastOpened : undefined;
     return {
-      ...snapshot, jobs: [...jobs.values()].slice(-40), refreshingRepos: [...this.pending],
+      // Bounded as the host's journal is, which keeps each ticket's last run
+      // past the forty: a stopped page and Continue read that record.
+      ...snapshot, jobs: journal([...jobs.values()], isLive), refreshingRepos: [...this.pending],
       ...(preferences ? { settings: preferences.settings, titles: preferences.titles, taskModels: preferences.taskModels, archived: preferences.archived, calledOff: preferences.calledOff, asks: preferences.asks } : {}),
       ...(power ? { power } : {}),
       ...(opened ? { lastOpened: opened } : {}),
@@ -156,6 +159,10 @@ export class WorkspaceRefresh {
       this.patch((snapshot) => this.merge(snapshot));
       return;
     }
+    // The repository is being read again from the moment a command's end is
+    // told, so the ended job is never shown beside the records from before it:
+    // those still say the stage the run started at, which reads as a stop.
+    if (change.kind === "records" && change.repoId) this.pending.add(change.repoId);
     if ((change.kind === "progress" || change.kind === "records") && change.job) {
       const previous = this.jobs.get(change.job.id);
       if (!previous || previous.sequence <= change.sequence) this.jobs.set(change.job.id, { job: change.job, sequence: change.sequence });

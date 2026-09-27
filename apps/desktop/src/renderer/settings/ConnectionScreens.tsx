@@ -17,7 +17,8 @@ import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { ManifestDialog } from "./ManifestDialog.js";
 import { SkillPicker } from "./SkillPicker.js";
 import type { PageProps } from "../shell/route.js";
-import { ModelCatalogSchema } from "../../shared/protocol.js";
+import { ModelCatalogSchema, ModelProviderSchema } from "../../shared/protocol.js";
+import { catalogDefault, pickerOrder, providerName, withOfferedDefaults } from "../../shared/contract-editing.js";
 import { EFFORT_LABELS, type EffortLevel } from "@perbo/contracts/browser";
 import type {
   ModelProvider,
@@ -25,18 +26,36 @@ import type {
   TaskModels,
 } from "../../shared/protocol.js";
 
-export const providerName = (id: string): string =>
-  id === "codex-cli"
-    ? "Codex"
-    : id === "anthropic"
-      ? "Anthropic API"
-      : "Claude Code";
-/** The connection a model provider runs on, as `providers` lists it. */
-const connectionOf = (id: ModelProvider): string =>
-  id === "claude-cli" ? "claude" : id === "codex-cli" ? "codex" : "anthropic";
+/** The connection a model provider runs on, as `providers` lists it: `claude-cli` on `claude`. */
+const connectionOf = (id: ModelProvider): string => id.replace(/-cli$/, "");
 const signedIn = (connections: Provider[] | undefined, id: ModelProvider): boolean =>
   connections?.some((connection) => connection.id === connectionOf(id) && connection.authenticated) ?? false;
+/** How a provider is reached, as its option in a picker says it. */
+const connectionKind = (id: string): string =>
+  id === "anthropic" ? " · optional API" : id === "opencode-cli" ? " · CLI" : " · subscription";
+/** The role a connection's `roles` names for each picker. */
+const ROLE_LABELS = { executor: "Execution", reviewer: "Independent review" } as const;
+/** Whether the host offers this role on this provider's connection; a role it withholds is greyed out. */
+const offersRole = (connections: Provider[], id: ModelProvider, role: "executor" | "reviewer"): boolean =>
+  connections.some((connection) => connection.id === connectionOf(id) && connection.roles.includes(ROLE_LABELS[role]));
 const effortLabel = (level: EffortLevel | null): string => (level === null ? "Default" : EFFORT_LABELS[level]);
+/**
+ * `provider`'s model catalog, read through the host while `enabled`. The
+ * pickers and the setup screen share one reading by its key.
+ */
+function useCatalog(provider: ModelProvider, enabled: boolean) {
+  return useQuery({
+    queryKey: ["models", provider],
+    queryFn: async () =>
+      ModelCatalogSchema.parse(
+        await bridge.request({ kind: "models", provider }),
+      ),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
 export function useProviders() {
   return useQuery({
     queryKey: ["providers"],
@@ -67,6 +86,7 @@ export function ModelPicker({
   connections,
   compact = false,
   connectionDot = true,
+  disabled = false,
 }: {
   role: "executor" | "reviewer";
   models: TaskModels;
@@ -74,6 +94,8 @@ export function ModelPicker({
   connections?: Provider[] | undefined;
   compact?: boolean;
   connectionDot?: boolean;
+  /** Held shut, reading the saved choice, while whatever the choice is written with is busy. */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -89,23 +111,11 @@ export function ModelPicker({
     effort: EffortLevel | null;
   } | null>(null);
   const selectedProvider = selection?.provider ?? provider;
-  const catalog = useQuery({
-    queryKey: ["models", selectedProvider],
-    queryFn: async () =>
-      ModelCatalogSchema.parse(
-        await bridge.request({ kind: "models", provider: selectedProvider }),
-      ),
-    enabled: open,
-    staleTime: 5 * 60_000,
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
-  const choices = catalog.data?.models ?? [];
-  const selectedModel =
-    (selection?.model ?? model) ||
-    choices.find((choice) => choice.isDefault)?.id ||
-    choices[0]?.id ||
-    "";
+  const catalog = useCatalog(selectedProvider, open);
+  // Every model the catalog offers, Claude Opus 5.5 first where it is offered,
+  // and the one a role with nothing chosen takes (D-093).
+  const choices = pickerOrder(catalog.data?.models ?? []);
+  const selectedModel = (selection?.model ?? model) || catalogDefault(choices);
   const selectedChoice = choices.find((choice) => choice.id === selectedModel);
   // The levels this model offers; a level it does not offer sends nothing on
   // Claude Code; Codex starts at medium and the API at high.
@@ -157,6 +167,7 @@ export function ModelPicker({
         type="button"
         aria-label={"Change " + role + " model"}
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => {
           if (!open) setSelection({ provider, model, effort });
           setOpen(!open);
@@ -181,7 +192,7 @@ export function ModelPicker({
           <span className="small">change</span>
         )}
       </button>
-      {open && (
+      {open && !disabled && (
         <div
           className="model-popup"
           role="group"
@@ -202,19 +213,21 @@ export function ModelPicker({
               })
             }
           >
-            {(role === "reviewer"
-              ? (["claude-cli", "codex-cli", "anthropic"] as const)
-              : (["claude-cli", "codex-cli"] as const)
-            ).map((id) => (
-              <option
-                key={id}
-                value={id}
-                disabled={connections !== undefined && !signedIn(connections, id)}
-              >
-                {providerName(id)}
-                {id === "anthropic" ? " · optional API" : " · subscription"}
-              </option>
-            ))}
+            {/* Every provider the protocol names, the optional API for the
+                reviewer only; one signed out, or whose connection the host
+                does not offer this role on, is greyed out. */}
+            {ModelProviderSchema.options
+              .filter((id) => role === "reviewer" || id !== "anthropic")
+              .map((id) => (
+                <option
+                  key={id}
+                  value={id}
+                  disabled={connections !== undefined && (!signedIn(connections, id) || !offersRole(connections, id, role))}
+                >
+                  {providerName(id)}
+                  {connectionKind(id)}
+                </option>
+              ))}
           </Dropdown>
           <Field id={role + "-model-id"} label="Model">
             <Dropdown
@@ -321,6 +334,129 @@ export function ModelPicker({
     </div>
   );
 }
+/**
+ * The Architect's model for new plannings (D-102): the chat's own model where
+ * the person chooses one, from the catalog of the connection the chat runs
+ * on, which is the executor's; and otherwise Default, the Architect's rule —
+ * Claude Opus 5.5 where Claude Code's catalog offers it, and the planning's
+ * executor model where it does not. A choice made on one connection holds
+ * while the executor stays on it.
+ */
+export function ArchitectPicker({
+  models,
+  onChange,
+}: {
+  models: TaskModels;
+  onChange: (models: TaskModels) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const provider = models.draftingProvider;
+  const saved = models.architectModel !== null && models.architectProvider === provider ? models.architectModel : "";
+  const [selection, setSelection] = useState<string | null>(null);
+  const catalog = useCatalog(provider, open);
+  const choices = pickerOrder(catalog.data?.models ?? []);
+  const selected = selection ?? saved;
+  const rule = provider === "claude-cli" ? "Opus 5.5 where offered" : "the executor's model";
+  // Default needs no catalog, so it can be chosen while one is read or where
+  // none could be; a model needs the catalog to list it.
+  const done = selected !== "" && (catalog.isFetching || catalog.isError || !choices.some((choice) => choice.id === selected));
+  const finish = (): void => {
+    onChange({ ...models, architectProvider: selected === "" ? null : provider, architectModel: selected === "" ? null : selected });
+    setOpen(false);
+  };
+  const away = useRef<() => void>(() => undefined);
+  away.current = () => {
+    if (done) setOpen(false);
+    else finish();
+  };
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: MouseEvent): void => {
+      if (!root.current?.contains(event.target as Node)) away.current();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [open]);
+  return (
+    <div className="model-picker" ref={root}>
+      <button
+        type="button"
+        aria-label="Change architect model"
+        aria-expanded={open}
+        onClick={() => {
+          if (!open) setSelection(null);
+          setOpen(!open);
+        }}
+      >
+        <span className="spacer">
+          <strong>{saved === "" ? "Default" : modelName(saved)}</strong>
+          {saved === "" && <span className="model-effort">{rule}</span>}
+        </span>
+        <img src="./brand/dropdown.svg" alt="" />
+      </button>
+      {open && (
+        <div
+          className="model-popup"
+          role="group"
+          aria-label="architect model selection"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setOpen(false);
+          }}
+        >
+          <SectionLabel>architect · {providerName(provider)}</SectionLabel>
+          <Field id="architect-model-id" label="Model">
+            <Dropdown
+              id="architect-model-id"
+              value={selected}
+              aria-describedby="architect-model-status"
+              disabled={catalog.isFetching}
+              onChange={(event) => setSelection(event.target.value)}
+            >
+              <option value="">Default · {rule}</option>
+              {selected !== "" && !choices.some((choice) => choice.id === selected) && (
+                <option value={selected} disabled>
+                  {`${selected} · ${catalog.isFetching ? "checking" : "not listed"}`}
+                </option>
+              )}
+              {choices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </Dropdown>
+          </Field>
+          <div id="architect-model-status" className="small muted" role="status">
+            {catalog.isFetching
+              ? "Discovering models…"
+              : catalog.isError
+                ? errorMessage(catalog.error)
+                : selected === ""
+                  ? provider === "claude-cli"
+                    ? "Claude Opus 5.5 where Claude Code offers it, and the executor's model where it does not."
+                    : "The executor's model, which the spec is drafted with."
+                  : (choices.find((choice) => choice.id === selected)?.description ??
+                    "Your saved model is no longer listed. Choose a model to replace it.")}
+            <div>The Architect runs on the executor's connection.</div>
+          </div>
+          <button
+            type="button"
+            className="text-button small"
+            disabled={catalog.isFetching}
+            onClick={() => {
+              void catalog.refetch();
+            }}
+          >
+            Refresh models
+          </button>
+          <Button className="small" onClick={finish} disabled={done}>
+            Done
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 export function ProviderScreen({
   workspace,
   setup = false,
@@ -331,6 +467,18 @@ export function ProviderScreen({
     [copied, setCopied] = useState(false);
   const providers = useProviders(),
     action = useAction();
+  // Setting up, the executor's default starts from Claude Code's catalog: on
+  // Claude Code it takes Claude Opus 5.5 where the catalog offers it, and
+  // keeps the model it has where it does not (D-093). The reviewer keeps its
+  // own default (D-010), and an executor the person has chosen on this screen
+  // keeps their choice.
+  const executorChosen = useRef(false);
+  const claudeCatalog = useCatalog("claude-cli", setup && signedIn(providers.data, "claude-cli"));
+  useEffect(() => {
+    if (!claudeCatalog.data || executorChosen.current) return;
+    const offered = claudeCatalog.data.models.map((row) => row.id);
+    setSettings((current) => withOfferedDefaults(current, offered));
+  }, [claudeCatalog.data]);
   const selectedProvider = providers.data?.find(
     (provider) => provider.id === selected,
   );
@@ -468,7 +616,10 @@ export function ProviderScreen({
                   connectionDot={false}
                   models={settings}
                   connections={providers.data}
-                  onChange={(models) => setSettings({ ...settings, ...models })}
+                  onChange={(models) => {
+                    if (role === "executor") executorChosen.current = true;
+                    setSettings({ ...settings, ...models });
+                  }}
                 />
               </div>
             </div>

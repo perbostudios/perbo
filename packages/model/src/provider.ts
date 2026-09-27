@@ -8,6 +8,7 @@ import {
 import { anthropicModel } from "./anthropic.js";
 import { claudeCliModel } from "./claude-cli.js";
 import { codexCliModel } from "./codex-cli.js";
+import { openCodeCliModel } from "./opencode.js";
 import type { Model } from "./turn.js";
 
 /**
@@ -18,7 +19,7 @@ import type { Model } from "./turn.js";
  * times, which is how a provider comes to exist on three of them.
  */
 
-export const MODEL_PROVIDERS = ["anthropic", "claude-cli", "codex-cli"] as const;
+export const MODEL_PROVIDERS = ["anthropic", "claude-cli", "codex-cli", "opencode-cli"] as const;
 export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
 
 export interface CreateModelOptions {
@@ -33,7 +34,7 @@ export interface CreateModelOptions {
   /**
    * How hard the model thinks, in the provider's own words (`EFFORT_LEVELS`).
    * Absent or null sends nothing on Claude Code; Codex starts at medium and
-   * the API at high.
+   * the API at high. OpenCode takes none, and one given is refused.
    */
   effort?: EffortLevel | null | undefined;
 }
@@ -49,6 +50,9 @@ export function createModel(provider: ModelProvider, options: CreateModelOptions
       return codexCliModel({ ...named, ...fitted("codex-cli", options.effort) });
     case "anthropic":
       return anthropicModel({ ...named, ...fitted("anthropic", options.effort) });
+    case "opencode-cli":
+      fitted("opencode-cli", options.effort);
+      return openCodeCliModel(named);
   }
 }
 
@@ -63,6 +67,10 @@ function fitted<P extends EffortProvider>(
 ): { effort?: ProviderEffort<P> } {
   if (effort === null || effort === undefined) return {};
   if (!effortFits(provider, effort))
-    throw new Error(`${provider} takes ${EFFORT_LEVELS[provider].join(", ")}, not ${effort}`);
+    throw new Error(
+      EFFORT_LEVELS[provider].length === 0
+        ? `${provider} takes no effort level, not ${effort}`
+        : `${provider} takes ${EFFORT_LEVELS[provider].join(", ")}, not ${effort}`,
+    );
   return { effort: effort as ProviderEffort<P> };
 }

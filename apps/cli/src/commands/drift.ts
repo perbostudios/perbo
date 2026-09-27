@@ -62,7 +62,7 @@ export const DriftInputSchema = z.strictObject({
   target: StoreTargetSchema,
   key: z.string().min(1, "drift requires a ticket key, e.g. PRB-1"),
   provider: z.enum(MODEL_PROVIDERS, {
-    error: "--provider must be 'anthropic', 'claude-cli' or 'codex-cli'",
+    error: "--provider must be 'anthropic', 'claude-cli', 'codex-cli' or 'opencode-cli'",
   }),
   model: ModelIdSchema.nullable(),
   /** Record going on to the contract with the differences open. */

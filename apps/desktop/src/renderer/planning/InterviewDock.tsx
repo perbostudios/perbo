@@ -3,8 +3,9 @@ import { Button, InfoHint, LineIcon, Notice, ThinkingStatus, cx } from "../ui/in
 import { useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage, useGraph } from "../workspace/index.js";
 import { graphHistory, latestUndoable } from "./history.js";
-import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
+import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, providerName } from "../../shared/contract-editing.js";
 import { AskedHandle } from "./AskedHandle.js";
+import { chatBlocks, type ChatLine, type ChatList } from "./chat-format.js";
 import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
 import {
   INTERVIEW_CONVERSATION_CAP,
@@ -323,7 +324,7 @@ export function InterviewDock({
       <div className="dock-head">
         <div className="dock-session">
           <span className={cx("prov-dot", models.draftingProvider === "codex-cli" && "prov-dot--codex")} />
-          <strong>{models.draftingProvider === "codex-cli" ? "Codex" : "Claude"}</strong>
+          <strong>{providerName(models.draftingProvider)}</strong>
           {/* The model the session was started on, once one has run (D-102). */}
           <span className="mono">{session?.interviewModel ?? models.executorModel}</span>
           <span className="spacer" />
@@ -1023,8 +1024,83 @@ function reveal(element: HTMLElement): void {
   else if (inner.top < outer.top) box.scrollTop -= outer.top - inner.top;
 }
 
+/**
+ * What the person or the Architect wrote, drawn in the marks it was written in
+ * ({@link chatBlocks}). Every word goes in as a text node, so a tag, a script
+ * or a link a model writes is shown as the characters it is.
+ */
+export function ChatText({ text }: { text: string }) {
+  return (
+    <>
+      {chatBlocks(text).map((block, index) =>
+        block.kind === "list" ? (
+          <ChatListView key={index} list={block} />
+        ) : block.kind === "code" ? (
+          <pre key={index} className="chat-code-block">
+            {block.text}
+          </pre>
+        ) : block.kind === "heading" ? (
+          <p key={index} className="chat-para chat-heading">
+            <ChatRuns runs={block.runs} />
+          </p>
+        ) : (
+          <p key={index} className="chat-para">
+            <ChatLines lines={block.lines} />
+          </p>
+        ),
+      )}
+    </>
+  );
+}
+
+function ChatListView({ list }: { list: ChatList }) {
+  const items = list.items.map((item, index) => (
+    <li key={index}>
+      <ChatLines lines={item.lines} />
+      {item.lists.map((inner, at) => (
+        <ChatListView key={at} list={inner} />
+      ))}
+    </li>
+  ));
+  return list.ordered ? (
+    <ol className="chat-list" start={list.start}>
+      {items}
+    </ol>
+  ) : (
+    <ul className="chat-list">{items}</ul>
+  );
+}
+
+/** Lines one under another, each break one the writer put there. */
+function ChatLines({ lines }: { lines: ChatLine[] }) {
+  return lines.map((runs, index) => (
+    <span key={index}>
+      {index > 0 && <br />}
+      <ChatRuns runs={runs} />
+    </span>
+  ));
+}
+
+function ChatRuns({ runs }: { runs: ChatLine }) {
+  return runs.map((run, index) =>
+    run.mark === "strong" ? (
+      <strong key={index} className="chat-strong">
+        {run.text}
+      </strong>
+    ) : run.mark === "emphasis" ? (
+      <em key={index}>{run.text}</em>
+    ) : run.mark === "code" ? (
+      <code key={index} className="chat-code">
+        {run.text}
+      </code>
+    ) : (
+      <span key={index}>{run.text}</span>
+    ),
+  );
+}
+
 /** One line of the conversation, in the shape its kind is read in. */
-function Line({
+export function Line({
   entry,
   onUndo,
   undoable,
@@ -1041,14 +1117,14 @@ function Line({
     return (
       <div className="msg msg--you">
         <span className="msg-who">you</span>
-        {line.text}
+        <ChatText text={line.text} />
       </div>
     );
   if (line.kind === "said")
     return (
       <div className="msg msg--interview">
         <span className="msg-who">{INTERVIEWER_NAME}</span>
-        {line.text}
+        <ChatText text={line.text} />
       </div>
     );
   if (line.kind === "note") return <NoteLine line={line} />;

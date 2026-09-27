@@ -121,6 +121,53 @@ describe("workspace refresh interface", () => {
     expect(f.requests).toContainEqual({ kind: "output", repoId: f.row.repoId, key: f.row.ticket.key, attemptId: "attempt-one" });
   });
 
+  /**
+   * A command's end is told with the job as it ended. That job is never shown
+   * beside the records from before it — which still say the stage the run
+   * started at, and read as a stop — without the repository marked as being
+   * read again, and what the host recorded on it is kept whole.
+   */
+  it("marks the repository as being read again before it shows the ended job, keeping its publication choice and outcome", async () => {
+    const f = await fixture();
+    const seen: { state: string | undefined; refreshing: boolean }[] = [];
+    const unsubscribe = f.client.getQueryCache().subscribe(() => {
+      const snapshot = f.client.getQueryData<Snapshot>(["workspace"]);
+      const job = snapshot?.jobs.find((entry) => entry.id === f.job.id);
+      seen.push({ state: job?.state, refreshing: snapshot?.refreshingRepos?.includes(f.row.repoId) ?? false });
+    });
+    cleanups.push(unsubscribe);
+    f.emit({ kind: "records", sequence: 1, repoId: f.row.repoId, key: f.row.ticket.key, job: { ...f.job, state: "completed", publish: true, outcome: "escalated" } });
+    const shown = seen.filter((entry) => entry.state === "completed");
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.every((entry) => entry.refreshing)).toBe(true);
+    const job = f.client.getQueryData<Snapshot>(["workspace"])!.jobs.find((entry) => entry.id === f.job.id)!;
+    expect({ publish: job.publish, outcome: job.outcome }).toEqual({ publish: true, outcome: "escalated" });
+  });
+
+  /**
+   * The host's journal keeps each ticket's last run past the forty most recent
+   * jobs, since the stopped page and Continue read it however long ago it
+   * ended; the snapshot the page reads keeps it too.
+   */
+  it("keeps each ticket's last run however many jobs came after it", async () => {
+    const f = await fixture();
+    const stopped: Job = { ...f.job, id: crypto.randomUUID(), state: "cancelled", endedAt: new Date().toISOString() };
+    const later: Job[] = Array.from({ length: 45 }, () => ({
+      ...f.job,
+      id: crypto.randomUUID(),
+      key: null,
+      kind: "export",
+      state: "completed",
+    }));
+    f.override(async (request) => {
+      if (request.kind === "snapshot") return { ...structuredClone(f.snapshot), jobs: [stopped, ...later] };
+      throw new Error("Unexpected request " + request.kind);
+    });
+    const snapshot = await f.refresh.snapshot();
+    expect(snapshot.jobs.map((job) => job.id)).toContain(stopped.id);
+    expect(snapshot.jobs.filter((job) => job.kind === "export")).toHaveLength(40);
+  });
+
   it("performs a follow-up read when completion arrives during an older detail request", async () => {
     const f = await fixture(), oldDetail = deferred<Detail>();
     const observer = f.observeDetail();

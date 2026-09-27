@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OPENCODE_API_KEY_ENV, OPENCODE_MIN_VERSION, opencodeVersionFits } from "@perbo/contracts";
 import type { Execute } from "../repository/git.js";
 import type { HostIO } from "../service.js";
 import type { Provider } from "../../shared/protocol.js";
@@ -72,7 +73,7 @@ export async function probeProviders(
       };
     }
   };
-  const providers = await Promise.all([probe("claude"), probe("codex")]);
+  const providers = await Promise.all([probe("claude"), probe("codex"), probeOpenCode(execute, cwd, environment)]);
   return [
     ...providers,
     {
@@ -87,6 +88,54 @@ export async function probeProviders(
       roles: ["Independent review"],
     },
   ];
+}
+
+/**
+ * OpenCode, as every role Perbo runs on it sees it (D-NEW-opencode-is-a-provider).
+ *
+ * There is no sign-in to offer: each role runs OpenCode under a home of
+ * Perbo's own making, where a login the person made would never be read, and
+ * authenticates with OpenCode Zen's key from the app environment or runs
+ * OpenCode's free models without one. So an installed OpenCode at
+ * {@link OPENCODE_MIN_VERSION} or later is connected, and the detail says
+ * which of the two it runs on.
+ */
+async function probeOpenCode(execute: Execute, cwd: string, environment: NodeJS.ProcessEnv): Promise<Provider> {
+  const base = {
+    id: "opencode" as const,
+    name: "OpenCode",
+    loginCommand: "",
+    roles: ["Execution", "Independent review", "Planning"],
+  };
+  try {
+    const result = await execute("opencode", ["--version"], { cwd, timeoutMs: 12_000 });
+    const line = (result.stdout || result.stderr).trim();
+    if (result.code !== 0 || !opencodeVersionFits(line))
+      return {
+        ...base,
+        installed: result.code === 0,
+        authenticated: false,
+        detail:
+          result.code === 0
+            ? `OpenCode ${line || "of an unknown version"} is installed; Perbo needs ${OPENCODE_MIN_VERSION} or later`
+            : "CLI unavailable. Install OpenCode 2, then refresh.",
+      };
+    return {
+      ...base,
+      installed: true,
+      authenticated: true,
+      detail: environment[OPENCODE_API_KEY_ENV]
+        ? `${OPENCODE_API_KEY_ENV} in the app environment · metered OpenCode Zen`
+        : `No ${OPENCODE_API_KEY_ENV} · OpenCode's free models only`,
+    };
+  } catch {
+    return {
+      ...base,
+      installed: false,
+      authenticated: false,
+      detail: "CLI unavailable. Install OpenCode 2, then refresh.",
+    };
+  }
 }
 
 /**

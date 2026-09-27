@@ -331,23 +331,26 @@ export const USAGE = `perbo — contract to pull request, locally
       session holds no loop authority. Arguments after -- go to the provider.
 
   perbo interview --repo . --spec specs/<slug> [--session <id>] [--model <id>]
-                   [--provider claude|codex] [--store <dir>]
+                   [--provider claude|codex|opencode] [--store <dir>]
       Interview yourself about a piece of work with your own session — Claude
-      Code through the Claude Agent SDK, or Codex through codex app-server —
-      and write the spec. It reads anything and runs read-only commands; it
-      writes that spec's folder, CONTEXT.md and the ADR folder, and nothing
-      else. Anything outside that is refused rather than put to you: there are
-      no permission prompts, and on Codex the app server's own approval
-      requests are answered by the same rules rather than reaching you. It
-      writes the spec and stops there: drafting the plan from it is yours,
-      through perbo admit --from-spec or Generate plan in the app. Once there
+      Code through the Claude Agent SDK, Codex through codex app-server, or
+      OpenCode through opencode acp — and write the spec. It reads anything
+      and runs read-only commands; it writes that spec's folder, CONTEXT.md
+      and the ADR folder, and nothing else. Anything outside that is refused
+      rather than put to you: there are no permission prompts, and on Codex
+      and OpenCode the provider's own approval requests are answered by the
+      same rules rather than reaching you. It writes the spec and stops
+      there: drafting the plan from it is yours, through perbo admit
+      --from-spec or Generate plan in the app. Once there
       is one, its edit_plan and undo_edit change the plan through the validated
       edit path, recorded as the interview's, and read_plan reads it back. It
       holds no tool that drafts, approves, publishes or merges. Your
       turns arrive as JSON lines on stdin; every event leaves as one on stdout.
       The session id is printed and kept beside the spec, so --session <id>
-      continues the conversation: the SDK's session on Claude, and the app
-      server's own thread resume on Codex.
+      continues the conversation: the SDK's session on Claude, the app
+      server's own thread resume on Codex, and ACP's session/resume on
+      OpenCode, whose sessions are kept outside the checkout under
+      ~/.perbo/opencode/.
 
   perbo sync --all-merged [--force]
       Read every ticket whose delivery already reports merged, once each, and
@@ -411,6 +414,19 @@ export const USAGE = `perbo — contract to pull request, locally
       edited the plan by hand since then (the interview's edits do not
       count): answer the differences instead, or edit the plan until a
       reading finds none.
+
+  perbo options PRB-1 --finding <finding key> [--finding <finding key>]… [--provider claude-cli] [--model <id>] [--json] [--repo .] [--store <dir>]
+      Ask the Architect for answers to findings the ticket's last review left
+      for you: for each finding named by its whole key, two to four
+      principles you could adopt as your own, one of them recommended, read
+      from the finding, the criterion it sits on, the contract and the change
+      the review judged. They are written beside the ticket as
+      PRB-1.options.json for that review and printed as JSON on stdout
+      whether or not --json is given; asking again prints them and calls a
+      model only for a finding not answered there. A later review replaces
+      them. Nothing is decided: pick one, or write your own, and record it
+      with perbo verdict --decide. Refused for a finding the executor is
+      never handed, whose only answer is to ship the change as it is.
 
   perbo inspect PRB-1 [--attempt <id>] [--json] [--repo .] [--store <dir>]
   perbo inspect <local run id> [--attempt <id>] [--json]
@@ -545,6 +561,19 @@ export const USAGE = `perbo — contract to pull request, locally
       without --replace, and a replacement supersedes the earlier row rather
       than overwriting it.
 
+  perbo verdict <ticket> --egress <question key> --allow|--refuse
+              [--author "..."] [--repo .] [--store <dir>] [--json]
+      Answer the question a run is waiting on: whether the executor may reach
+      a host that is not on the repository's network allow-list. The run
+      prints the question, its key and the whole command that named the host,
+      and records it on the ticket. --allow lets the held call run and has the
+      run add that one host to network_allow_list in .perbo/config.json;
+      --refuse refuses it, closes the run's questions about the network and
+      is remembered on the ticket, so that host is never asked about again on
+      it. Refused where the question is answered already, where its window
+      passed and the attempt stopped, or where no run of the ticket is live.
+      Who answered is read as above, and --stand-in cannot answer one.
+
   perbo verdict --list <change> [--json] [--repo .] [--store <dir>]
       Read those decisions back: every one recorded for a change — the finding
       key, the decision, who decided and when — newest first, with a replaced
@@ -590,8 +619,9 @@ Drafting for admit
                           title as it stands, not the drafter's name, and leave
                           the spec's title line as it is
   --provider <name>       'claude-cli' (default, the locally installed \`claude\` and
-                          its own login), 'anthropic' (ANTHROPIC_API_KEY) or
-                          'codex-cli'; the drafter uses the reviewer's transport
+                          its own login), 'anthropic' (ANTHROPIC_API_KEY),
+                          'codex-cli' or 'opencode-cli'; the drafter uses the
+                          reviewer's transport
   --model <id>            override the drafting model
 
 Optional for admit
@@ -644,8 +674,10 @@ Optional for review
   --model <id>            override the reviewer model
   --provider <name>       'claude-cli' (default: the locally installed \`claude\`
                           and its own login, as \`perbo run\` uses), 'anthropic'
-                          (ANTHROPIC_API_KEY) or 'codex-cli' (the locally
-                          installed \`codex\` and its own login)
+                          (ANTHROPIC_API_KEY), 'codex-cli' (the locally
+                          installed \`codex\` and its own login) or
+                          'opencode-cli' (the locally installed \`opencode\`,
+                          on OPENCODE_API_KEY or OpenCode's free models)
   --max-turns <n>         cap the reviewer's file reads
   --raw-artifact <file>   also write the artifact BEFORE credential redaction to
                           this file. For the corpus harness, which scores whether

@@ -1,18 +1,27 @@
 import { randomUUID } from "node:crypto";
+import { EXIT_CODES, isRunVerdict } from "@perbo/contracts";
 import { busyMessage, inTheWay, isLive, journal } from "../../shared/jobs.js";
 import { logTail, redact, requireSuccess } from "../process.js";
 import type { Cli } from "../cli.js";
 import type { Changes } from "../changes.js";
 import type { ContractEditing, EditingOwner } from "../../shared/contract-editing.js";
 import type { ProcessResult } from "../process.js";
-import type { Profile, RegisteredRepository } from "../profile/store.js";
+import { CLOSED_MID_COMMAND, type Profile, type RegisteredRepository } from "../profile/store.js";
 import type { WorkspaceReads } from "../workspace-reads.js";
 import type { Job } from "../../shared/protocol.js";
 
+/** How one invocation reads its exit. */
+export interface InvokeOptions {
+  /**
+   * `perbo run`: its exit 2 with a verdict for the person on stdout is the run
+   * completing, paused for them, and not a failure.
+   */
+  verdict?: boolean;
+}
 /** What a running job is given: its cancellation, and the CLI in its own repository. */
 export interface JobContext {
   signal: AbortSignal;
-  invoke(args: string[]): Promise<ProcessResult>;
+  invoke(args: string[], options?: InvokeOptions): Promise<ProcessResult>;
 }
 export type JobOperation = (job: Job, context: JobContext) => Promise<void>;
 
@@ -58,6 +67,8 @@ export class JobRunner {
    * planning in another repository.
    */
   private readonly admissions = new Map<string, Promise<void>>();
+  /** Perbo is closing: a command it cuts off ends `interrupted`, as one a crash cut off does. */
+  private closing = false;
 
   constructor(deps: JobRunnerDeps) {
     this.deps = deps;
@@ -114,6 +125,13 @@ export class JobRunner {
     this.deps.profile.state.jobs = journal([...this.deps.profile.state.jobs, job], (entry) =>
       this.active.has(entry.id),
     );
+    // An abort is the person's stop, taken before Perbo closed, or Perbo
+    // closing, quit or crashed alike.
+    const stopped = (): Job["state"] => {
+      if (!this.closing || job.state === "stopping") return "cancelled";
+      job.error = CLOSED_MID_COMMAND;
+      return "interrupted";
+    };
     const admits = kind === "draft" || kind === "admit";
     const ahead = admits ? this.admissions.get(repo.id) : undefined;
     // Reserve the job's place synchronously, before operation can yield or another IPC request can enter.
@@ -122,15 +140,15 @@ export class JobRunner {
         if (controller.signal.aborted) throw new Error("Command cancelled before starting");
         return operation(job, {
           signal: controller.signal,
-          invoke: (args) => this.invoke(job, repo, args, controller.signal),
+          invoke: (args, options) => this.invoke(job, repo, args, controller.signal, options),
         });
       })
       .then(() => {
-        job.state = controller.signal.aborted ? "cancelled" : "completed";
+        job.state = controller.signal.aborted ? stopped() : "completed";
       })
       .catch((error: unknown) => {
         job.error = redact(error instanceof Error ? error.message : String(error));
-        job.state = controller.signal.aborted ? "cancelled" : "failed";
+        job.state = controller.signal.aborted ? stopped() : "failed";
       })
       .finally(async () => {
         job.endedAt = new Date().toISOString();
@@ -191,8 +209,14 @@ export class JobRunner {
     return null;
   }
 
-  /** Every command is cancelled, and its receipt awaited, before the app closes. */
+  /**
+   * Every command is cut off, and its receipt awaited, before the app closes:
+   * each ends `interrupted`, the state a crash leaves, since quitting and
+   * crashing are the same event to the work. One the person was already
+   * stopping ends as their stop.
+   */
   async shutdown(): Promise<void> {
+    this.closing = true;
     const running = [...this.active.values()];
     for (const entry of running) entry.controller.abort();
     await Promise.all(running.map((entry) => entry.done));
@@ -201,13 +225,16 @@ export class JobRunner {
   /**
    * One invocation of the CLI for a job: its output becomes the job's log as it
    * arrives, persisted no more often than the interval, and its stdout the
-   * job's result where it is JSON.
+   * job's result where it is JSON. A run that exits on a verdict for the person
+   * completes with that outcome on the job, and every other non-zero exit is
+   * the job failing.
    */
   private async invoke(
     job: Job,
     repo: RegisteredRepository,
     args: string[],
     signal: AbortSignal,
+    options: InvokeOptions = {},
   ): Promise<ProcessResult> {
     const result = await this.deps.cli.run(args, repo, {
       signal,
@@ -223,14 +250,25 @@ export class JobRunner {
       },
     });
     job.log = logTail(redact([result.stderr, result.stdout].filter(Boolean).join("\n")));
-    requireSuccess(result);
-    if (result.stdout.trim()) {
+    const parsed = ((): unknown => {
+      if (!result.stdout.trim()) return undefined;
       try {
-        job.result = JSON.parse(result.stdout);
+        return JSON.parse(result.stdout) as unknown;
       } catch {
-        job.result = null;
+        return null;
       }
-    }
+    })();
+    const outcome = (parsed as { outcome?: unknown } | null | undefined)?.outcome;
+    const verdict =
+      options.verdict === true &&
+      !result.cancelled &&
+      result.code === EXIT_CODES.gate_closed &&
+      isRunVerdict(outcome)
+        ? outcome
+        : null;
+    if (verdict === null) requireSuccess(result);
+    if (parsed !== undefined) job.result = parsed;
+    if (verdict !== null) job.outcome = verdict;
     return result;
   }
 }

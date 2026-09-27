@@ -1,16 +1,33 @@
 import { z } from "zod";
-import type { Detail, Snapshot, TaskRow } from "../../shared/protocol.js";
+import type { AttemptView, Detail, Job, Snapshot, TaskRow } from "../../shared/protocol.js";
 import type { TaskView } from "../shell/route.js";
-import { runnerProgress } from "../../shared/runner-progress.js";
+import { runnerProgress, WHEEL_STEPS, wheelAt, wheelStep, type RunnerStage } from "../../shared/runner-progress.js";
 import { heldTicket, inTheWay, isRun, ticketRun } from "../../shared/jobs.js";
 import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isMergeDecided, isPreLoop } from "../../shared/archive.js";
 
 export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
+/**
+ * Where the wheel stands once the ticket's journey ended — a pull request
+ * opened, merged or closed, or a local run finished with nothing to merge:
+ * past every step, the ring full. Only a loop still running, paused or
+ * stopped sits at a step.
+ */
+export const JOURNEY_END = WHEEL_STEPS.length + 1;
 export const stageName = (stage: number): string =>
-  ["contract", "execution", "checks", "decisions required", "refinement", "review"][stage - 1] ?? "contract";
-const stageOf = (state: string): number =>
-  ["pr_open", "independent_review"].includes(state) ? 6 : state === "changes_requested" ? 4 :
-  state === "verifying" ? 3 : ["executing", "provisioning"].includes(state) ? 2 : 1;
+  stage === JOURNEY_END ? "review ready" : (WHEEL_STEPS[stage - 1] ?? "contract");
+/** The wheel's step a ticket's state names while the loop carries it; a journey that ended is `JOURNEY_END`. */
+export const stageOf = (state: string): number =>
+  wheelStep(
+    state === "independent_review"
+      ? "review"
+      : state === "changes_requested"
+        ? "decisions required"
+        : state === "verifying"
+          ? "checks"
+          : ["executing", "provisioning"].includes(state)
+            ? "execution"
+            : "contract",
+  );
 const closureSchema = z.object({
   all_closed: z.boolean(), deterministic_failure: z.string().nullable(), open_keys: z.array(z.string()),
   per_finding: z.array(z.object({ finding_key: z.string(), status: z.enum(["closed", "not_closed", "cannot_tell"]), pointer: z.string() })),
@@ -34,25 +51,29 @@ export const completedLabel = (count: number): string => `${count} completed`;
 
 /**
  * Where a Home ticket stands (S4), the one answer its card's colour, the
- * header's counts and the rail's Home badge all read: yellow where a finding
- * waits on the person's answer mid-loop; red where the loop stopped and will
- * not reach the end on its own; green where the journey ended — a pull request
- * opened, merged or closed without merge, or a local run finished with no pull
- * request to merge; none for every other part of the loop.
+ * header's counts and the rail's Home badge all read: yellow where the loop
+ * paused for the person — a finding waits on their answer, the run just ended
+ * on a verdict for them, or a live run waits on their answer about a host off
+ * the allow-list (D-NEW-an-unlisted-host-asks); red only where the loop
+ * stopped on an error or because the person stopped it, and will not reach the
+ * end on its own; green where the journey ended — a pull request opened,
+ * merged or closed without merge, or a local run finished with no pull request
+ * to merge; none for every other part of the loop.
  *
  * A repository's records being read again does not move it, so nothing that
  * shows it blinks while they are: a run that completed while its ticket still
- * reads mid-loop is the record not yet read, and is not taken for a stop.
+ * reads mid-loop is the record not yet read, and is not taken for a stop, and
+ * one that completed on a verdict is yellow from the moment it ends.
  */
 export function homeTone(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
   row: Pick<TaskRow, "repoId" | "ticket">,
 ): HomeTone | null {
   const { ticket } = row;
-  const { jobs, active, stoppedShort } = ticketRun(workspace, row);
+  const { jobs, active, stoppedShort, paused, asking } = ticketRun(workspace, row);
   const settling = jobs.filter(isRun).at(-1)?.state === "completed" && workspace.refreshingRepos?.includes(row.repoId);
   if ((active?.state === "stopping" && isRun(active)) || (stoppedShort && !settling) || (!active && GIVEN_UP_STATES.includes(ticket.state))) return "red";
-  if (!active && ticket.state === "changes_requested") return "yellow";
+  if (paused || asking || (!active && ticket.state === "changes_requested")) return "yellow";
   return JOURNEY_END_STATES.includes(ticket.state) ? "green" : null;
 }
 
@@ -158,6 +179,97 @@ export function unseenAttention(
   return opened === undefined || opened < attentionSince(workspace, row, tone);
 }
 
+/** One stage an attempt on record went through, at the time its record holds. */
+export interface RecordedStage {
+  stage: RunnerStage;
+  at: string;
+  /** For a check, its recorded result. */
+  check?: AttemptView["checks"][number];
+  /** For a review round whose review is on record, how many findings it left open. */
+  open?: number;
+}
+
+/**
+ * The stages each attempt on record went through, one list per attempt, in the
+ * order it ran them: a run provisions its worktree once, and each attempt is
+ * executed, sealed, checked, and then reviewed or has its closures verified —
+ * the same stages a run's log announces as it goes.
+ */
+export function recordedRunnerStages(attempts: readonly AttemptView[]): RecordedStage[][] {
+  const provisioned = new Set<number>();
+  const remediations = new Map<number, Set<number>>();
+  return attempts.map((attempt) => {
+    const stages: RecordedStage[] = [];
+    const execution = attempt.bundles.find((bundle) => bundle.kind === "execution");
+    const kind = execution?.inputs["round_kind"] ?? (attempt.round === 0 ? "execute" : "remediate");
+    if (!provisioned.has(attempt.run)) {
+      provisioned.add(attempt.run);
+      stages.push({ stage: { kind: "worktree" }, at: attempt.startedAt });
+    }
+    if (kind === "execute") stages.push({ stage: { kind: "executing" }, at: attempt.startedAt });
+    else if (kind === "resolve_conflict") stages.push({ stage: { kind: "conflict" }, at: attempt.startedAt });
+    else {
+      const rounds = remediations.get(attempt.run) ?? new Set<number>();
+      rounds.add(attempt.round);
+      remediations.set(attempt.run, rounds);
+      stages.push({ stage: { kind: "remediation", round: rounds.size }, at: attempt.startedAt });
+    }
+    const sealed =
+      execution === undefined
+        ? attempt.startedAt
+        : new Date(Date.parse(attempt.startedAt) + execution.usage.wall_clock_ms).toISOString();
+    stages.push({ stage: { kind: "seal" }, at: sealed });
+    for (const check of attempt.checks) stages.push({ stage: { kind: "check", name: check.name }, at: sealed, check });
+    const reviewBundle = attempt.bundles.find(
+      (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
+    );
+    if (attempt.review !== null || reviewBundle !== undefined) {
+      const review = attempt.review;
+      stages.push({
+        stage: { kind: "review", round: attempt.round },
+        at: review?.created_at ?? reviewBundle!.created_at,
+        ...(review === null ? {} : { open: review.findings.filter((finding) => finding.status === "open").length }),
+      });
+    }
+    const verification = attempt.bundles.find(
+      (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.id}`,
+    );
+    if (attempt.verification !== null || verification !== undefined)
+      stages.push({ stage: { kind: "verify", round: attempt.round }, at: verification?.created_at ?? sealed });
+    return stages;
+  });
+}
+
+/**
+ * Where the progress wheel stood when the ticket's last run stopped: the last
+ * stage that moves it among the stage lines that run printed, and where its
+ * log holds none, among the stages the attempts on record went through. Null
+ * where neither says, so a stop never puts the wheel back to the contract.
+ */
+function stageReached(lastRun: Job | undefined, attempts: readonly AttemptView[]): number | null {
+  const logged = lastRun === undefined ? null : runnerProgress(lastRun.log);
+  return logged?.stage ?? wheelAt(recordedRunnerStages(attempts).flat().map(({ stage }) => stage))?.stage ?? null;
+}
+
+/**
+ * Whether the person stopped the ticket's last run themselves: its record says
+ * a stop was taken for it, settled or still settling.
+ */
+export const stoppedByPerson = (jobs: readonly Job[]): boolean => {
+  const run = jobs.filter(isRun).at(-1);
+  return run?.state === "cancelled" || run?.state === "stopping";
+};
+
+/**
+ * Whether Continue the task carries on from the ticket's last run: the person
+ * stopped it, or Perbo closed while it was going, quit or crashed alike
+ * (`interrupted`). Nothing about the plan or an error stood in the way of
+ * either; every other stop is a limit, a refusal or an error that another
+ * attempt at the same plan meets again.
+ */
+export const carriesOn = (jobs: readonly Job[]): boolean =>
+  stoppedByPerson(jobs) || jobs.filter(isRun).at(-1)?.state === "interrupted";
+
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
 export function projectTicket(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
@@ -167,7 +279,7 @@ export function projectTicket(
   refreshing = workspace.refreshingRepos?.includes(row.repoId) ?? false,
 ) {
   const { ticket, repoId } = row;
-  const { jobs, active, stoppedShort } = ticketRun(workspace, row);
+  const { jobs, active, stoppedShort, paused, asking } = ticketRun(workspace, row);
   // This ticket's own run, decision or publication takes its turn; another
   // ticket's run and planning anywhere do not hold it up (D-049, D-101).
   const busy = Boolean(inTheWay(workspace.jobs, { repoId, key: ticket.key, kind: "run" }));
@@ -197,9 +309,24 @@ export function projectTicket(
     ready: !active && !refreshing && ["pr_open", "ready", "merged"].includes(ticket.state) && checksPassed && (approved || closuresVerified),
   };
   const observed = active ? runnerProgress(active.log) : null;
-  const stage = observed?.stage ?? stageOf(ticket.state);
-  const attention = !active && !refreshing && (recoverable || ["changes_requested", "pr_open", "failed", "blocked", "plan_invalid"].includes(ticket.state));
   const tone = homeTone(workspace, row);
+  // A journey that ended is past every step, whatever stage the loop's last
+  // line named. A stopped run keeps the wheel where the run had taken it,
+  // rather than where the state its stop left the ticket at would put it, and
+  // a run paused for the person is at the decision before the records say so,
+  // as is a run waiting on their answer about a host until they give it.
+  const stage =
+    (tone === "green"
+      ? JOURNEY_END
+      : stopped
+      ? stageReached(jobs.filter(isRun).at(-1), currentDetail && detail ? detail.attempts : [])
+      : paused || asking
+        ? stageOf("changes_requested")
+        : observed?.stage) ?? stageOf(ticket.state);
+  // Continue the task is offered only after the person's own stop, taken or
+  // still settling, or Perbo closing mid-run.
+  const continuable = carriesOn(jobs);
+  const attention = !active && !refreshing && (recoverable || paused || ["changes_requested", "pr_open", "failed", "blocked", "plan_invalid"].includes(ticket.state));
   let screen: Exclude<TaskView, "auto">;
   if (requested === "output") screen = "output";
   // The merge screen follows the review whatever the ticket holds: it merges
@@ -233,7 +360,7 @@ export function projectTicket(
   const primary = stopped ? { label: "See the stopped run", view: "stopped" as const } :
     active || refreshing ? { label: "Watch", view: "loop" as const } :
     resultReady ? { label: ticket.delivery.pull_request_url ? "Merge" : "Review result", view: "review" as const } :
-    ticket.state === "changes_requested" ? { label: "Answer", view: "decisions" as const } :
+    paused || ticket.state === "changes_requested" ? { label: "Answer", view: "decisions" as const } :
     screen === "review" ? { label: "Review result", view: "review" as const } :
     stage === 1 ? { label: "Review contract", view: "contract" as const } : { label: "Watch", view: "loop" as const };
   const descriptions: Record<string, string> = {
@@ -247,8 +374,8 @@ export function projectTicket(
     independent_review: "The reviewer is checking the diff against the approved criteria, without the executor’s narrative.",
     failed: "The loop stopped. Its work and evidence have been retained. Open the task to inspect the cause.",
   };
-  const description = stopped ? "The run stopped. Its work and evidence have been retained — carry on with the task, plan it again, or delete it." :
+  const description = stopped ? `The run stopped. Its work and evidence have been retained — ${continuable ? "carry on with the task, plan it again," : "plan it again"} or delete it.` :
     refreshing ? "Reading the task's recorded outcome…" :
-    descriptions[observed?.state ?? ticket.state] ?? "Open the ticket to see its contract, latest state and retained evidence.";
-  return { jobs, active, busy, held, recoverable, resultReady, refreshing, attention, tone, primary, screen, stage, description, observed, latest, review, evidence };
+    descriptions[paused ? "changes_requested" : (observed?.state ?? ticket.state)] ?? "Open the ticket to see its contract, latest state and retained evidence.";
+  return { jobs, active, busy, held, recoverable, continuable, paused, asking, resultReady, refreshing, attention, tone, primary, screen, stage, description, observed, latest, review, evidence };
 }

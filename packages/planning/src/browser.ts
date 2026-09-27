@@ -1,10 +1,13 @@
 // The part of this package a browser loads: the spec text, the impact report,
-// the graph edit path, the drift report's shape and a ticket's name, none of which touch the
+// the graph edit path, the drift report's shape, the shape of the answers
+// offered to a decision and a ticket's name, none of which touch the
 // filesystem, so the desktop's renderer computes what the command line
 // computes rather than asking the host for it. `browser.test.ts` holds the
 // property.
 
 export { assertionsChangedSinceDraft } from "./assertion-drift.js";
+export { DECISION_OPTION_MAX_CHARS, DecisionOptionsVerdictSchema } from "./decision-options-report.js";
+export type { DecisionOption, DecisionOptionsVerdict } from "./decision-options-report.js";
 export {
   DriftFindingSchema,
   DriftVerdictSchema,

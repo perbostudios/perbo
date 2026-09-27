@@ -640,6 +640,33 @@ it("refuses to approve a ticket while a planning over it records problems open, 
   expect(ticket().approved_at).not.toBeNull();
 });
 
+it("refuses to approve a ticket while the chat on a planning over it owes a turn, naming it, and approves it once the turn is over (D-102)", async () => {
+  const { id, key } = await draftedFromSpec("approve-mid-turn", ["A signup queues exactly one email."]);
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const runs = () => snapshot.jobs.filter((each) => each.kind === "run" && each.key === key);
+  const { digest } = await sampleBridge.request({ kind: "detail", repoId, key });
+  const approve = () =>
+    sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: true, resumeFrom: null });
+  // A turn in flight, as the host counts one: sent, and not yet answered.
+  await sampleBridge.request({ kind: "interviewTurn", id, text: "take your time" });
+  expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(id);
+  await expect(approve()).rejects.toThrow(
+    `${key} is not approved while the chat is still talking on its planning: confirm it once the chat ` +
+      "has finished this turn.",
+  );
+  expect(runs()).toHaveLength(0);
+  expect(ticket().approved_at).toBeNull();
+  // The turn over, the approval is the person's.
+  await vi.waitFor(
+    async () => expect((await sampleBridge.request({ kind: "snapshot" })).working ?? []).not.toContain(id),
+    { timeout: 5000 },
+  );
+  const run = await approve();
+  held.push(run);
+  expect(runs()).toHaveLength(1);
+  expect(ticket().approved_at).not.toBeNull();
+});
+
 it("throws away a planning and the ticket it drafted while another ticket's run is under way", async () => {
   // Over a ticket nothing else here reads, since the delete takes it, put
   // back in review as a plan a planning drafted is.

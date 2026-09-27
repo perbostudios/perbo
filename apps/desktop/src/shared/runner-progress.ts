@@ -1,4 +1,12 @@
-import { readSpoken, readTally, type Speaker, type Tally } from "@perbo/contracts/browser";
+import {
+  readEgressQuestion,
+  readEgressSettled,
+  readSpoken,
+  readTally,
+  type EgressSettlement,
+  type Speaker,
+  type Tally,
+} from "@perbo/contracts/browser";
 import type { TicketState } from "@perbo/contracts";
 
 /**
@@ -19,7 +27,14 @@ export type RunnerStage =
   /** The loop's own round, counting from 0 as the runner does. */
   | { kind: "review"; round: number }
   | { kind: "verify"; round: number }
-  | { kind: "delivery" };
+  | { kind: "delivery" }
+  /**
+   * The run waiting on a person's answer about a host off the allow-list, and
+   * that answer (D-NEW-an-unlisted-host-asks). Only the host is taken: the
+   * command the line also carries is the card's to show.
+   */
+  | { kind: "egress"; host: string }
+  | { kind: "egressSettled"; host: string; settled: EgressSettlement };
 
 /** The stage one progress line announces, or null for a line that announces none. */
 export function readStage(line: string): RunnerStage | null {
@@ -37,6 +52,10 @@ export function readStage(line: string): RunnerStage | null {
   if (match) return { kind: "review", round: Number(match[1]) };
   match = /^verifying closures, round (\d+)$/.exec(trimmed);
   if (match) return { kind: "verify", round: Number(match[1]) };
+  const asked = readEgressQuestion(trimmed);
+  if (asked !== null) return { kind: "egress", host: asked.host };
+  const settled = readEgressSettled(trimmed);
+  if (settled !== null) return { kind: "egressSettled", host: settled.host, settled: settled.settled };
   return null;
 }
 
@@ -71,23 +90,47 @@ export function runnerStages(log: string): LoggedStage[] {
   return stages;
 }
 
-/** Where a stage puts the progress wheel; a stage with none leaves it where it was. */
-const WHEEL: Partial<Record<RunnerStage["kind"], { stage: number; title: string; state: TicketState }>> = {
-  worktree: { stage: 2, title: "Materialising the worktree", state: "provisioning" },
-  executing: { stage: 2, title: "Working on the approved outcome", state: "executing" },
-  remediation: { stage: 5, title: "Refining the change", state: "executing" },
-  check: { stage: 3, title: "Running deterministic checks", state: "verifying" },
-  review: { stage: 6, title: "Independent review", state: "independent_review" },
-  verify: { stage: 5, title: "Verifying the refinements", state: "independent_review" },
+/**
+ * The progress wheel's steps, in the order the loop runs them: the contract,
+ * its execution, the checks over the change, the independent review, the
+ * decisions a review puts to the person, and the refinement that answers the
+ * findings. A step's number is its place here, counting from 1.
+ */
+export const WHEEL_STEPS = ["contract", "execution", "checks", "review", "decisions required", "refinement"] as const;
+export type WheelStep = (typeof WHEEL_STEPS)[number];
+/** A step's number on the wheel. */
+export const wheelStep = (step: WheelStep): number => WHEEL_STEPS.indexOf(step) + 1;
+
+type Wheel = { stage: number; title: string; state: TicketState };
+/**
+ * Where a stage puts the progress wheel; a stage with none leaves it where it
+ * was. A review after a refinement round puts it back at the review, and says
+ * which pass it is; a closure verification is the refinement's own.
+ */
+const WHEEL: { [K in RunnerStage["kind"]]?: (stage: Extract<RunnerStage, { kind: K }>) => Wheel } = {
+  worktree: () => ({ stage: wheelStep("execution"), title: "Materialising the worktree", state: "provisioning" }),
+  executing: () => ({ stage: wheelStep("execution"), title: "Working on the approved outcome", state: "executing" }),
+  check: () => ({ stage: wheelStep("checks"), title: "Running deterministic checks", state: "verifying" }),
+  // The runner counts its rounds from 0; a person counts reviews from 1.
+  review: ({ round }) => ({
+    stage: wheelStep("review"),
+    title: round === 0 ? "Independent review" : `Independent review ${round + 1}`,
+    state: "independent_review",
+  }),
+  remediation: () => ({ stage: wheelStep("refinement"), title: "Refining the change", state: "executing" }),
+  verify: () => ({ stage: wheelStep("refinement"), title: "Verifying the refinements", state: "independent_review" }),
 };
 
-/** Observed CLI milestones, used for display while ticket persistence lags and for the stage-change notification. */
-export function runnerProgress(
-  log: string,
-): { stage: number; title: string; state: TicketState } | null {
-  let current: { stage: number; title: string; state: TicketState } | null = null;
-  for (const { stage } of runnerStages(log)) current = WHEEL[stage.kind] ?? current;
+/** Where a run's stages, oldest first, leave the progress wheel: the last of them that moves it, or null where none does. */
+export function wheelAt(stages: readonly RunnerStage[]): Wheel | null {
+  let current: Wheel | null = null;
+  for (const stage of stages) current = (WHEEL[stage.kind] as ((stage: RunnerStage) => Wheel) | undefined)?.(stage) ?? current;
   return current;
+}
+
+/** Observed CLI milestones, used for display while ticket persistence lags and for the stage-change notification. */
+export function runnerProgress(log: string): Wheel | null {
+  return wheelAt(runnerStages(log).map(({ stage }) => stage));
 }
 
 /**

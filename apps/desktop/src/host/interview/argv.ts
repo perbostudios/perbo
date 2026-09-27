@@ -1,5 +1,5 @@
 import { TaskModelsSchema, INTERVIEW_NEEDS_A_TITLE } from "../../shared/protocol.js";
-import { interviewProviderFor, interviewSessionArgs } from "../../shared/contract-editing.js";
+import { interviewProviderFor, interviewSessionArgs, type InterviewProviderName } from "../../shared/contract-editing.js";
 import { specFolder } from "../repository/config.js";
 import { safePath } from "../repository/paths.js";
 import type { RegisteredRepository } from "../profile/store.js";
@@ -45,7 +45,7 @@ export function interviewArgv(
  * choice: the same derivation {@link interviewArgv} sends, read here so the id
  * reported back is recorded as that provider's.
  */
-export function interviewProvider(session: EditingSession): "claude" | "codex" {
+export function interviewProvider(session: EditingSession): InterviewProviderName {
   try {
     return interviewProviderFor(TaskModelsSchema.strip().parse(session.form.models));
   } catch {

@@ -10,13 +10,15 @@ import {
 import { DECIDED_DELIVERY_NOTE, isNeverReadPath, retainedBranch } from "@perbo/contracts/browser";
 import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { openDrafts, problemsHoldApproval, titleChanged, turnMark } from "../shared/contract-editing.js";
+import { openDrafts, problemsHoldApproval, titleChanged, turnHoldsApproval, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { heldTicket, isLive, isRun } from "../shared/jobs.js";
 import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
+import { egressSettledLine } from "@perbo/contracts/browser";
+import { pendingEgressQuestion } from "../shared/egress-question.js";
 import type { Job, ReplyMap, Request, RequestHandlers, TaskRow } from "../shared/protocol.js";
 import {
   afterTheNote,
@@ -711,6 +713,15 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       loginCommand: "codex login",
       roles: ["Execution", "Independent review", "Planning"],
     },
+    {
+      id: "opencode",
+      name: "OpenCode",
+      installed: true,
+      authenticated: true,
+      detail: "Sample connection · OpenCode's free models only",
+      loginCommand: "",
+      roles: ["Execution", "Independent review", "Planning"],
+    },
   ],
   saveSettings: (request) => {
     snapshot.settings = request.settings;
@@ -793,6 +804,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         { label: "5-hour limit", usedPercent: 23, resetsAt: new Date(Date.now() + 133 * 60_000).toISOString() },
         { label: "Weekly · all models", usedPercent: 18, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
       ] },
+      { id: "opencode", name: "OpenCode", role: null, connected: true, plan: null, windows: null, detail: "OpenCode reports what each run cost; it reports no plan window." },
       { id: "anthropic", name: "Anthropic API", role: null, connected: false, plan: null, windows: null, detail: "No API key in the app environment." },
     ],
     notes: ["Sample figures. The desktop reads its own records."],
@@ -901,10 +913,43 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   run: (request) => {
     // Refused while a planning over the ticket records problems open, in the
     // host's words: an open problem holds approving for either shape
-    // (D-NEW-basic-and-epic-flows).
-    const held = request.approve ? problemsHoldApproval(editingRecords(), request.repoId, request.key) : null;
+    // (D-NEW-basic-and-epic-flows). And while the chat on one owes the person
+    // a turn (D-102).
+    const held = request.approve
+      ? (problemsHoldApproval(editingRecords(), request.repoId, request.key) ??
+        turnHoldsApproval(editingRecords(), request.repoId, request.key, isWorking))
+      : null;
     if (held !== null) throw new Error(held);
     return startWork(request.kind, request.repoId, request.key, request.publish);
+  },
+  // D-NEW-an-unlisted-host-asks: the answer to the question a live run is
+  // waiting on, settled on that run's output as the CLI's run settles it.
+  egressAnswer: (request) => {
+    const running = snapshot.jobs.find(
+      (entry) => entry.repoId === request.repoId && entry.key === request.key && isRun(entry) && isLive(entry),
+    );
+    const asked = running === undefined ? null : pendingEgressQuestion(running.log);
+    if (running === undefined || asked === null || asked.key !== request.question)
+      throw new Error(`no run of ${request.key} is live, so nothing is waiting on an answer`);
+    running.log += `\n  ${egressSettledLine(asked, request.allow ? "allowed" : "refused")}`;
+    emit({ kind: "progress", job: running });
+    return null;
+  },
+  // D-NEW-decision-options: the Architect's answers to the findings the
+  // ticket's last review left for a person, as the host runs `perbo options`:
+  // kept for that review, so asking again spends nothing and says so.
+  decisionOptions: (request) => {
+    const review = detail(request.key).attempts.findLast((attempt) => attempt.review !== null)?.review ?? null;
+    if (review === null)
+      throw new Error(`${request.key} has no review on record, so it has no findings to offer answers to`);
+    const cached = request.findings.every((key) => optionsOffered.has(`${request.repoId}:${review.review_id}:${key}`));
+    const findings = request.findings.map((key) => {
+      if (!review.findings.some((finding) => finding.key === key))
+        throw new Error(`${key.slice(0, 12)} is not a finding of ${request.key}'s last review (${review.review_id})`);
+      optionsOffered.add(`${request.repoId}:${review.review_id}:${key}`);
+      return { finding_key: key, options: SAMPLE_DECISION_OPTIONS };
+    });
+    return { key: request.key, review_id: review.review_id, findings, cached };
   },
   decide: (request) => {
     // Each answer is recorded on its finding before the run, as the host does.
@@ -1015,6 +1060,25 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
 };
 
+/** The findings the sample Architect has answered, by repository, review and finding. */
+const optionsOffered = new Set<string>();
+
+/** The sample Architect's answers to a finding: the sample review's one is where a failed email goes. */
+const SAMPLE_DECISION_OPTIONS = [
+  {
+    text: "Park a permanently failed email on the dead-letter queue and alert the on-call channel, so a person can resend it.",
+    recommended: true,
+  },
+  {
+    text: "Drop a permanently failed email after the last retry, and log the failure with the recipient redacted.",
+    recommended: false,
+  },
+  {
+    text: "Hand a permanently failed email to the support inbox, where a person decides whether to resend it.",
+    recommended: false,
+  },
+];
+
 /** The states a sample round proves on its way to the review's answer, as the CLI records them. */
 const REVIEWED = [
   { to: "executing", note: "1 attempt executed" },
@@ -1058,9 +1122,12 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
           row.ticket.delivery.pull_request_number = 418;
           row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
         }
-      } else if (!decisionsAnswered.has(key))
+      } else if (!decisionsAnswered.has(key)) {
         moveTicket(row.ticket, [...REVIEWED, { to: "changes_requested", note: "A finding waits on the person." }]);
-      else {
+        // The run completes on the review's escalation, as the host records a
+        // run the CLI ended on a verdict for the person.
+        opened.outcome = "escalated";
+      } else {
         moveTicket(row.ticket, [...REVIEWED, { to: "pr_open", note: "The review passed; the pull request is open." }]);
         row.ticket.delivery.state = "open";
         row.ticket.delivery.pull_request_number = 418;

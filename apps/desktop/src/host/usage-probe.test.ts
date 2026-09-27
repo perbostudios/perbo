@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { CLAUDE_METADATA_ARGS } from "./model-catalog.js";
+import { CLAUDE_METADATA_ARGS } from "@perbo/model/defaults";
 import { CLAUDE_USAGE_UNSUPPORTED, claudeUsage, codexUsage } from "./usage-probe.js";
 
 const temporary: string[] = [];

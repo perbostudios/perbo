@@ -21,6 +21,7 @@ import {
 } from "./admission.js";
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
+import { relayEgress, type EgressRelayState } from "./egress.js";
 import { READ_ONLY_ORIENTATION } from "./profile.js";
 import { describeShellCwd } from "./prohibited.js";
 import { UNKNOWN_CWD, everySegment, type CommandSegment } from "./shell/index.js";
@@ -184,6 +185,13 @@ export interface PreToolGuardState {
    * which roles the attempt offered cannot say a named one is among them.
    */
   agent_roles?: string[];
+  /**
+   * The egress relay (D-NEW-an-unlisted-host-asks): a call naming a host off
+   * this list is held until the runner answers whether it may be reached.
+   * Absent where no run asks, and then the call is judged as it always was and
+   * the runner's stream reading ends the attempt on the host.
+   */
+  egress?: EgressRelayState;
 }
 
 /**
@@ -437,15 +445,26 @@ export function guardHookEntry(): string {
  * the only settings source the invocation names, so it is also what keeps
  * every other hook out.
  */
-export function attemptSettings(command: string): Record<string, unknown> {
+export function attemptSettings(command: string, holdSeconds?: number): Record<string, unknown> {
   const hook = [{ type: "command", command }];
   return {
     hooks: {
-      PreToolUse: [{ matcher: PRE_TOOL_MATCHER, hooks: hook }],
+      // A hook the binary gives up on runs the tool, so where the guard may
+      // hold a call for a person (D-NEW-an-unlisted-host-asks) the binary is
+      // told to wait longer than the guard ever holds one.
+      PreToolUse: [
+        {
+          matcher: PRE_TOOL_MATCHER,
+          hooks: holdSeconds === undefined ? hook : [{ type: "command", command, timeout: holdSeconds }],
+        },
+      ],
       SessionStart: [{ matcher: SESSION_START_MATCHER, hooks: hook }],
     },
   };
 }
+
+/** What the binary is told to wait for the hook, past the longest the guard holds a call. */
+const HOOK_GRACE_SECONDS = 60;
 
 /**
  * Create the attempt's guard directory and write its state and settings.
@@ -487,6 +506,11 @@ export function preparePreToolGuard(args: {
    * and a compaction gets nothing rather than something invented.
    */
   brief?: { text: string; records: BriefRecords };
+  /**
+   * The egress relay (D-NEW-an-unlisted-host-asks), where the runner answers
+   * whether an unlisted host may be reached. Omitted, the hook holds nothing.
+   */
+  egress?: EgressRelayState;
 }): PreToolGuard {
   const host = HOST_TEMPORARY_DIRECTORY.TMPDIR ?? tmpdir();
   const directory = mkdtempSync(join(host, "perbo-guard-"));
@@ -509,6 +533,7 @@ export function preparePreToolGuard(args: {
     allow_list: [...args.profile.command_allow_list],
     deny_list: [...args.profile.command_deny_list],
     agent_roles: [...(args.agent_roles ?? PERBO_AGENT_ROLE_NAMES)],
+    ...(args.egress ? { egress: { allow_list: [...args.egress.allow_list], wait_ms: args.egress.wait_ms } } : {}),
   };
   writeFileSync(guard.statePath, JSON.stringify(state), "utf8");
   writeFileSync(guard.decisionsPath, "", "utf8");
@@ -521,7 +546,8 @@ export function preparePreToolGuard(args: {
   // the call run. So the command sets it for the hook alone.
   const electron = args.electron ?? process.versions.electron !== undefined;
   const command = (electron ? "ELECTRON_RUN_AS_NODE=1 " : "") + [...program, directory].map(quote).join(" ");
-  writeFileSync(guard.settingsPath, JSON.stringify(attemptSettings(command)), "utf8");
+  const hold = args.egress ? Math.ceil(args.egress.wait_ms / 1000) + HOOK_GRACE_SECONDS : undefined;
+  writeFileSync(guard.settingsPath, JSON.stringify(attemptSettings(command, hold)), "utf8");
   return guard;
 }
 
@@ -940,6 +966,42 @@ export function runPreToolHook(
         error instanceof Error ? error.message : String(error)
       }`,
     );
+  }
+
+  // D-NEW-an-unlisted-host-asks: a call the guard would let run and that names
+  // a host off the list is held here, before it runs, until the runner says
+  // whether it may reach it. A refusal refuses the call, so it moves nothing.
+  if (judged.decision.decision === "allowed" && attempt.egress !== undefined) {
+    let relayed: ReturnType<typeof relayEgress>;
+    try {
+      relayed = relayEgress(
+        directory,
+        { tool_use_id: call.tool_use_id ?? "", tool: call.tool_name ?? "unknown", input: call.tool_input ?? {} },
+        attempt.egress,
+      );
+    } catch (error) {
+      relayed = {
+        answer: "refuse",
+        hosts: [],
+        reason: `the runner's write guard could not ask whether this call's host may be reached: ${causeOf(error)}`,
+      };
+    }
+    if (relayed?.answer === "refuse") {
+      const refused: PreToolDecision = {
+        ...judged.decision,
+        answer: "deny",
+        decision: "denied",
+        rule: ADMISSION_RULES.egress,
+        target: relayed.hosts.length > 0 ? relayed.hosts.join(", ") : null,
+        reason: relayed.reason,
+      };
+      try {
+        appendFileSync(join(directory, DECISIONS_FILE), `${JSON.stringify(refused)}\n`, "utf8");
+      } catch {
+        // The refusal stands whether or not the runner can read it back.
+      }
+      return failClosed(relayed.reason);
+    }
   }
 
   if (judged.next_cwd !== agent.cwd) {

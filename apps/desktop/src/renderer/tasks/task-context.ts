@@ -1,11 +1,11 @@
 import { costOf, formatUsd, rollCosts, type Cost } from "@perbo/contracts/browser";
-import type { ProhibitedAction, ReviewError } from "@perbo/contracts";
+import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
 import { runnerStages, runnerTally, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
 import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
-import { projectTicket } from "./ticket-workspace.js";
+import { projectTicket, recordedRunnerStages, stoppedByPerson } from "./ticket-workspace.js";
 export interface TaskContext extends PageProps {
   detail: Detail;
   repoId: string;
@@ -189,7 +189,14 @@ export function watchTranscript(
         ? { author: "Executor", label: "message", text: words }
         : { author: "Reviewer", label: "finding", text: words },
     );
-  if (active !== undefined && isRun(active)) return fromLog(active);
+  // D-NEW-an-unlisted-host-asks: while the run waits on the person, the pause
+  // is the last line, in the runner's own words and never an agent's.
+  if (active !== undefined && isRun(active)) {
+    const last = runnerStages(active.log).findLast(({ stage }) => stage.kind === "egress" || stage.kind === "egressSettled");
+    return last?.stage.kind === "egress"
+      ? [...fromLog(active), { author: "Perbo", label: "decision raised", text: stageWords(last.stage) }]
+      : fromLog(active);
+  }
   const logged = fromLog(jobs.filter(isRun).at(-1));
   if (attempts.some(({ transcript }) => transcript === undefined)) return logged;
   const spoken = attempts.map(({ transcript }) => retainedOutput(transcript).entries);
@@ -234,6 +241,15 @@ export function stageWords(stage: RunnerStage): string {
       return "Verifying closures";
     case "delivery":
       return "Opening the pull request";
+    // D-NEW-an-unlisted-host-asks: the pause, and how it ended.
+    case "egress":
+      return `Waiting on you: allow ${stage.host}?`;
+    case "egressSettled":
+      return stage.settled === "allowed"
+        ? `You allowed ${stage.host}`
+        : stage.settled === "refused"
+          ? `You refused ${stage.host}`
+          : `Nobody answered about ${stage.host}`;
   }
 }
 
@@ -281,64 +297,23 @@ const RUN_STATES = new Set(["provisioning", "executing", "verifying", "independe
  * Every stage the attempts on record went through, oldest first, each at the
  * time its record holds and with the runner's detail where the record has
  * it: the check's result, and the findings a review left open.
- *
- * The same stages a run's log announces as it goes: a run provisions its
- * worktree once, and each attempt is executed, sealed, checked, and then
- * reviewed or has its closures verified.
  */
 function recordedStages(attempts: readonly AttemptView[]): LoopStep[] {
-  const provisioned = new Set<number>();
-  const remediations = new Map<number, Set<number>>();
-  return attempts.flatMap((attempt) => {
-    const steps: { stage: RunnerStage; at: string; reason?: string }[] = [];
-    const execution = attempt.bundles.find((bundle) => bundle.kind === "execution");
-    const kind = execution?.inputs["round_kind"] ?? (attempt.round === 0 ? "execute" : "remediate");
-    if (!provisioned.has(attempt.run)) {
-      provisioned.add(attempt.run);
-      steps.push({ stage: { kind: "worktree" }, at: attempt.startedAt });
-    }
-    if (kind === "execute") steps.push({ stage: { kind: "executing" }, at: attempt.startedAt });
-    else if (kind === "resolve_conflict") steps.push({ stage: { kind: "conflict" }, at: attempt.startedAt });
-    else {
-      const rounds = remediations.get(attempt.run) ?? new Set<number>();
-      rounds.add(attempt.round);
-      remediations.set(attempt.run, rounds);
-      steps.push({ stage: { kind: "remediation", round: rounds.size }, at: attempt.startedAt });
-    }
-    const sealed =
-      execution === undefined
-        ? attempt.startedAt
-        : new Date(Date.parse(attempt.startedAt) + execution.usage.wall_clock_ms).toISOString();
-    steps.push({ stage: { kind: "seal" }, at: sealed });
-    for (const check of attempt.checks)
-      steps.push({
-        stage: { kind: "check", name: check.name },
-        at: sealed,
-        reason: `Result: ${check.status}.` + (check.detail ? `\n\n${check.detail}` : ""),
-      });
-    const reviewBundle = attempt.bundles.find(
-      (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
-    );
-    if (attempt.review !== null || reviewBundle !== undefined) {
-      const review = attempt.review;
-      steps.push({
-        stage: { kind: "review", round: attempt.round },
-        at: review?.created_at ?? reviewBundle!.created_at,
-        ...(review === null
-          ? {}
-          : { reason: findingsLeft(review.findings.filter((finding) => finding.status === "open").length) }),
-      });
-    }
-    const verification = attempt.bundles.find(
-      (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.id}`,
-    );
-    if (attempt.verification !== null || verification !== undefined)
-      steps.push({ stage: { kind: "verify", round: attempt.round }, at: verification?.created_at ?? sealed });
+  return recordedRunnerStages(attempts).flatMap((stages) => {
     // Each stage no earlier than the one before it, as the attempt ran them.
-    let floor = steps[0]!.at;
-    return steps.map(({ stage, at, reason }) => {
+    let floor = stages[0]!.at;
+    return stages.map(({ stage, at, check, open }) => {
       floor = Date.parse(at) > Date.parse(floor) ? at : floor;
-      return { text: stageWords(stage), reason: reason ?? null, at: floor };
+      return {
+        text: stageWords(stage),
+        reason:
+          check !== undefined
+            ? `Result: ${check.status}.` + (check.detail ? `\n\n${check.detail}` : "")
+            : open !== undefined
+              ? findingsLeft(open)
+              : null,
+        at: floor,
+      };
     });
   });
 }
@@ -506,7 +481,143 @@ const CEILINGS: Record<string, { resource: string; say: (used: number | null, li
   command_ceiling_exceeded: { resource: "attempt_commands", say: counted("ran", "command") },
 };
 
-/** What ended a command, as the loop page says it. */
+/** The limits nothing sets unless a repository's own configuration names them, so a refusal by one is the repository's number. */
+type RepositoryOnly = Exclude<LimitedResource, DefaultedResource | PerTokenCostLimit>;
+const plural = (n: number, unit: string): string => `${count(n)} ${unit}${n === 1 ? "" : "s"}`;
+/**
+ * Each limit a run can be refused by, as a person reads it: what it bounds,
+ * a measure of it in its own unit, and whether its number can only have come
+ * from the repository's configuration or may be Perbo's default for it.
+ */
+const LIMITS: {
+  [R in LimitedResource]: {
+    bounds: string;
+    measure: (n: number) => string;
+    set: R extends RepositoryOnly ? "repository" : "default";
+  };
+} = {
+  concurrent_local_attempts: {
+    bounds: "the runs this machine takes at once",
+    measure: (n) => plural(n, "run"),
+    set: "repository",
+  },
+  local_workspace_bytes: {
+    bounds: "the disk the worktrees fill on this machine",
+    measure: (n) => `${(n / 1024 ** 3).toFixed(1)} GiB`,
+    set: "default",
+  },
+  attempt_stall_ms: { bounds: "how long an agent may go without doing anything", measure: lasting, set: "default" },
+  attempt_wall_clock_ms: { bounds: "how long one attempt may run", measure: lasting, set: "repository" },
+  attempt_commands: { bounds: "the commands one attempt may run", measure: (n) => plural(n, "command"), set: "repository" },
+  attempt_iterations: { bounds: "the turns one attempt may take", measure: (n) => plural(n, "turn"), set: "repository" },
+  round_iterations: {
+    bounds: "the turns one refinement round may take",
+    measure: (n) => plural(n, "turn"),
+    set: "repository",
+  },
+  attempt_tokens: { bounds: "the tokens one attempt may use", measure: (n) => plural(n, "token"), set: "repository" },
+  attempt_cost_micros: { bounds: "what one attempt may spend", measure: (n) => formatUsd(n, 2), set: "default" },
+  remediation_rounds: {
+    bounds: "the refinement rounds one ticket may take",
+    measure: (n) => plural(n, "round"),
+    set: "default",
+  },
+  ticket_cost_micros: { bounds: "what one ticket may spend", measure: (n) => formatUsd(n, 2), set: "default" },
+  wait_for_provider_ms: {
+    bounds: "how long the loop waits out a provider's limit",
+    measure: lasting,
+    set: "default",
+  },
+};
+
+/** The kill switches a refusal can name, by the words the refusal is printed in. */
+const KILL_SWITCHES: { reads: RegExp; key: string; says: (match: RegExpExecArray) => string }[] = [
+  { reads: /^global read-only mode is engaged/, key: "global_read_only", says: () => "which lets no attempt start or continue" },
+  {
+    reads: /^automation is disabled for organisation (.+)$/,
+    key: "organisation_automation_disabled",
+    says: (match) => `which stops automation for the organisation ${match[1]}`,
+  },
+  {
+    reads: /^provider (\S+) is disabled by kill switch$/,
+    key: "disabled_providers",
+    says: (match) => `which names the provider ${match[1]}`,
+  },
+  {
+    reads: /^model (\S+) is disabled by kill switch$/,
+    key: "disabled_models",
+    says: (match) => `which names the model ${match[1]}`,
+  },
+];
+
+/**
+ * A run the CLI refused by a limit (`describeFailure`), in Perbo's own words:
+ * the limit named by what it bounds, where its number comes from — the
+ * repository's `.perbo/config.json` and the key in it, or Perbo's default that
+ * key would override — and, for the runs this machine takes at once, that a
+ * run of another ticket was going (D-049). Null for output that holds no such
+ * refusal, or one naming a limit this does not know.
+ */
+function limitRefusal(output: string): { sentence: string; reason: string } | null {
+  const limit = /refused by a limit: (\w+) would reach (\d+), above the limit of (\d+)\./.exec(output);
+  if (limit !== null) {
+    const resource = limit[1]! as LimitedResource;
+    const known = (LIMITS as Record<string, (typeof LIMITS)[LimitedResource] | undefined>)[resource];
+    if (known === undefined) return null;
+    const reached = Number(limit[2]);
+    const ceiling = Number(limit[3]);
+    const key = `limits.limits.${resource}`;
+    if (resource === "concurrent_local_attempts" && reached - 1 === 0)
+      return {
+        sentence: "The run did not start: this repository's configuration allows no runs at all on this machine.",
+        reason:
+          `This repository's .perbo/config.json sets ${key} to 0, so no run starts on this machine, whatever ` +
+          `else is going. Raise the number there, or remove ${key}, to let runs start.`,
+      };
+    if (resource === "concurrent_local_attempts") {
+      const others = reached - 1 === 1 ? "a run of another ticket was" : `${count(reached - 1)} runs of other tickets were`;
+      return {
+        sentence: `The run did not start: this repository's configuration allows ${ceiling === 1 ? "one run" : `${count(ceiling)} runs`} at a time on this machine, and ${others} going.`,
+        reason:
+          "Runs of different tickets go side by side unless a repository's own configuration names a number. " +
+          `This repository's .perbo/config.json sets ${key} to ${count(ceiling)}, and ${others} going when this one ` +
+          `was started, so it was refused before anything ran. Raise the number there, or remove ${key}, to let ` +
+          "runs go side by side.",
+      };
+    }
+    const from =
+      known.set === "repository"
+        ? `This repository's .perbo/config.json sets ${key} to ${known.measure(ceiling)}.`
+        : `The limit is ${known.measure(ceiling)}: Perbo's own unless this repository's .perbo/config.json names ${key}, which then sets it.`;
+    return {
+      sentence: `The run was refused by a limit on ${known.bounds}: it would reach ${known.measure(reached)}, above the limit of ${known.measure(ceiling)}.`,
+      reason: `${from} The run was refused where it would have gone past it. Raise ${key} in .perbo/config.json to let a run go further.`,
+    };
+  }
+  const switched = /refused by a limit: (.+?)\. Clear the kill switch/.exec(output);
+  if (switched === null) return null;
+  for (const { reads, key, says } of KILL_SWITCHES) {
+    const match = reads.exec(switched[1]!);
+    if (match !== null)
+      return {
+        sentence: "The run was refused: a kill switch in this repository's configuration is on.",
+        reason:
+          `This repository's .perbo/config.json turns on limits.kill_switches.${key}, ${says(match)}. ` +
+          "Turn it off there to let a run start.",
+      };
+  }
+  return null;
+}
+
+/** One reason a run stopped, in words, with the whole of what the records hold of it behind an `i`. */
+export interface StopReason {
+  /** One line, read from the records. */
+  text: string;
+  /** The whole recorded reason. */
+  detail: string;
+}
+
+/** What ended a command, as the loop page and the stopped page say it. */
 export interface RunEnding {
   job: Job;
   /** The card's title: "The run ended" for the loop, the command's own name otherwise. */
@@ -517,48 +628,88 @@ export interface RunEnding {
   reason: string;
   /** The command's own output, where there is no verdict of the loop's to say instead. */
   log: string | null;
+  /** Whether the person stopped the run themselves (`stoppedByPerson`): the one stop Continue the task carries on from. */
+  byPerson: boolean;
+  /**
+   * Each reason the command ended, one line each: the sentence alone for most
+   * endings, and one line for each command the guard refused.
+   */
+  reasons: StopReason[];
 }
 
+/** The review errors that are not an answer the reviewer gave, as the stop is said of them. */
+const UNHAD: Record<Exclude<ReviewError["kind"], "verdict_rejected" | "malformed_verdict" | "unknown_criterion_id">, string> = {
+  provider_unavailable: "The reviewer's model provider was unavailable, so the change was not reviewed.",
+  budget_exhausted: "The review ran out of its budget before it reached a verdict.",
+  timeout: "The review timed out before it reached a verdict.",
+  internal: "The review failed inside Perbo before it reached a verdict.",
+};
+
 /**
- * What ended a ticket's last command, where it failed or was cut off by Perbo
- * closing: one sentence, and the fuller reason behind it.
+ * What ended a ticket's last command, where it failed, was cut off by Perbo
+ * closing, or was a run the person stopped: one sentence, the fuller reason
+ * behind it, and the reasons one line each.
  *
- * A run whose loop reached a verdict ends `failed` whenever the verdict is not
- * an approval — the review requesting changes, the reviewer's answer not
- * parsing, an attempt terminated, a ceiling reached — and its error is then
- * the whole run log. What a person
- * needs is the verdict, read from the attempt the run recorded. Where there is
- * no verdict to read — the CLI refusing to start, an approval refused, a
- * failure after the review, Perbo closing mid-command — the command's own
- * output is what there is, carried whole in `log`.
+ * A run that ends on a verdict for the person completes, paused for them
+ * (`RUN_VERDICTS`), and is not an ending: this reads only what did not
+ * complete. A run failed where the attempt it recorded was terminated — a
+ * limit reached, a host reached for, a command refused, the agent or its
+ * provider failing, the reviewer's answer not parsing — and that is read from
+ * the attempt. Where there is none to read — the CLI refusing to start or
+ * refusing a limit, a failure after the review, Perbo closing mid-command —
+ * the command's own output is what there is, carried whole in `log`. A run the
+ * person stopped says so, whatever its attempt recorded as it was cut off.
  *
  * Every word of `reason` comes from the records: the termination the runner
- * wrote, the ceiling it hit, the review's findings or its error and the
- * CLI's own error lines. The findings are the reviewer's words, shown as what it found and
- * never acted on.
+ * wrote, the ceiling it hit, the host it reached for, the review's error, and
+ * the CLI's own error lines.
  *
- * Null where the last command neither failed nor was interrupted.
+ * Null where the last command neither failed, was interrupted, nor was a run
+ * that was stopped.
  */
-export function runEnding(
-  jobs: readonly Job[],
-  latest: AttemptView | undefined,
-  ticketState: string,
-): RunEnding | null {
+export function runEnding(jobs: readonly Job[], latest: AttemptView | undefined): RunEnding | null {
   const job = jobs.at(-1);
-  if (job === undefined || (job.state !== "failed" && job.state !== "interrupted")) return null;
+  if (job === undefined) return null;
   const run = isRun(job);
   const title = run ? "The run ended" : `${job.label} failed`;
-  const output = job.error ?? job.log;
-  // Where there is no verdict of the loop's: the command's own words.
-  const own = (sentence: string): RunEnding => ({ job, title, sentence, reason: cliSentence(output), log: output });
-  if (job.state === "interrupted")
-    return {
-      ...own("Perbo closed before the command reported an outcome."),
-      title: run ? "The run ended" : `${job.label} did not finish`,
-      reason: output,
-    };
   // The attempt is this command's own only where it started after the command did.
   const recorded = run && latest !== undefined && Date.parse(latest.startedAt) >= Date.parse(job.startedAt);
+  if (run && stoppedByPerson([job])) {
+    const sentence = "You stopped the run.";
+    const why = recorded
+      ? "The run was stopped from this desktop while its attempt was going, and the work that attempt had done is kept."
+      : "The run was stopped from this desktop before the loop recorded an attempt of it.";
+    return { job, title, sentence, reason: why, log: null, byPerson: true, reasons: [{ text: sentence, detail: why }] };
+  }
+  if (job.state !== "failed" && job.state !== "interrupted") return null;
+  const output = job.error ?? job.log;
+  // A run refused by a limit is said in Perbo's words, the whole log under Watch.
+  const refused = run ? limitRefusal(output) : null;
+  // Where there is no verdict of the loop's: the command's own words.
+  const own = (sentence: string, reason = cliSentence(output)): RunEnding =>
+    refused !== null
+      ? {
+          job,
+          title,
+          sentence: refused.sentence,
+          reason: refused.reason,
+          log: null,
+          byPerson: false,
+          reasons: [{ text: refused.sentence, detail: refused.reason }],
+        }
+      : { job, title, sentence, reason, log: output, byPerson: false, reasons: [{ text: sentence, detail: reason || output }] };
+  if (job.state === "interrupted") {
+    const sentence = run ? "Perbo closed while the run was going." : "Perbo closed before the command reported an outcome.";
+    return {
+      job,
+      title: run ? "The run ended" : `${job.label} did not finish`,
+      sentence,
+      reason: output,
+      log: output,
+      byPerson: false,
+      reasons: [{ text: sentence, detail: output }],
+    };
+  }
   if (!recorded)
     return own(
       run
@@ -574,7 +725,15 @@ export function runEnding(
     const entry = latest.ceilings.find((each) => each.resource === resource);
     return [entry?.used ?? null, entry?.ceiling ?? null];
   };
-  const ended = (sentence: string, why: string): RunEnding => ({ job, title, sentence, reason: why, log: null });
+  const ended = (sentence: string, why: string, reasons: StopReason[] = [{ text: sentence, detail: why }]): RunEnding => ({
+    job,
+    title,
+    sentence,
+    reason: why,
+    log: null,
+    byPerson: false,
+    reasons,
+  });
   if (reason === "no_changes")
     return ended(
       "The agent made no change to the branch.",
@@ -589,17 +748,43 @@ export function runEnding(
   if (reason === "prohibited_action") {
     const refused = refusals(detail);
     const kinds = [...new Set(refused.map((each) => guardKind(each.kind)))];
+    const told = refused.map((each) =>
+      each.command === null
+        ? {
+            text: `The guard refused ${guardKind(each.kind)}.`,
+            detail: `The guard refused ${guardKind(each.kind)}: ${each.reading}.`,
+          }
+        : {
+            text: `The guard refused \`${each.command}\`, ${guardKind(each.kind)}.`,
+            detail: `The guard refused the command \`${each.command}\`: it read it as ${each.reading}, which is ${guardKind(each.kind)}.`,
+          },
+    );
     return ended(
       `The attempt was terminated: the guard refused ${kinds.join(" and ")}.`,
-      refused
-        .map((each) =>
-          each.command === null
-            ? `The guard refused ${guardKind(each.kind)}: ${each.reading}.`
-            : `The guard refused the command \`${each.command}\`: it read it as ${each.reading}, which is ${guardKind(each.kind)}.`,
-        )
-        .join("\n") + "\nSo it ended the attempt.",
+      told.map((each) => each.detail).join("\n") + "\nSo it ended the attempt.",
+      told.map((each) => ({ ...each, detail: `${each.detail}\nSo it ended the attempt.` })),
     );
   }
+  if (reason === "unlisted_egress_host") {
+    // The host as the runner named it, shown as words and never used.
+    const host = /^(\S+) is not on\b/.exec(detail)?.[1] ?? null;
+    // Asked about and left unanswered until the attempt's stall window closed.
+    const unanswered = /nobody answered/.test(detail) ? ", and nobody answered whether to allow it" : "";
+    return ended(
+      host === null
+        ? `The agent reached for a host the repository does not list${unanswered}.`
+        : `The agent reached for ${host}, a host the repository does not list${unanswered}.`,
+      "The runner ends an attempt whose agent reaches for a host outside the hosts the repository lists for its " +
+        "executor." + noted,
+    );
+  }
+  if (reason === "transport_unavailable")
+    return ended(
+      "The model provider was unavailable, so the attempt ended without doing the work.",
+      "The provider kept answering that it could not take the request until the agent's retries ran out." + noted,
+    );
+  if (reason === "agent_error")
+    return ended("The agent exited with an error.", "The coding agent ended the attempt on an error of its own." + noted);
   if (reason === "stalled") {
     const [quiet, limit] = measured("attempt_stall_ms");
     return ended(
@@ -637,37 +822,14 @@ export function runEnding(
   // with the error behind the `i` exactly as the review recorded it.
   if (review?.error && UNPARSED[review.error.kind]) return ended(REVIEW_UNPARSED, review.error.message);
   const decision = review?.decision ?? latest.reviewDecision;
-  const open = (review?.findings ?? []).filter((finding) => finding.status === "open");
-  const findings = (asked: string): string =>
-    `The independent review read the change against the contract and ${asked} ` +
-    `${open.length === 1 ? "one thing" : `${open.length} things`}:\n` +
-    open
-      .map((finding, index) => `${index + 1}. ${finding.statement}${finding.blocking ? " (holds the merge)" : ""}`)
-      .join("\n");
-  if (decision === "changes_requested" || (decision !== "escalate" && ticketState === "changes_requested"))
-    return ended(
-      "The review requested changes.",
-      open.length === 0
-        ? "The independent review read the change against the contract and did not approve it; the review on the ticket says why."
-        : findings("asked for changes to"),
-    );
-  if (decision === "escalate")
-    return ended(
-      "The review escalated the change to you.",
-      open.length === 0
-        ? "The independent review read the change against the contract and put the decision to you; the review on the ticket says what it is."
-        : findings("put to you"),
-    );
-  if (/closure\(s\) still open/.test(latest.outcome))
-    return ended(
-      "Refinement ended with findings still open.",
-      open.length === 0
-        ? `The refinement rounds ended with ${latest.outcome}; the review on the ticket lists them.`
-        : findings("still holds open"),
-    );
-  // No verdict of the loop's to say: the command's output says the rest.
+  // Nothing the attempt recorded says why: the command's output says the rest.
   if (decision === "approve") return own("The review approved the change, and the run failed after it.");
-  return own("The run failed after the loop recorded its attempt.");
+  const failed = own("The run failed after the loop recorded its attempt.");
+  // No answer was had from the reviewer at all: the reason says what kept it,
+  // with the error as the review recorded it.
+  return review?.error
+    ? { ...failed, reasons: [{ text: UNHAD[review.error.kind as keyof typeof UNHAD], detail: review.error.message }] }
+    : failed;
 }
 
 /**

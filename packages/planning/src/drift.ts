@@ -77,8 +77,12 @@ export function shownDriftText(text: string, env: NodeJS.ProcessEnv): string {
     .trim();
 }
 
-/** Every string in a submitted report, as it is shown; its shape is left to the schema. */
-function shownReport(value: unknown, env: NodeJS.ProcessEnv): unknown {
+/**
+ * Every string in a submitted report, as it is shown ({@link shownDriftText});
+ * its shape is left to the schema. The decision options' reading measures its
+ * answers through this too.
+ */
+export function shownReport(value: unknown, env: NodeJS.ProcessEnv): unknown {
   if (typeof value === "string") return shownDriftText(value, env);
   if (Array.isArray(value)) return value.map((entry) => shownReport(entry, env));
   if (value !== null && typeof value === "object")

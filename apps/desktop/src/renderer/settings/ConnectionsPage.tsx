@@ -13,8 +13,9 @@ import {
 } from "../ui/index.js";
 import { errorMessage, useAction } from "../workspace/index.js";
 import { useToast } from "../shell/Toast.js";
-import { ModelPicker, useProviders } from "./ConnectionScreens.js";
+import { ArchitectPicker, ModelPicker, useProviders } from "./ConnectionScreens.js";
 import type { PageProps } from "../shell/route.js";
+import type { Provider } from "../../shared/protocol.js";
 
 /** Settings · Connections (S6): the accounts, the defaults for new tasks, and the repositories. */
 export function ConnectionsPage({ workspace, navigate }: PageProps) {
@@ -22,7 +23,8 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
     providers = useProviders(),
     toast = useToast();
   const [loginError, setLoginError] = useState<{ id: string; message: string; command: string } | null>(null);
-  const signIn = (provider: { id: "claude" | "codex"; loginCommand: string }): void => {
+  const signIn = (provider: Provider): void => {
+    if (provider.id !== "claude" && provider.id !== "codex") return;
     setLoginError(null);
     void action
       .mutateAsync({ kind: "login", provider: provider.id })
@@ -43,7 +45,7 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
     await action.mutateAsync({ kind: "saveSettings", settings });
   };
   const accounts = (providers.data ?? [])
-    .filter((provider): provider is typeof provider & { id: "claude" | "codex" } => provider.id !== "anthropic")
+    .filter((provider) => provider.id !== "anthropic")
     .sort((a, b) => Number(b.authenticated) - Number(a.authenticated));
   const connected = accounts.filter((provider) => provider.authenticated);
   const currentDoctor = [...workspace.jobs]
@@ -93,7 +95,9 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                 <FactList
                   className="provider-facts"
                   rows={[
-                    ["connection", "subscription CLI"],
+                    // A CLI with no sign-in of its own (OpenCode) runs on a key
+                    // in the app's environment or on its free models.
+                    ["connection", provider.loginCommand === "" ? "CLI" : "subscription CLI"],
                     [
                       "models",
                       [
@@ -115,9 +119,11 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                   ]}
                 />
                 <div className="repo-buttons">
-                  <Button className="small" disabled={action.isPending} onClick={() => signIn(provider)}>
-                    {provider.authenticated ? "Sign in again" : "Sign in"}
-                  </Button>
+                  {provider.loginCommand !== "" && (
+                    <Button className="small" disabled={action.isPending} onClick={() => signIn(provider)}>
+                      {provider.authenticated ? "Sign in again" : "Sign in"}
+                    </Button>
+                  )}
                   <Button
                     className="small"
                     disabled={providers.isFetching}
@@ -183,6 +189,20 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                 </span>
               </div>
             ))}
+            <div className="default-row">
+              <span>Architect</span>
+              <span>
+                <ArchitectPicker
+                  models={workspace.settings}
+                  onChange={(models) => {
+                    action.mutate({
+                      kind: "saveSettings",
+                      settings: { ...workspace.settings, ...models },
+                    });
+                  }}
+                />
+              </span>
+            </div>
             <button
               className="default-row"
               onClick={() => {

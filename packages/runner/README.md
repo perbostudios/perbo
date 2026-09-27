@@ -4,11 +4,12 @@ The half of execution that is not the agent.
 
 - `profile.ts` — the A2b permission profile: the command allow-list, the deny list, the environment
   built from an allow-list rather than scrubbed by a deny-list, and the pinned provider base URL.
-- `adapter.ts` — the Claude Code adapter (`codex/` is the Codex one). It builds an argv rather than assembling one,
+- `adapter.ts` — the Claude Code adapter (`codex/` is the Codex one, `opencode/` the OpenCode one). It builds an argv rather than assembling one,
   records it on the attempt with the prompt removed from the hash, and **asserts** that the agent
-  loaded nothing originating in the repository (ADR-0030). Both adapters print each turn the
+  loaded nothing originating in the repository (ADR-0030). Each adapter prints each turn the
   executor's own session speaks as a progress line of its own (`spokenLine` in `@perbo/contracts`),
-  redacted as the attempt's records are; the review stage prints each finding the reviewer left
+  redacted as the attempt's records are — on OpenCode a message once the next one starts or the turn
+  ends, since a step's words stream around its tool calls; the review stage prints each finding the reviewer left
   open the same way, and one the runner or the review's own checks state, such as a flaky check,
   as a `finding:` line of the runner's own, never marked as the reviewer's words; and the seal
   says when it starts. On Codex a subagent's items reach the attempt's transcript marked
@@ -27,6 +28,13 @@ The half of execution that is not the agent.
 - `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
   the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
   the agent role files it writes.
+- `opencode/` — the OpenCode adapter (D-NEW-opencode-is-a-provider): `index.ts` is the surface
+  (`runOpenCodeAgent`, and `opencodeDecision`, the runner's answer to one call OpenCode asks about,
+  judged as Codex's approvals are); `internal/acp.ts` holds the `opencode acp` session, the home it
+  runs under and the brief in its instructions. A refusal ends OpenCode's turn, so the adapter starts
+  the next one with the refusals; a command or file change that ran without the runner being asked, a
+  tool the executor's rules do not give it, or a primary agent beyond OpenCode's own ends the attempt
+  `agent_configuration_present`. OpenCode reports dollars, so its tally carries them.
 - `quarantine.ts` — the other half of ADR-0030: every known agent-configuration path moved out of
   the worktree before handover and restored afterwards, journalled before the first move so an
   interrupted attempt is recoverable.
@@ -58,6 +66,17 @@ The half of execution that is not the agent.
   Every file the spec commit holds is excluded from it, so the checks, the review, the verification
   and the pull request read one range and the review reads the diff after the spec.
 - `bundle.ts` — immutable, content-addressed run bundles with a computed replayability tier.
+- `egress.ts` — the egress log, and the relay through which the write guard's hook holds a call
+  naming a host off the allow-list while the runner asks whether it may be reached
+  ([D-NEW-an-unlisted-host-asks](../../docs/11-open-decisions.md)): the hook writes an ask into
+  its own directory and waits, the adapter answers beside it. `egress-questions.ts` is the
+  ticket's record of those questions — appended, answered by `perbo verdict --egress` and closed
+  when the run stops waiting, each under the lock beside it — and the one write of
+  an allowed host into `.perbo/config.json`; `loop/internal/egress.ts` is the run's rules — one
+  question a run, a refusal remembered on the ticket, the stall window as the wait.
+- `record-lock.ts` — one writer at a time for a record the store keeps whole: the CLI's
+  `verdicts.json` and a ticket's egress questions are each changed under a lock beside them and
+  read again under it, and a writer that cannot take the lock within five seconds writes nothing.
 - `decisions.ts` — a person's answer to a finding routed to them, and how it is recorded on the
   finding (D-132); read by the loop and by the pull
   request body. The choices, and which findings take one, are in `@perbo/contracts`.

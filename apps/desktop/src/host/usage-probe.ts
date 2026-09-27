@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { z } from "zod";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import type { UsageWindow } from "../shared/protocol.js";
-import { CLAUDE_METADATA_ARGS, metadataProcess } from "./model-catalog.js";
+import { CLAUDE_METADATA_ARGS } from "@perbo/model/defaults";
+import { metadataProcess } from "./model-catalog.js";
 import { childEnvironment, redact } from "./process.js";
 
 /**

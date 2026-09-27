@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LimitsTableSchema } from "@perbo/contracts";
+import { EXIT_CODES, LimitsTableSchema, RUN_VERDICTS } from "@perbo/contracts";
 import { DEFAULT_DELIVERED_CHECKS_BOUND_MS, TicketRunConfigSchema } from "@perbo/runner";
 import { describe, expect, it, vi } from "vitest";
 import { UsageError } from "../../usage-error.js";
@@ -62,6 +62,12 @@ describe("exit codes", () => {
     expect(exitCodeForRun("terminated")).toBe(3);
     // A reviewer outage is a run that did not complete, not a closed gate.
     expect(exitCodeForRun("review_failed")).toBe(3);
+  });
+
+  it("closes the gate for exactly the verdicts on the change for the person", () => {
+    for (const outcome of RUN_VERDICTS) expect(exitCodeForRun(outcome)).toBe(EXIT_CODES.gate_closed);
+    for (const outcome of ["approved", "level", "relevelled", "no_changes", "terminated", "base_conflict", "review_failed"] as const)
+      expect(exitCodeForRun(outcome)).not.toBe(EXIT_CODES.gate_closed);
   });
 
   it("gives no non-zero code the meaning of success", () => {

@@ -216,6 +216,16 @@ export function confirmLabel(shape: PlanShape): string {
   return shape === "basic" ? "Confirm contract" : "Confirm the plan";
 }
 
+/**
+ * The sentence under a press that waits for the Architect to finish (D-102):
+ * Generate plan, Confirm the plan and Confirm contract are each held while a
+ * turn is in flight, from the moment the person sends it until it is over, so
+ * whatever they last asked the chat for is in what the press reads.
+ */
+export function chatStillTalking(press: string): string {
+  return `The chat is still talking. ${press} is yours once it has finished this turn.`;
+}
+
 /** Whether this ticket's plan is approved, as the snapshot's own row for it says. */
 export function planApproved(workspace: Snapshot, repoId: string, key: string): boolean {
   return workspace.tasks.some(
@@ -236,6 +246,11 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
  * reads the plan against the spec by the same rule
  * (D-NEW-basic-and-epic-flows). An approved plan is frozen and goes straight
  * to its contract, and so does a plan with no planning to read it in.
+ *
+ * Every press that asks it is held while the chat is still talking on the
+ * planning ({@link chatStillTalking}, D-102), and so is the shortcut, which is
+ * null for that time: a confirm made mid-turn would read, or pass over, a plan
+ * the turn is still moving.
  *
  * Asked only by a press that navigates to what it returns, it records an
  * epic's confirm as on its way ({@link confirmArrives}): the Problems pane

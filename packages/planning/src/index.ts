@@ -1,6 +1,26 @@
 export { assertionsChangedSinceDraft } from "./assertion-drift.js";
 export { contractDifferences, contractEditCount } from "./diff.js";
 export {
+  DECISION_OPTIONS_PROMPT_VERSION,
+  readDecisionOptions,
+} from "./decision-options.js";
+export type { DecisionContract, DecisionFinding } from "./decision-options.js";
+export {
+  decisionOptionsRecordPath,
+  readDecisionOptionsRecord,
+  writeDecisionOptionsRecord,
+} from "./decision-options-record.js";
+export {
+  DECISION_OPTIONS_JSON_SCHEMA,
+  DecisionOptionsVerdictSchema,
+} from "./decision-options-report.js";
+export type {
+  DecisionOption,
+  DecisionOptionsRecord,
+  DecisionOptionsVerdict,
+  FindingOptions,
+} from "./decision-options-report.js";
+export {
   CONTRACT_DRAFT_JSON_SCHEMA,
   ContractDraftSchema,
   draftContract,

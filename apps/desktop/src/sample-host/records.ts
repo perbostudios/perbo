@@ -1934,7 +1934,12 @@ export function sampleCatalog(provider: ModelProvider): ModelCatalog {
         ]
       : provider === "anthropic"
         ? [["claude-opus-5", "Claude Opus 5", "Sample API model", []]]
-        : [
+        : provider === "opencode-cli"
+          ? [
+              ["opencode/big-pickle", "Big Pickle", "opencode/big-pickle", []],
+              ["opencode/claude-opus-5", "Claude Opus 5", "opencode/claude-opus-5", []],
+            ]
+          : [
             ["claude-opus-5", "Opus 5", "Sample · best for everyday, complex tasks", [...EFFORT_LEVELS["claude-cli"]]],
             ["claude-opus-5-5", "Opus 5.5", "Sample · the chat's model where it is offered", [...EFFORT_LEVELS["claude-cli"]]],
             ["claude-fable-5-1", "Fable 5.1", "Sample · hardest and longest-running tasks", [...EFFORT_LEVELS["claude-cli"]]],

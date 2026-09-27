@@ -11,6 +11,7 @@ import { indexCommandLine } from "../commands/symbol-index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { interviewCommandLine } from "../commands/interview/index.js";
 import { mcpCommandLine } from "../commands/mcp.js";
+import { optionsCommandLine } from "../commands/options.js";
 import { principleCommandLine } from "../commands/principle.js";
 import { reviewCommandLine } from "../commands/review/index.js";
 import { doctorCommandLine, executeCommandLine } from "../commands/run/index.js";
@@ -108,6 +109,7 @@ export const COMMANDS: { readonly [Name in CommandName]: TerminalCommand } = {
   approve: approveCommandLine,
   edit: editCommandLine,
   drift: driftCommandLine,
+  options: optionsCommandLine,
   list: listCommandLine,
   sync: syncCommandLine,
   serve: serveCommandLine,

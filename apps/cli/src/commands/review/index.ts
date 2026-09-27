@@ -143,6 +143,8 @@ function providerUnavailableHint(provider: ReviewArgs["provider"]): string {
       return "the `claude` binary could not complete the review: sign in with `claude` (or `claude auth login`) and re-run; `--provider anthropic` reviews on ANTHROPIC_API_KEY instead";
     case "codex-cli":
       return "the `codex` binary could not complete the review: sign in with `codex` and re-run, or use `--provider claude-cli`";
+    case "opencode-cli":
+      return "the `opencode` binary could not complete the review: check that OpenCode 2 is installed and that OPENCODE_API_KEY is set for a model other than OpenCode's free ones, then re-run, or use `--provider claude-cli`";
   }
 }
 

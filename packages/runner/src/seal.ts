@@ -400,6 +400,30 @@ export async function commitsSince(args: {
 }
 
 /**
+ * The paths `base_commit..head_commit` changes, as git lists them.
+ *
+ * What a continued run's first round measures a widening against (SCP-194):
+ * the change set the commit it continues from already held. Both ends are the
+ * runner's own — the contract's base and a commit read from the branch — so
+ * nothing a model returned reaches the argv.
+ */
+export async function changedPathsBetween(args: {
+  worktree: string;
+  base_commit: string;
+  head_commit: string;
+  timeoutMs?: number;
+}): Promise<string[]> {
+  const range = `${args.base_commit}..${args.head_commit}`;
+  const listed = await git.runOrThrow(
+    args.worktree,
+    ["diff", "--name-status", "-z", range, "--", ...SCRATCH_EXCLUDE_PATHSPEC],
+    { timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxOutputBytes: MAX_LISTING_BYTES },
+  );
+  if (listed.truncated) throw new Error(`${range} lists more than ${MAX_LISTING_BYTES} bytes of files`);
+  return parseNameStatus(listed.stdout).map((file) => file.path);
+}
+
+/**
  * The commit a worktree is on, or null where it has none.
  *
  * Read straight after provisioning, this is where the materialization's verify

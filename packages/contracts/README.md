@@ -59,6 +59,13 @@ for a person takes any, `answersReview`, which says which review an answer answe
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
 
+`opencode.ts` is the single home for how every role Perbo runs on OpenCode starts it
+([D-NEW-opencode-is-a-provider](../../docs/11-open-decisions.md)): the argv, the permission rules
+each role runs under, the whole configuration, the directories that stand for OpenCode's own, the
+file its instructions go in, the key it may be passed by name and the version it is held to. The
+runner's executor, the model package's reviewer, the chat and the desktop's catalogue each read it,
+so no two of them start OpenCode differently.
+
 `spoken.ts` is the single home for an agent's words as a run prints them while it works: one
 progress line per turn, carrying the whole turn with its line breaks escaped so it stays one
 physical line, and marked with whose words they are, which the runner's adapters and review stage

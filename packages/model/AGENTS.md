@@ -3,10 +3,10 @@
 The model call. The repository-wide rules are in the root [`AGENTS.md`](../../AGENTS.md); these bind
 work here. [`README.md`](README.md) says what each module owns.
 
-- **Process execution lives in `src/claude-cli.ts` and `src/codex-cli.ts` and nowhere else.** They
-  pass argv, never a command line, and nothing a model returns becomes an argument
-  ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)). An ESLint rule holds the line,
-  and `scripts/lint-boundaries.test.mjs` proves the rule fires.
+- **Process execution lives in `src/claude-cli.ts`, `src/codex-cli.ts` and `src/opencode.ts` and
+  nowhere else.** They pass argv, never a command line, and nothing a model returns becomes an
+  argument ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)). An ESLint rule holds the
+  line, and `scripts/lint-boundaries.test.mjs` proves the rule fires.
 - **The reviewer and the drafter speak through this package**, so a change to a default model, to
   the request a transport builds, or to the price card is a change to the reviewer: it carries a
   summary of a [regression-suite](../../docs/evaluation/regression-suite.md) run in its pull

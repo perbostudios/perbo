@@ -16,6 +16,7 @@ export const COMMAND_NAMES = [
   "approve",
   "edit",
   "drift",
+  "options",
   "list",
   "sync",
   "serve",

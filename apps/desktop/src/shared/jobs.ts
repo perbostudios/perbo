@@ -1,3 +1,4 @@
+import { pendingEgressQuestion } from "./egress-question.js";
 import type { Job, Snapshot } from "./protocol.js";
 
 /**
@@ -158,9 +159,10 @@ const IN_PROGRESS_STATES: readonly string[] = ["provisioning", "executing", "ver
 export const isRun = (job: Pick<Job, "kind">): boolean => job.kind === "run" || job.kind === "decide";
 
 /**
- * One ticket's jobs, the one the loop is running for it, and whether its run
- * stopped short of the end. The renderer's projection of a ticket and the
- * archive's eligibility both read this, so a stopped run is one answer.
+ * One ticket's jobs, the one the loop is running for it, whether its run
+ * stopped short of the end, and whether it paused for the person. The
+ * renderer's projection of a ticket and the archive's eligibility both read
+ * this, so a stopped run is one answer.
  *
  * A stop seals to `failed` or `cancelled` inside the executor's window and
  * strands the ticket where it stood outside it, so a ticket left failed,
@@ -168,6 +170,14 @@ export const isRun = (job: Pick<Job, "kind">): boolean => job.kind === "run" || 
  * ticket's state is the whole answer: the journal keeps a ticket's last run
  * only while the host keeps its journal, and a stopped ticket filed in the
  * Archive long ago is still stopped once that record has gone.
+ *
+ * A run that completed on a verdict for the person (`outcome`) paused the
+ * loop for them instead: the CLI writes the ticket's state only as it ends, so
+ * until the records are read again the ticket still says the stage the run
+ * started at, and that is the pause catching up, never a stop. A run still
+ * going that waits on the person's answer about a host off the allow-list
+ * (D-NEW-an-unlisted-host-asks) is `asking`: paused for them the same way,
+ * until the answer is printed or the run is stopped.
  */
 export function ticketRun(
   workspace: Pick<Snapshot, "jobs">,
@@ -179,8 +189,16 @@ export function ticketRun(
   );
   // The loop is what a ticket's screens watch and stop, so it wins over planning running beside it.
   const active = exclusiveJob(jobs) ?? jobs.find(isLive);
-  const stoppedShort = !active && (IN_PROGRESS_STATES.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state));
-  return { jobs, active, stoppedShort };
+  const last = jobs.filter(isRun).at(-1);
+  const paused =
+    !active &&
+    last?.state === "completed" &&
+    last.outcome !== undefined &&
+    (ticket.state === "changes_requested" || IN_PROGRESS_STATES.includes(ticket.state));
+  const asking = active !== undefined && active.state === "running" && isRun(active) && pendingEgressQuestion(active.log) !== null;
+  const stoppedShort =
+    !active && !paused && (IN_PROGRESS_STATES.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state));
+  return { jobs, active, stoppedShort, paused, asking };
 }
 
 /**

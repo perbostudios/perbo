@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
-import { readStage, runnerProgress, runnerStages, runnerTally } from "./runner-progress.js";
+import { readStage, runnerProgress, runnerStages, runnerTally, WHEEL_STEPS, wheelStep } from "./runner-progress.js";
 
 describe("readStage", () => {
   it("reads each stage the runner announces, and only the number or name the line states", () => {
@@ -102,6 +102,39 @@ describe("runnerStages", () => {
 });
 
 describe("runnerProgress", () => {
+  /**
+   * The wheel's steps follow the order the loop runs: a first review, the
+   * decisions it puts to the person, a refinement round, and a review again,
+   * which returns the wheel to the review and says which pass it is.
+   */
+  it("follows the loop's order, returning to the review for a second pass", () => {
+    expect(WHEEL_STEPS).toEqual(["contract", "execution", "checks", "review", "decisions required", "refinement"]);
+    let log = "  worktree /w on b at c\n  executing\n";
+    const seen: [number | undefined, string | undefined][] = [];
+    for (const line of [
+      "  check Tests: pnpm test",
+      "  review round 0",
+      "  remediation round 1 of at most 6",
+      "  check Tests: pnpm test",
+      "  review round 1",
+      "  verifying closures, round 1",
+    ]) {
+      log += line + "\n";
+      const wheel = runnerProgress(log);
+      seen.push([wheel?.stage, wheel?.title]);
+    }
+    expect(seen).toEqual([
+      [3, "Running deterministic checks"],
+      [4, "Independent review"],
+      [6, "Refining the change"],
+      [3, "Running deterministic checks"],
+      [4, "Independent review 2"],
+      [6, "Verifying the refinements"],
+    ]);
+    // The pause for a decision is the step after the review.
+    expect(wheelStep("decisions required")).toBe(wheelStep("review") + 1);
+  });
+
   it("leaves the wheel where it was for a stage that has no place on it", () => {
     const checked = "  worktree /w on b at c\n  executing\n  check Tests: pnpm test\n";
     expect(runnerProgress(checked + "  sealing the change set\n")?.stage).toBe(3);

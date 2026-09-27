@@ -9,14 +9,17 @@ import {
   TicketKeySchema,
   decidable,
   decisionChoicesFor,
+  egressQuestionsPath,
   routedToPerson,
   stateDir,
   type DecisionChoice,
+  type EgressQuestion,
   type ReviewDecision,
   type StopRouting,
   type Ticket,
 } from "@perbo/contracts";
 import { z } from "zod";
+import { answerEgressQuestion, EgressAnswerRefusedError, liveRunLocks, withRecordLock } from "@perbo/runner";
 import { UsageError, readInput } from "../../usage-error.js";
 import {
   parseArgv,
@@ -38,7 +41,6 @@ import { refuseUnknownReview, storedReviewSubject, storedReviewsFor } from "../r
 import type { CommandContext, Rendered } from "../../command.js";
 import type { ReportCommand } from "../../command-line/table.js";
 import { StoreTargetSchema, storeDir } from "../../store/index.js";
-import { withRecordLock } from "../../store/record-lock.js";
 import { listTickets } from "../../store/tickets.js";
 import {
   GIT_IDENTITY_COMMANDS,
@@ -98,7 +100,23 @@ const VerdictCommonSchema = {
   reference: z.string().min(1),
 };
 
-export const VerdictInputSchema = z.discriminatedUnion("list", [
+/**
+ * `--egress`: a person's answer to the question a live run is waiting on,
+ * whether the executor may reach a host off the network allow-list
+ * (D-NEW-an-unlisted-host-asks). Its own shape rather than a `--decide`: the
+ * question is not a finding of any review, and what it answers is the run
+ * holding the call, not a later run.
+ */
+const EgressAnswerInputSchema = z.strictObject({
+  ...VerdictCommonSchema,
+  /** The question's key, whole or by any prefix that names one. */
+  egress: z.string().min(1),
+  allow: z.boolean(),
+  author: z.string().nullable(),
+});
+export type EgressAnswerInput = z.infer<typeof EgressAnswerInputSchema>;
+
+const DecisionOrListSchema = z.discriminatedUnion("list", [
   /** Taking a decision, which is what this command was built to do. */
   z.strictObject({
     ...VerdictCommonSchema,
@@ -122,6 +140,8 @@ export const VerdictInputSchema = z.discriminatedUnion("list", [
   /** `--list`: reading back the decisions already taken, and taking none. */
   z.strictObject({ ...VerdictCommonSchema, list: z.literal(true) }),
 ]);
+
+export const VerdictInputSchema = z.union([DecisionOrListSchema, EgressAnswerInputSchema]);
 export type VerdictInput = z.infer<typeof VerdictInputSchema>;
 export type VerdictRecordInput = Extract<VerdictInput, { list: false }>;
 export type VerdictListInput = Extract<VerdictInput, { list: true }>;
@@ -160,6 +180,9 @@ const VERDICT_FLAGS = {
   "--accept": decisionFlag("--accept"),
   "--reject": decisionFlag("--reject"),
   "--decide": decisionFlag("--decide"),
+  "--egress": valueFlag({ refuseFlagShaped: "missing key after --egress" }),
+  "--allow": switchFlag(),
+  "--refuse": switchFlag(),
   "--choice": valueFlag(),
   "--note": valueFlag(),
   "--author": valueFlag(),
@@ -209,6 +232,38 @@ function readVerdict(argv: readonly string[]): {
     target: { repo: flags["--repo"] ?? ".", store: flags["--store"] ?? null },
   };
   const output = { json: flags["--json"] === true };
+
+  const egress = flags["--egress"] ?? null;
+  const allow = flags["--allow"] === true;
+  const refuse = flags["--refuse"] === true;
+  if (egress === null && (allow || refuse)) {
+    throw new UsageError(`${allow ? "--allow" : "--refuse"} answers an egress question: name it with --egress <question key>`);
+  }
+  if (egress !== null) {
+    // The question a live run waits on, and nothing else in the same breath.
+    const other = [
+      ...(taken === null ? [] : [taken]),
+      ...(flags["--list"] === true ? ["--list"] : []),
+      ...(note === null ? [] : ["--note"]),
+      ...(flags["--choice"] === undefined ? [] : ["--choice"]),
+      ...(replace ? ["--replace"] : []),
+    ];
+    if (other.length > 0) {
+      throw new UsageError(`--egress answers the question a run is waiting on; ${other.join(" and ")} belong to a review`);
+    }
+    if (standIn) {
+      throw new UsageError(
+        "--egress lets the executor reach a host or refuses it, and only a person answers that: --stand-in cannot (D-121)",
+      );
+    }
+    if (allow === refuse) {
+      throw new UsageError("--egress takes one answer: --allow or --refuse");
+    }
+    return {
+      input: readInput(VerdictInputSchema, { ...common, egress, allow, author }),
+      output,
+    };
+  }
 
   if (flags["--list"] === true) {
     // `--list` reads the record; the flags that write to it have nothing to do
@@ -647,6 +702,13 @@ export interface VerdictListed {
 /** What one invocation did, or refused to do. */
 export type VerdictReport =
   | VerdictListed
+  /** An egress question answered, which the run waiting on it reads. */
+  | {
+      readonly kind: "egress";
+      readonly subject: InspectSubject;
+      readonly question: EgressQuestion;
+      readonly path: string;
+    }
   /** Nothing to record the decision against: no `--author` and no git identity. */
   | { readonly kind: "unnamed"; readonly repositoryRoot: string }
   /** A decision already stands on this finding and `--replace` was not given. */
@@ -694,6 +756,7 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
   const repositoryRoot = resolve(context.cwd, input.target.repo);
   const dir = storeDir(repositoryRoot, input.target.store);
   const subject = subjectFor(dir, input.reference);
+  if ("egress" in input) return answerEgress(input, { repositoryRoot, dir, subject, now: context.now });
   if (input.list) {
     // The strict reader, as the write path uses: reporting "no decisions
     // recorded" for a file this cannot parse would be a lie about the record.
@@ -814,11 +877,69 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
 }
 
 /**
+ * `--egress`: the person's answer to the question a run of this ticket is
+ * waiting on (D-NEW-an-unlisted-host-asks), written to the ticket's egress
+ * record, which that run reads. The run does what the answer says — lets the
+ * held call through and adds the host to the configuration, or refuses it —
+ * so this writes the answer and nothing else.
+ */
+function answerEgress(
+  input: EgressAnswerInput,
+  at: { repositoryRoot: string; dir: string; subject: InspectSubject; now: Date },
+): VerdictReport {
+  const { repositoryRoot, dir, subject, now } = at;
+  const identity = readGitIdentity(repositoryRoot);
+  const author = input.author ?? authorLine(identity);
+  if (author === null) return { kind: "unnamed", repositoryRoot };
+  // Only a live run is waiting: an answer nothing reads would be a record of
+  // a decision that changed nothing. Which live run asked is judged against
+  // the question itself, under the record's lock.
+  const liveRuns = liveRunLocks(join(dir, ...stateDir())).filter((lock) => lock.ticket_id === subject.ticket_id);
+  if (liveRuns.length === 0) {
+    throw new UsageError(
+      `no run of ${subject.ticket} is live, so nothing is waiting on an answer; a run asks again where it needs one`,
+    );
+  }
+  const path = join(dir, ...egressQuestionsPath(subject.ticket_id));
+  try {
+    const question = answerEgressQuestion({
+      path,
+      key: input.egress,
+      choice: input.allow ? "allow" : "refuse",
+      author,
+      now,
+      liveRuns,
+    });
+    return { kind: "egress", subject, question, path };
+  } catch (error) {
+    if (error instanceof EgressAnswerRefusedError) throw new UsageError(`${subject.ticket} unchanged: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
  * What one decision looks like once it is taken, and what a refusal looks
  * like: the same two answers whether a person is reading them or a script is.
  */
 function renderVerdict(report: VerdictReport, json: boolean): Rendered {
   if (report.kind === "listed") return renderListing(report, json);
+  if (report.kind === "egress") {
+    const { question } = report;
+    if (json) return { stdout: `${JSON.stringify(question, null, 2)}\n`, stderr: "", exitCode: EXIT_CODES.approve };
+    const allowed = question.answer?.choice === "allow";
+    return {
+      stdout:
+        `${report.subject.ticket}  ${question.key}  ${question.host}  ${question.answer?.choice}  ` +
+        `${question.answer?.author}  ${question.answer?.decided_at}\n`,
+      stderr:
+        (allowed
+          ? "  the run lets the held call through and adds this one host to network_allow_list in .perbo/config.json\n"
+          : "  the run refuses the held call, tells the executor the network is closed for the rest of the run, and " +
+            "never asks about this host again on this ticket\n") +
+        `  ${report.path} — this machine only; nothing was sent anywhere\n`,
+      exitCode: EXIT_CODES.approve,
+    };
+  }
   if (report.kind === "unnamed") return refuseUnnamed(report.repositoryRoot, json);
   if (report.kind === "refused") {
     // SCP-189: a `--json` caller asked for machine-readable output and a

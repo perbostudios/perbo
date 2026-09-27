@@ -12,5 +12,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
     exclude: ["test/fixtures/**", ".test-dist-*/**", "dist/**", "node_modules/**"],
+    // No test launches the `claude` on PATH to read its catalog (src/test-support/no-catalog.ts).
+    setupFiles: ["src/test-support/no-catalog.ts"],
   },
 });

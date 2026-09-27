@@ -7,7 +7,7 @@ import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { RequestSchema, TYPED_TEXT_MAX_CHARS, type Detail, type Job, type Snapshot } from "../../shared/protocol.js";
 import { typeInto } from "../../test-support/typing.js";
-import { LoopScreen } from "./LoopScreen.js";
+import { ANSWER_TOO_LONG, LoopScreen, OPTIONS_FAILED } from "./LoopScreen.js";
 import type { TaskContext } from "./task-context.js";
 
 let client: QueryClient;
@@ -60,13 +60,6 @@ const failedRun = (overrides: Partial<Job> = {}): Job => ({
   result: null,
   ...overrides,
 });
-/** The attempt on record as one the review asked changes of. */
-const requestedChanges = (detail: Detail): void => {
-  const attempt = detail.attempts.at(-1)!;
-  attempt.termination = "completed: the attempt ran to its end";
-  attempt.reviewDecision = "changes_requested";
-  attempt.review!.decision = "changes_requested";
-};
 /** The steps as the page lists them, top first. */
 const listed = (): HTMLElement[] =>
   [...screen.getByRole("region", { name: "Description of steps" }).children] as HTMLElement[];
@@ -216,7 +209,12 @@ describe("the three answers a question takes", () => {
     for (const [name, change] of Object.entries(cases)) {
       mount(context([], change));
       const dialog = screen.getByRole("dialog", { name: "Decisions required" });
-      expect(within(dialog).getByRole("textbox", { name: "Your approach" }), name).toBeTruthy();
+      // The person's own words, whether the field is open or the Architect's
+      // answers came first and it opens from Something else.
+      expect(
+        within(dialog).getByRole("radio", { name: /^(Something else|Tell it what the product should do)/ }),
+        name,
+      ).toBeTruthy();
       expect(within(dialog).getByRole("button", { name: "Let it decide" }), name).toBeTruthy();
       expect(within(dialog).queryByRole("radio", { name: /^Ship as it is/ }), name).toBeNull();
       cleanup();
@@ -255,32 +253,33 @@ describe("the three answers a question takes", () => {
 });
 
 describe("what ended the run", () => {
-  it("says the review requested changes in a card, with its findings behind the i, and keeps it at the top of the steps once confirmed", () => {
+  it("says what ended a run in a card, with the fuller reason behind the i, and keeps it at the top of the steps once confirmed", () => {
     const run = failedRun();
-    mount(context([run], requestedChanges));
-    // The log is not the page: the verdict is.
+    const stalled = (detail: Detail): void => {
+      detail.ticket.state = "failed";
+      const attempt = detail.attempts.at(-1)!;
+      attempt.termination = "stalled: no tool activity for 612000ms";
+      attempt.ceilings = [{ resource: "attempt_stall_ms", used: 612_000, ceiling: 600_000, hit: true }];
+    };
+    mount(context([run], stalled));
+    // The log is not the page: what the attempt recorded is.
     expect(screen.queryByText(/THE WHOLE RUN LOG/)).toBeNull();
     const card = screen.getByRole("dialog", { name: "The run ended" });
-    expect(within(card).getByText(/^The review requested changes\./)).toBeTruthy();
-    // The decision waits behind what ended the run.
-    expect(screen.queryByRole("dialog", { name: "Decisions required" })).toBeNull();
+    expect(within(card).getByText(/^The attempt stalled for 10 minutes, past its 10-minute limit\./)).toBeTruthy();
     const dot = within(card).getByRole("button", { name: "Why the run ended" });
     fireEvent.click(dot);
     expect(dot.getAttribute("aria-expanded")).toBe("true");
-    expect(hint(dot)).toContain("Where should a permanently failed email go?");
+    expect(hint(dot)).toMatch(/^The agent showed no tool activity for 10 minutes/);
 
     fireEvent.click(within(card).getByRole("button", { name: "Got it" }));
     expect(screen.queryByRole("dialog", { name: "The run ended" })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Decisions required" })).toBeTruthy();
     const steps = screen.getByRole("region", { name: "Description of steps" });
     const newest = steps.firstElementChild as HTMLElement;
-    expect(newest.textContent).toMatch(/^The review requested changes\./);
-    expect(hint(within(newest).getByRole("button", { name: "Why the run ended" }))).toContain(
-      "Where should a permanently failed email go?",
-    );
+    expect(newest.textContent).toMatch(/^The attempt stalled for 10 minutes/);
+    expect(hint(within(newest).getByRole("button", { name: "Why the run ended" }))).toMatch(/^The agent showed no tool activity/);
     // Confirmed once: the same command's card is not said again.
     cleanup();
-    mount(context([run], requestedChanges));
+    mount(context([run], stalled));
     expect(screen.queryByRole("dialog", { name: "The run ended" })).toBeNull();
   });
 
@@ -326,7 +325,7 @@ describe("what ended the run", () => {
     });
     mount(context([cut]));
     const closed = screen.getByRole("dialog", { name: "The run ended" });
-    expect(closed.querySelector(".ended-sentence")?.textContent).toMatch(/^Perbo closed before the command reported an outcome\./);
+    expect(closed.querySelector(".ended-sentence")?.textContent).toMatch(/^Perbo closed while the run was going\./);
     expect(closed.querySelector(".ended-log")?.textContent).toBe(cut.error);
   });
 });
@@ -574,5 +573,221 @@ describe("the strip of commands, spend and files", () => {
       ),
     );
     expect(strip()).toEqual(live);
+  });
+});
+
+describe("the Architect's answers on the decision card (D-NEW-decision-options)", () => {
+  const offered = [
+    { text: "Drop a permanently failed email after the last retry and log it.", recommended: false },
+    { text: "Park a permanently failed email on the dead-letter queue and alert on-call.", recommended: true },
+    { text: "Hand a permanently failed email to the support inbox to resend.", recommended: false },
+  ];
+  const findingKey = (): string => sample.detail.attempts.findLast((attempt) => attempt.review)!.review!.findings[0]!.key;
+  const answers = (options = offered) => ({
+    key: "PRB-412",
+    review_id: "rev_sample",
+    findings: [{ finding_key: findingKey(), options }],
+    cached: false,
+  });
+  /**
+   * The bridge with the options request answered by `reply`, and a decision
+   * kept here rather than sent on: sent, the sample host would start the loop
+   * and move the ticket every later case reads.
+   */
+  function answering(reply: () => Promise<unknown>) {
+    const through = sampleBridge.request.bind(sampleBridge);
+    const request = vi.spyOn(sampleBridge, "request").mockImplementation((async (call: { kind: string }) =>
+      call.kind === "decisionOptions"
+        ? reply()
+        : call.kind === "decide"
+          ? failedRun({ kind: "decide", state: "running", endedAt: null })
+          : through(call as never)) as never);
+    const calls = () => request.mock.calls.map(([call]) => call);
+    return {
+      asked: () => calls().filter((call) => call.kind === "decisionOptions"),
+      decided: () => {
+        const decided = calls().find((call) => call.kind === "decide");
+        if (decided?.kind !== "decide") throw new Error("nothing was decided");
+        return decided;
+      },
+    };
+  }
+  afterEach(() => vi.restoreAllMocks());
+  const dialog = (): HTMLElement => screen.getByRole("dialog", { name: "Decisions required" });
+  /** Each radio's answer, as the card lists them, top first. */
+  const radios = (): string[] =>
+    within(dialog())
+      .getAllByRole("radio")
+      .map((radio) => radio.closest("label")!.querySelector("strong")!.textContent ?? "");
+
+  it("asks once as the card opens, offers the typed field meanwhile, then lists the answers with the recommended one first", async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    const bridge = answering(() => new Promise((done) => (resolve = done)));
+    mount(context([]));
+    // While the Architect is asked, the field is there at once.
+    expect(within(dialog()).getByRole("textbox", { name: "Your approach" })).toBeTruthy();
+    expect(within(dialog()).getByRole("status").textContent).toMatch(/The Architect is suggesting answers/);
+    expect(bridge.asked()).toEqual([
+      { kind: "decisionOptions", repoId: sample.repoId, key: "PRB-412", findings: [findingKey()] },
+    ]);
+    expect(RequestSchema.safeParse(bridge.asked()[0]).success).toBe(true);
+    await act(async () => resolve(answers()));
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    // The recommended one first and the Architect's order under it; Ship as it
+    // is where the finding takes it; Something else last, its field closed.
+    expect(radios()).toEqual([
+      offered[1]!.text,
+      offered[0]!.text,
+      offered[2]!.text,
+      "Ship as it is",
+      "Something else — tell it what to do",
+    ]);
+    const recommended = within(dialog()).getAllByText("recommended");
+    expect(recommended).toHaveLength(1);
+    expect(recommended[0]!.closest("label")!.textContent).toContain(offered[1]!.text);
+    expect(within(dialog()).queryByRole("textbox", { name: "Your approach" })).toBeNull();
+    expect(within(dialog()).queryByRole("status")).toBeNull();
+    // Every answer whole, as the Architect wrote it.
+    for (const option of offered) expect(within(dialog()).getByText(option.text).textContent).toBe(option.text);
+    expect(bridge.asked()).toHaveLength(1);
+  });
+
+  it("keeps Let it decide off the answers, as the button beside Save and continue, and says it by that name", async () => {
+    answering(async () => answers());
+    mount(context([]));
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    expect(radios().some((name) => /let it decide|architect/i.test(name))).toBe(false);
+    expect(within(dialog()).queryByText(/Architect.s call/)).toBeNull();
+    const footer = [...dialog().querySelector(".decision-actions")!.children];
+    expect(footer.at(-1)?.textContent).toBe("Save and continue");
+    expect(footer.at(-2)?.textContent).toBe("Let it decide");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Let it decide" }));
+    const confirm = screen.getByRole("dialog", { name: "Confirm your decisions" });
+    expect(within(confirm).getByText("Let it decide — the executor chooses within the contract")).toBeTruthy();
+  });
+
+  it("sends a picked answer as the person's approach, exactly as typing it would, and moves on with Save and continue", async () => {
+    const bridge = answering(async () => answers());
+    mount(context([]));
+    const pick = await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[0]!.text) });
+    fireEvent.click(pick);
+    expect((pick as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Save and continue" }));
+    const confirm = screen.getByRole("dialog", { name: "Confirm your decisions" });
+    // Offered, not written: the confirmation says it as it was picked.
+    expect(within(confirm).getByText(offered[0]!.text)).toBeTruthy();
+    expect(within(confirm).queryByText("written by you, not offered")).toBeNull();
+    fireEvent.click(within(confirm).getByRole("button", { name: "Confirm and resume" }));
+    const decided = bridge.decided();
+    expect(decided.decisions).toEqual([{ findingKey: findingKey(), choice: "approach", answer: offered[0]!.text }]);
+    expect(decided.answer.endsWith("\n" + offered[0]!.text)).toBe(true);
+    expect(RequestSchema.safeParse(decided).success).toBe(true);
+  });
+
+  it("opens the typed field from Something else, with the caret in it, and sends what is typed", async () => {
+    const bridge = answering(async () => answers());
+    mount(context([]));
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    fireEvent.click(within(dialog()).getByRole("radio", { name: /^Something else/ }));
+    const box = within(dialog()).getByRole("textbox", { name: "Your approach" });
+    expect(document.activeElement).toBe(box);
+    fireEvent.change(box, { target: { value: "Keep it for a week, then drop it." } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Confirm your decisions" })).getByRole("button", {
+        name: "Confirm and resume",
+      }),
+    );
+    expect(bridge.decided().decisions[0]).toMatchObject({ choice: "approach", answer: "Keep it for a week, then drop it." });
+  });
+
+  it("walks the answers with the arrow keys without opening the field in passing, and picks one with Enter", async () => {
+    answering(async () => answers());
+    mount(context([]));
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    const own = within(dialog()).getByRole("radio", { name: /^Something else/ });
+    // An arrow key's step is reported as a click on the answer it reaches.
+    fireEvent.keyDown(own, { key: "ArrowDown" });
+    fireEvent.click(own);
+    fireEvent.keyUp(own, { key: "ArrowDown" });
+    expect((own as HTMLInputElement).checked).toBe(true);
+    expect(document.activeElement).not.toBe(within(dialog()).getByRole("textbox", { name: "Your approach" }));
+    const recommended = within(dialog()).getByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    fireEvent.keyDown(recommended, { key: "Enter" });
+    expect((recommended as HTMLInputElement).checked).toBe(true);
+    // A pick clicked again is taken back, as the chat's card takes it back.
+    fireEvent.click(recommended);
+    expect((recommended as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("offers Ship as it is only where the finding takes it, and asks nothing about a finding with no principle to offer", async () => {
+    const lastReview = (detail: Detail) => detail.attempts.findLast((attempt) => attempt.review)!.review!;
+    // A principle alone: answers, and no Ship as it is.
+    answering(async () => answers());
+    mount(context([], (detail) => void (lastReview(detail).findings[0]!.routing = "advisory")));
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    expect(radios()).not.toContain("Ship as it is");
+    expect(radios()).toContain("Something else — tell it what to do");
+    cleanup();
+    client.clear();
+    vi.restoreAllMocks();
+    // Never handed to the executor: Ship as it is alone, and nothing asked.
+    const bridge = answering(async () => answers());
+    mount(context([], (detail) => void (lastReview(detail).findings[0]!.rule_id = "security.secret_in_diff")));
+    expect(radios()).toEqual(["Ship as it is"]);
+    expect(bridge.asked()).toEqual([]);
+  });
+
+  it("says in one sentence that the answers could not be fetched, with why behind the i, and keeps the typed field", async () => {
+    const bridge = answering(async () => {
+      throw new Error("error: the Architect cannot be asked on this machine");
+    });
+    mount(context([]));
+    const status = await within(dialog()).findByText(OPTIONS_FAILED);
+    const dot = within(status).getByRole("button", { name: "Why they could not be fetched" });
+    expect(hint(dot)).toBe("error: the Architect cannot be asked on this machine");
+    const box = within(dialog()).getByRole("textbox", { name: "Your approach" });
+    expect(radios()).toEqual(["Ship as it is", "Tell it what the product should do"]);
+    fireEvent.change(box, { target: { value: "Park it and tell on-call." } });
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Save and continue" }));
+    expect(screen.getByRole("dialog", { name: "Confirm your decisions" })).toBeTruthy();
+    expect(bridge.asked()).toHaveLength(1);
+  });
+
+  it("says why an answer longer than the room the message leaves cannot be picked, beside it and whole", async () => {
+    answering(async () => answers());
+    // The one message every answer goes down in, headed by the task and the
+    // question, leaves exactly the shortest answer's room.
+    const shortest = Math.min(...offered.map((option) => option.text.length));
+    const heading = "For task PRB-412:\n1. ".length + "\n".length;
+    mount(
+      context([], (detail) => {
+        detail.attempts.findLast((attempt) => attempt.review)!.review!.findings[0]!.statement = "w".repeat(
+          TYPED_TEXT_MAX_CHARS - heading - shortest,
+        );
+      }),
+    );
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    for (const option of offered) {
+      const radio = within(dialog()).getByRole("radio", { name: new RegExp("^" + option.text) }) as HTMLInputElement;
+      const fits = option.text.length <= shortest;
+      expect(radio.disabled, option.text).toBe(!fits);
+      expect(radio.closest("label")!.querySelector("p")?.textContent ?? null, option.text).toBe(
+        fits ? null : ANSWER_TOO_LONG,
+      );
+    }
+  });
+
+  it("does not ask again for a set it already has when the card opens again", async () => {
+    const bridge = answering(async () => answers());
+    mount(context([]));
+    await within(dialog()).findByRole("radio", { name: new RegExp("^" + offered[1]!.text) });
+    cleanup();
+    // Long enough for a query nothing holds any more to be let go.
+    await act(() => new Promise((done) => setTimeout(done, 20)));
+    mount(context([]));
+    // There at once, from what was fetched.
+    expect(within(dialog()).getByRole("radio", { name: new RegExp("^" + offered[1]!.text) })).toBeTruthy();
+    expect(bridge.asked()).toHaveLength(1);
   });
 });

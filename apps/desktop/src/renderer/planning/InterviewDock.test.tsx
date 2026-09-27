@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { INTERVIEW_WROTE_THE_SPEC, RequestSchema, TYPED_TEXT_MAX_CHARS } from "../../shared/protocol.js";
 import { typeInto } from "../../test-support/typing.js";
 import {
+  ChatText,
+  Line,
   NoteLine,
   QuestionCard,
   ToolCard,
@@ -378,5 +380,106 @@ describe("a note about a tool's output (D-NEW-nothing-shown-is-cut)", () => {
     const note = document.querySelector<HTMLElement>(".msg--note")!;
     expect(note.textContent).toBe("Named specs/dark-mode-toggle from your first message.");
     expect(within(note).queryByRole("button")).toBeNull();
+  });
+});
+
+describe("a message in the chat, in the marks it was written in", () => {
+  /** An Architect's message: a bold title, four numbered steps each led by a bold label and spaced apart once, and a question. */
+  const FETCHING = [
+    "**Fetching the prompt**",
+    "1. **Source:** the reviewer's prompt is read from `packages/review/src/prompt.ts` at start.",
+    "2. **Cache:** it is kept for the run and never refetched.",
+    "",
+    "3. **Fallback:** where it cannot be read, the run stops and *says why*.",
+    "4. **Refresh:** a new run reads it again.",
+    "",
+    "Does that match what you expected?",
+  ].join("\n");
+  const said = (text: string) =>
+    ({ n: 1, at: "2026-01-01T00:00:00.000Z", line: { kind: "said", text } }) as never;
+  const turn = (text: string) =>
+    ({ n: 1, at: "2026-01-01T00:00:00.000Z", line: { kind: "turn", text } }) as never;
+  const textNodes = (root: Node): string[] => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const found: string[] = [];
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) found.push(node.textContent ?? "");
+    return found;
+  };
+
+  it("draws the Architect's titles bold and its numbered steps as one list, with none of the marks left in", () => {
+    render(<Line entry={said(FETCHING)} onUndo={null} undoable={null} busy={false} />);
+    const message = document.querySelector<HTMLElement>(".msg--interview")!;
+    const bold = [...message.querySelectorAll("strong")].map((each) => each.textContent);
+    expect(bold).toEqual(["Fetching the prompt", "Source:", "Cache:", "Fallback:", "Refresh:"]);
+    const lists = message.querySelectorAll("ol");
+    expect(lists).toHaveLength(1);
+    expect([...lists[0]!.children].map((item) => item.tagName)).toEqual(["LI", "LI", "LI", "LI"]);
+    expect(lists[0]!.children[2]!.textContent).toBe("Fallback: where it cannot be read, the run stops and says why.");
+    expect(message.querySelector("em")?.textContent).toBe("says why");
+    expect(message.querySelector("code")?.textContent).toBe("packages/review/src/prompt.ts");
+    expect(message.querySelectorAll("p.chat-para")).toHaveLength(2);
+    const texts = textNodes(message);
+    expect(texts.filter((text) => text.includes("*") || text.includes("`"))).toEqual([]);
+    expect(texts.filter((text) => /^\s*\d+[.)]\s/.test(text))).toEqual([]);
+  });
+
+  it("draws the person's own turn in the same marks", () => {
+    render(<Line entry={turn("Keep **both** steps:\n- read\n- write")} onUndo={null} undoable={null} busy={false} />);
+    const message = document.querySelector<HTMLElement>(".msg--you")!;
+    expect(message.querySelector("strong")?.textContent).toBe("both");
+    expect([...message.querySelectorAll("ul > li")].map((item) => item.textContent)).toEqual(["read", "write"]);
+  });
+
+  it("keeps a line break the writer put inside a paragraph", () => {
+    render(<ChatText text={"First line\nsecond line"} />);
+    const paragraph = document.querySelector("p.chat-para")!;
+    expect(paragraph.querySelectorAll("br")).toHaveLength(1);
+    expect(paragraph.textContent).toBe("First linesecond line");
+  });
+
+  it("shows a tag or a script a model writes as the characters it is", () => {
+    const text = 'Run <script>alert("x")</script> then <b>this</b> and <img src=x onerror=alert(1)>';
+    const { container } = render(<ChatText text={text} />);
+    expect(container.querySelector("script, b, img")).toBeNull();
+    expect(container.textContent).toBe(text);
+  });
+
+  it("leaves a URL and a link as text rather than an anchor", () => {
+    const text = "See https://example.com/a and [the docs](https://example.com/docs).";
+    const { container } = render(<ChatText text={text} />);
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toBe(text);
+    // One with no break in it wraps inside its turn instead of scrolling the dock.
+    expect(cssRule(".msg")).toContain("overflow-wrap: anywhere");
+  });
+
+  it("draws fenced code as one block of its own text, marks and tags included, wrapping rather than clipped", () => {
+    const code = 'const a = "**b**";\n<script>alert(1)</script>\n1. not a step';
+    const { container } = render(<ChatText text={"Try this:\n```ts\n" + code + "\n```\nThen _run_ it."} />);
+    const block = container.querySelector("pre.chat-code-block")!;
+    expect([...block.childNodes].map((node) => node.nodeType)).toEqual([Node.TEXT_NODE]);
+    expect(block.textContent).toBe(code);
+    expect(container.querySelector("script, ol, strong")).toBeNull();
+    expect(container.querySelector("em")?.textContent).toBe("run");
+    const rule = cssRule(".chat-code-block");
+    expect(rule).toContain("var(--mono)");
+    expect(rule).toContain("white-space: pre-wrap");
+    expect(rule).toContain("overflow-wrap: anywhere");
+    expect(rule).not.toMatch(/overflow(-x|-y)?:\s*(hidden|auto|scroll)|max-height|nowrap/);
+  });
+
+  it("reads _word_ as italic and leaves a snake_case name as it is", () => {
+    const { container } = render(<ChatText text={"Keep _only_ the run_id and __init__."} />);
+    expect([...container.querySelectorAll("em")].map((each) => each.textContent)).toEqual(["only"]);
+    expect(container.textContent).toBe("Keep only the run_id and __init__.");
+  });
+
+  it("draws a heading at the chat's own size, bold", () => {
+    const { container } = render(<ChatText text={"# The plan\nIt has two steps."} />);
+    expect(container.querySelector("h1, h2, h3, h4, h5, h6")).toBeNull();
+    expect(container.querySelector("p.chat-heading")?.textContent).toBe("The plan");
+    const rule = cssRule(".chat-heading,\n.chat-strong");
+    expect(rule).toContain("font-weight: 600");
+    expect(rule).not.toContain("font-size");
   });
 });

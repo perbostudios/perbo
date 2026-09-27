@@ -2,12 +2,20 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { replaceFile } from "@perbo/workspace";
+import { RUN_VERDICTS } from "@perbo/contracts";
 import {
   EditingSessionSchema,
   SettingsSchema,
   TaskModelsSchema,
   parseStored,
 } from "../../shared/protocol.js";
+
+/**
+ * What a command Perbo closed on records as its error, quit or crashed alike:
+ * its outcome is in the CLI's records rather than here.
+ */
+export const CLOSED_MID_COMMAND =
+  "Perbo closed before the command reported an outcome. Refresh the ticket from its CLI records before starting again.";
 
 /** A repository the person connected, as the profile records it. */
 export const RegisteredRepositorySchema = z.object({
@@ -41,6 +49,7 @@ export const JobSchema = z.object({
     .object({ sessionId: z.string().uuid(), operationId: z.string().uuid() })
     .optional(),
   publish: z.boolean().optional(),
+  outcome: z.enum(RUN_VERDICTS).optional(),
 });
 
 /** Everything this host keeps between launches, in one file. */
@@ -131,8 +140,7 @@ export class Profile {
     for (const job of state.jobs)
       if (job.state === "running" || job.state === "stopping") {
         job.state = "interrupted";
-        job.error =
-          "Perbo closed before the command reported an outcome. Refresh the ticket from its CLI records before starting again.";
+        job.error = CLOSED_MID_COMMAND;
         job.endedAt = new Date().toISOString();
       }
     return new Profile(path, state);

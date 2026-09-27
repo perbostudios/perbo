@@ -69,8 +69,40 @@ export type {
   UsdDigits,
 } from "./cost.js";
 export { findCredentials, redactCredentials } from "./credential.js";
+export {
+  EGRESS_ANSWERS,
+  EGRESS_QUESTIONS_SCHEMA_VERSION,
+  EgressAnswerSchema,
+  egressQuestionLine,
+  EgressQuestionKeySchema,
+  egressQuestionOpen,
+  EgressQuestionSchema,
+  EgressQuestionsSchema,
+  egressSettledLine,
+  readEgressQuestion,
+  readEgressSettled,
+  refusedHosts,
+} from "./egress.js";
+export type { EgressAnswer, EgressQuestion, EgressQuestions, EgressSettlement } from "./egress.js";
 export { EFFORT_LABELS, EFFORT_LEVELS, effortFits, EffortLevelSchema } from "./effort.js";
 export type { EffortLevel, EffortProvider, ProviderEffort } from "./effort.js";
+export {
+  OPENCODE_ACP_ARGV,
+  OPENCODE_API_KEY_ENV,
+  OPENCODE_BUILTIN_MODES,
+  OPENCODE_INTERVIEW_SERVER,
+  OPENCODE_MIN_VERSION,
+  OPENCODE_ROLES,
+  OPENCODE_SESSION_ATTEMPTS,
+  OPENCODE_SESSION_RETRY_MS,
+  opencodeConfig,
+  opencodeEnvironment,
+  opencodeInstructionsPath,
+  opencodePermissions,
+  opencodeToolName,
+  opencodeVersionFits,
+} from "./opencode.js";
+export type { OpenCodeRole } from "./opencode.js";
 export {
   EXECUTOR_SKILL_REVISION,
   EXECUTOR_SKILLS,
@@ -130,6 +162,8 @@ export type {
   LimitsTable,
   PerTokenCostLimit,
 } from "./limits.js";
+export { isRunVerdict, RUN_VERDICTS } from "./run-verdict.js";
+export type { RunVerdict } from "./run-verdict.js";
 export type { MaterializationEntry } from "./materialisation-entry.js";
 export {
   COLD_START_TARGET_MS,
@@ -342,8 +376,11 @@ export {
   configuredFolder,
   ConfiguredFolderError,
   contractPath,
+  decisionOptionsPath,
   draftPath,
   driftPath,
+  egressQuestionsFileName,
+  egressQuestionsPath,
   PRINCIPLES_FILENAME,
   principlesPath,
   SPEC_FOLDER_CONFIG_KEY,

@@ -11,10 +11,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ModelPicker, modelName } from "./ConnectionScreens.js";
+import { ArchitectPicker, ModelPicker, ProviderScreen, modelName } from "./ConnectionScreens.js";
 import { bridge } from "../workspace/index.js";
 import { SettingsSchema } from "../../shared/protocol.js";
-import type { ModelCatalog, ModelProvider, Provider } from "../../shared/protocol.js";
+import type { ModelCatalog, ModelProvider, Provider, Request, Snapshot } from "../../shared/protocol.js";
 
 const clients: QueryClient[] = [];
 afterEach(() => {
@@ -382,5 +382,213 @@ describe("the name a closed picker reads", () => {
     ["gpt-5.6-terra", "gpt-5.6-terra"],
   ])("%s reads as %s", (id, name) => {
     expect(modelName(id)).toBe(name);
+  });
+});
+
+/**
+ * Claude Opus 5.5 where Claude Code's catalog offers it (D-093): listed first,
+ * taken by a role with nothing chosen, and the defaults a new profile is set
+ * up with. The catalog is the one Claude Code reports, read, never assumed.
+ */
+describe("Claude Opus 5.5 where the catalog offers it", () => {
+  const row = (id: string, label: string, isDefault = false) => ({ id, label, description: "", isDefault, efforts: [] });
+  const withOpus55 = [row("claude-opus-5", "Opus 5", true), row("claude-fable-5-1", "Fable 5.1"), row("claude-opus-5-5", "Opus 5.5")];
+  const withoutOpus55 = [row("claude-fable-5-1", "Fable 5.1"), row("claude-opus-5", "Opus 5", true)];
+  let readings = 0;
+  function answer(claude: ReturnType<typeof row>[]) {
+    return vi.spyOn(bridge, "request").mockImplementation(((request: Request) => {
+      if (request.kind === "providers")
+        return Promise.resolve([
+          { id: "claude", name: "Claude Code", installed: true, authenticated: true, detail: "", loginCommand: "claude login", roles: [] },
+        ]);
+      if (request.kind === "models")
+        return Promise.resolve({
+          provider: request.provider,
+          // A fresh reading each time, as a refresh is.
+          discoveredAt: new Date(Date.now() + ++readings).toISOString(),
+          source: "claude-code",
+          models: request.provider === "claude-cli" ? claude : [row("o-class", "O-class", true)],
+        });
+      return Promise.resolve(null);
+    }) as typeof bridge.request);
+  }
+  async function pickAfreshOnClaude(): Promise<string[]> {
+    fireEvent.click(screen.getByRole("button", { name: "Change executor model" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }).textContent).toContain("Fable 5.1"));
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    const listed = (await screen.findAllByRole("option")).map((option) => option.textContent ?? "");
+    fireEvent.click(screen.getByRole("option", { name: "Fable 5.1" }));
+    // Another provider and back leaves the role with nothing chosen.
+    fireEvent.click(screen.getByRole("combobox", { name: "executor provider" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Codex/ }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }).textContent).toContain("O-class"));
+    fireEvent.click(screen.getByRole("combobox", { name: "executor provider" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Claude Code/ }));
+    return listed;
+  }
+
+  it("lists Opus 5.5 first, and a role with nothing chosen takes it", async () => {
+    answer(withOpus55);
+    mount("claude-fable-5-1");
+    const listed = await pickAfreshOnClaude();
+    expect(listed).toEqual(["Opus 5.5", "Opus 5", "Fable 5.1"]);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }).textContent).toContain("Opus 5.5"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("status").textContent).toContain('"executorModel":"claude-opus-5-5"');
+  });
+
+  it("keeps the provider's order and its own default where the catalog does not offer Opus 5.5", async () => {
+    answer(withoutOpus55);
+    mount("claude-fable-5-1");
+    const listed = await pickAfreshOnClaude();
+    expect(listed).toEqual(["Fable 5.1", "Opus 5"]);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }).textContent).toContain("Opus 5"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByRole("status").textContent).toContain('"executorModel":"claude-opus-5"');
+  });
+
+  function setUp(): void {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    clients.push(client);
+    render(
+      <QueryClientProvider client={client}>
+        <ProviderScreen
+          workspace={{ settings: SettingsSchema.parse({}) } as Snapshot}
+          navigate={() => undefined}
+          setup
+          onDone={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+  }
+  const saved = (request: ReturnType<typeof answer>) =>
+    request.mock.calls.map(([sent]) => sent as Request).find((sent) => sent.kind === "saveSettings");
+
+  it.each([
+    ["offers it", withOpus55, "claude-opus-5-5", "Opus 5.5"],
+    ["does not offer it", withoutOpus55, "claude-opus-5", "Opus 5"],
+  ] as const)("sets a new profile's executor up from Claude Code's catalog where it %s, and the reviewer on its own default", async (_, models, id, name) => {
+    const request = answer([...models]);
+    setUp();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Change executor model" }).querySelector("strong")?.textContent).toBe(name),
+    );
+    // Read once the catalog has had its effect on the executor.
+    expect(screen.getByRole("button", { name: "Change reviewer model" }).querySelector("strong")?.textContent).toBe("Opus 5");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(saved(request)).toBeDefined());
+    // The reviewer keeps `DEFAULT_CLAUDE_MODEL` until a suite run moves it (D-010).
+    expect(saved(request)).toMatchObject({ settings: { executorModel: id, reviewerModel: "claude-opus-5" } });
+  });
+
+  it("keeps an executor the person picked on setup when the catalog is read again", async () => {
+    const request = answer([...withOpus55]);
+    setUp();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Change executor model" }).querySelector("strong")?.textContent).toBe("Opus 5.5"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Change executor model" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Fable 5.1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    // Read again, from the picker's own Refresh, and put away unchanged.
+    fireEvent.click(screen.getByRole("button", { name: "Change executor model" }));
+    const before = readings;
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh models" }));
+    await waitFor(() => expect(readings).toBeGreaterThan(before));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.keyDown(screen.getByRole("group", { name: "executor model selection" }), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(saved(request)).toBeDefined());
+    expect(saved(request)).toMatchObject({ settings: { executorModel: "claude-fable-5-1", reviewerModel: "claude-opus-5" } });
+  });
+});
+
+/**
+ * The Architect's model among the defaults for new tasks (D-102): Default is
+ * the Architect's rule, and a model the person chooses from the executor's
+ * connection is the one a new planning's chat starts on.
+ */
+describe("the Architect's default model", () => {
+  const row = (id: string, label: string) => ({ id, label, description: "", isDefault: false, efforts: [] });
+  function architect(
+    saved: { architectProvider: "claude-cli" | "codex-cli" | null; architectModel: string | null },
+    catalogFails = false,
+  ) {
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) =>
+      request.kind === "models" && catalogFails
+        ? Promise.reject(new Error("Provider CLI unavailable. Install it, sign in and refresh."))
+        : Promise.resolve(
+            request.kind === "models"
+              ? { provider: request.provider, discoveredAt: new Date().toISOString(), source: "claude-code", models: [row("claude-opus-5-5", "Opus 5.5"), row("claude-fable-5-1", "Fable 5.1")] }
+              : null,
+          )) as typeof bridge.request);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    clients.push(client);
+    function Picker() {
+      const [models, setModels] = useState(SettingsSchema.parse(saved));
+      return (
+        <>
+          <ArchitectPicker models={models} onChange={(choice) => setModels({ ...models, ...choice })} />
+          <output>{JSON.stringify({ provider: models.architectProvider, model: models.architectModel })}</output>
+        </>
+      );
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <Picker />
+      </QueryClientProvider>,
+    );
+  }
+  const closed = (): string => screen.getByRole("button", { name: "Change architect model" }).textContent ?? "";
+  const kept = (): string => document.querySelector("output")!.textContent ?? "";
+
+  it("reads Default, the Architect's rule, where nothing is chosen", () => {
+    architect({ architectProvider: null, architectModel: null });
+    expect(closed()).toBe("DefaultOpus 5.5 where offered");
+  });
+
+  it("keeps a model chosen from the executor's connection, and Default takes it back to the rule", async () => {
+    architect({ architectProvider: null, architectModel: null });
+    fireEvent.click(screen.getByRole("button", { name: "Change architect model" }));
+    // The catalog read, which the model list waits for.
+    await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "Default · Opus 5.5 where offered",
+      "Opus 5.5",
+      "Fable 5.1",
+    ]);
+    fireEvent.click(screen.getByRole("option", { name: "Fable 5.1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(kept()).toBe('{"provider":"claude-cli","model":"claude-fable-5-1"}');
+    expect(closed()).toBe("Fable 5.1");
+    fireEvent.click(screen.getByRole("button", { name: "Change architect model" }));
+    // The catalog read, which the model list waits for.
+    await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Default · Opus 5.5 where offered" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(kept()).toBe('{"provider":null,"model":null}');
+  });
+
+  it("takes Default back where the catalog cannot be read", async () => {
+    architect({ architectProvider: "claude-cli", architectModel: "claude-fable-5-1" }, true);
+    fireEvent.click(screen.getByRole("button", { name: "Change architect model" }));
+    await screen.findByText("Provider CLI unavailable. Install it, sign in and refresh.");
+    const done = screen.getByRole("button", { name: "Done" }) as HTMLButtonElement;
+    // The saved model cannot be confirmed against a catalog nobody read.
+    expect(done.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Default · Opus 5.5 where offered" }));
+    expect(done.disabled).toBe(false);
+    fireEvent.click(done);
+    expect(kept()).toBe('{"provider":null,"model":null}');
+  });
+
+  it("reads Default for a choice made on a connection the executor has left", () => {
+    architect({ architectProvider: "codex-cli", architectModel: "codex-sample" });
+    expect(closed()).toBe("DefaultOpus 5.5 where offered");
   });
 });

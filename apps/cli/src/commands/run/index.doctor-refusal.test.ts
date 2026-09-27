@@ -127,7 +127,7 @@ describe("perbo doctor", () => {
       argv: doctorArgs(dir),
       streams: sink,
       cwd: process.cwd(),
-      deps: { preflight: () => machineReady, diagnose: (request) => {
+      deps: { preflight: () => machineReady, claudeModels: () => Promise.resolve([]), diagnose: (request) => {
           requests.push(request);
           return Promise.resolve(cannotMaterialize);
         }, // SCP-279: the fourth collaborator, stubbed like the others. The real one
@@ -160,7 +160,14 @@ describe("perbo doctor", () => {
     const dir = checkout("injected");
     const machineRequests: PreflightRequest[] = [];
     const diagnoseRequests: DiagnoseRequest[] = [];
+    const catalogRequests: string[] = [];
     const { streams } = await run(dir, {
+      // The fifth: the models Claude Code's catalog offers, which the model
+      // this checkout's proposed configuration names is read from.
+      claudeModels: (binary) => {
+        catalogRequests.push(binary);
+        return Promise.resolve([]);
+      },
       preflight: (request) => {
         machineRequests.push(request);
         return machineReady;
@@ -200,6 +207,7 @@ describe("perbo doctor", () => {
       },
     ]);
     expect(diagnoseRequests).toEqual([{ checkout: dir, repository_id: "repo_local" }]);
+    expect(catalogRequests).toEqual(["claude"]);
     expect(observed.started).toEqual([]);
     // The stubs' answers are the ones reported, not a second opinion from the
     // real ones alongside them.
@@ -243,7 +251,7 @@ describe("perbo doctor", () => {
 
 async function run(
   repo: string,
-  collaborators: Partial<Pick<DoctorDeps, "preflight" | "diagnose" | "baseRef" | "pullRequestChecks">>,
+  collaborators: Partial<Pick<DoctorDeps, "preflight" | "diagnose" | "baseRef" | "pullRequestChecks" | "claudeModels">>,
 ): Promise<{ streams: RecordedStreams; code: number }> {
   const sink = recordStreams();
   const code = await runCommandLine(doctorCommandLine, {

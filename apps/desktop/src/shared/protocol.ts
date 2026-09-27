@@ -3,6 +3,7 @@ import {
   CriterionIdSchema,
   DECISION_CHOICES,
   EffortLevelSchema,
+  EgressQuestionKeySchema,
   ExecutorSkillsSchema,
   GraphEditSchema,
   MaterializationEntrySchema,
@@ -10,10 +11,12 @@ import {
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
+  RUN_VERDICTS,
   StandingProhibitedEntrySchema,
   TICKET_NAME_CAP,
   type DecisionChoice,
   type GraphEdge,
+  type RunVerdict,
   type SizeEstimate,
   type StandingProhibitedEntry,
   type VerificationKind,
@@ -29,6 +32,7 @@ import type {
 } from "@perbo/contracts";
 import type { ImpactReport, SpecField } from "@perbo/planning/browser";
 import { DriftFindingSchema, MAX_DRIFT_FINDINGS } from "@perbo/planning/browser";
+import type { DecisionOptionsVerdict } from "@perbo/planning/browser";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
 
 /**
@@ -100,12 +104,12 @@ export type Afk = z.infer<typeof AfkSchema>;
 export const SettingsSchema = z.strictObject({
   name: z.string().trim().max(PERSON_NAME_MAX_CHARS).default(""),
   onboardingComplete: z.boolean().default(false),
-  executorProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
+  executorProvider: z.enum(["claude-cli", "codex-cli", "opencode-cli"]).default("claude-cli"),
   executorSkills: ExecutorSkillsSchema.default([]),
   executorModel: z.string().trim().min(1).max(100).default("claude-opus-5"),
   reviewerModel: z.string().trim().min(1).max(100).default("claude-opus-5"),
   reviewerProvider: z
-    .enum(["claude-cli", "codex-cli", "anthropic"])
+    .enum(["claude-cli", "codex-cli", "opencode-cli", "anthropic"])
     .default("claude-cli"),
   /**
    * How hard each role's model thinks, from the levels its catalog row offers
@@ -114,7 +118,16 @@ export const SettingsSchema = z.strictObject({
    */
   executorEffort: EffortLevelSchema.nullable().default(null),
   reviewerEffort: EffortLevelSchema.nullable().default(null),
-  draftingProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
+  draftingProvider: z.enum(["claude-cli", "codex-cli", "opencode-cli"]).default("claude-cli"),
+  /**
+   * The model the Architect's chat runs on, chosen from the catalog of the
+   * provider it was chosen on, which the chat runs on only while that is the
+   * planning's drafting provider (D-102). Null takes the Architect's rule:
+   * Claude Opus 5.5 where Claude Code's catalog offers it, and otherwise the
+   * planning's executor model.
+   */
+  architectProvider: z.enum(["claude-cli", "codex-cli", "opencode-cli"]).nullable().default(null),
+  architectModel: z.string().trim().min(1).max(100).nullable().default(null),
   /**
    * Minutes without tool activity before a run is stopped (D-096). The one
    * setting here that stops a run: nothing bounds how long one takes, what it
@@ -144,6 +157,8 @@ export const TaskModelsSchema = SettingsSchema.pick({
   reviewerProvider: true,
   reviewerModel: true,
   draftingProvider: true,
+  architectProvider: true,
+  architectModel: true,
   executorSkills: true,
 }).extend({
   executorEffort: EffortLevelSchema.nullable(),
@@ -153,6 +168,7 @@ export type TaskModels = z.infer<typeof TaskModelsSchema>;
 export const ModelProviderSchema = z.enum([
   "claude-cli",
   "codex-cli",
+  "opencode-cli",
   "anthropic",
 ]);
 export type ModelProvider = z.infer<typeof ModelProviderSchema>;
@@ -171,6 +187,7 @@ export const ModelCatalogSchema = z.strictObject({
   source: z.enum([
     "claude-code",
     "codex-app-server",
+    "opencode",
     "anthropic-api",
     "sample",
   ]),
@@ -753,11 +770,11 @@ export const EditingSessionSchema = z.strictObject({
    */
   interviewSession: z.string().min(1).max(200).nullable().default(null),
   /**
-   * Which provider's id that is (SCP-312). The two keep separate namespaces,
+   * Which provider's id that is (SCP-312). Each keeps a namespace of its own,
    * so a planning whose drafting provider has changed since starts a session
    * of its own rather than continuing one the new provider has never heard of.
    */
-  interviewProvider: z.enum(["claude", "codex"]).nullable().default(null),
+  interviewProvider: z.enum(["claude", "codex", "opencode"]).nullable().default(null),
   /** The model that session was started on, which the chat's header names. */
   interviewModel: z.string().min(1).max(100).nullable(),
 });
@@ -1390,12 +1407,39 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     ),
     digest: z.string().length(64),
   }),
+  /**
+   * The Architect's answers to the findings the ticket's last review left for
+   * a person, by each finding's key (D-NEW-decision-options): the host runs
+   * `perbo options` on the ticket's own models, which prints the answers kept
+   * for that review and asks a model only for a finding not yet answered.
+   * The keys name findings the command checks against the review, and nothing
+   * here becomes an argument but them (ADR-0023 §4). What comes back is words
+   * for the person to pick; a picked one goes down in `decide` exactly as
+   * typed words do.
+   */
+  z.strictObject({
+    kind: z.literal("decisionOptions"),
+    ...reference,
+    findings: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1),
+  }),
   z.strictObject({
     kind: z.literal("verdict"),
     ...reference,
     findingKey: z.string().regex(/^[a-f0-9]{64}$/),
     decision: z.enum(["endorse", "override", "accept", "reject"]),
     note: text,
+  }),
+  /**
+   * The person's answer to the question a live run is waiting on, whether the
+   * executor may reach a host off the allow-list (D-NEW-an-unlisted-host-asks).
+   * Answered directly rather than as a job: the run it answers holds the
+   * ticket's lane, and it is that run that acts on the answer.
+   */
+  z.strictObject({
+    kind: z.literal("egressAnswer"),
+    ...reference,
+    question: EgressQuestionKeySchema,
+    allow: z.boolean(),
   }),
   z.strictObject({ kind: z.literal("cancel"), jobId: identifier }),
   z.strictObject({ kind: z.literal("openRepository"), repoId: identifier }),
@@ -1422,7 +1466,7 @@ export interface Repository {
   prohibitedPaths?: string[];
 }
 export interface Provider {
-  id: "claude" | "codex" | "anthropic";
+  id: "claude" | "codex" | "opencode" | "anthropic";
   name: string;
   installed: boolean;
   authenticated: boolean;
@@ -1452,6 +1496,8 @@ export interface Job {
   editing?: { sessionId: string; operationId: string } | undefined;
   /** A run's publication choice: whether it pushes and opens a pull request once the review gate passes. */
   publish?: boolean | undefined;
+  /** A run that completed on a verdict for the person: the outcome its CLI reported. */
+  outcome?: RunVerdict | undefined;
 }
 export interface TaskRow {
   repoId: string;
@@ -1519,6 +1565,8 @@ const JobUpdateSchema = z.object({
   kind: z.string(), label: z.string(), state: z.enum(["running", "stopping", "completed", "failed", "cancelled", "interrupted"]),
   startedAt: z.string(), endedAt: z.string().nullable(), log: z.string().max(80_000), error: z.string().nullable(), result: z.unknown(),
   editing: z.object({ sessionId: identifier, operationId: identifier }).optional(),
+  publish: z.boolean().optional(),
+  outcome: z.enum(RUN_VERDICTS).optional(),
 });
 export const PowerStateSchema = z.strictObject({
   holding: z.boolean(),
@@ -1670,12 +1718,6 @@ export interface DecisionQuestion {
    * none where the question takes the person's words for a principle alone.
    */
   choices: readonly DecisionChoice[];
-  options: {
-    title: string;
-    detail: string;
-    recommended?: boolean;
-    metadata?: string[];
-  }[];
 }
 /** What one card or row can say about a ticket's work without opening it (S4, S5). */
 export interface TaskSummary {
@@ -1696,7 +1738,7 @@ export interface UsageWindow {
   resetsAt: string | null;
 }
 export interface UsageProvider {
-  id: "claude" | "codex" | "anthropic";
+  id: "claude" | "codex" | "opencode" | "anthropic";
   name: string;
   role: string | null;
   /** Signed in on this machine, whether or not the provider reports a window. */
@@ -1785,7 +1827,9 @@ export interface ReplyMap {
   publish: Job;
   principle: Job;
   decide: Job;
+  decisionOptions: DecisionOptionsVerdict;
   verdict: Job;
+  egressAnswer: null;
   cancel: null;
   openRepository: null;
   openWorktree: null;

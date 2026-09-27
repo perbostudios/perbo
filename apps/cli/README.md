@@ -9,7 +9,7 @@ It runs on your machine, on your own model credential.
 
 ## Quick start
 
-Before the first command, `doctor` checks your machine: Node 22 or newer; the package manager your repository installs with — missing it, `doctor` reports `install_binary_missing` and names what to get; a coding agent, `claude-cli` by default or `codex-cli` at 0.145.0 or later, already signed in; set `ANTHROPIC_API_KEY` to run the reviewer against a hosted Anthropic key instead of that local agent; and, once you publish, the GitHub CLI signed in (`gh auth login`).
+Before the first command, `doctor` checks your machine: Node 22 or newer; the package manager your repository installs with — missing it, `doctor` reports `install_binary_missing` and names what to get; a coding agent, `claude-cli` by default, `codex-cli` at 0.145.0 or later, already signed in, or `opencode-cli`, OpenCode 2.0.14 or later, which needs no sign-in and runs on `OPENCODE_API_KEY` or OpenCode's free models (D-NEW-opencode-is-a-provider); set `ANTHROPIC_API_KEY` to run the reviewer against a hosted Anthropic key instead of that local agent; and, once you publish, the GitHub CLI signed in (`gh auth login`).
 
 In the repository you want changed, once the binary is installed:
 
@@ -94,7 +94,7 @@ what leaves the machine, uninstall — is [`docs/install.md`](../../docs/install
 | `verdict` | Records your endorse or override on a stop, accept or reject on a finding, or your answer to a finding routed to you, which closes it |
 | `run` | Runs the loop end to end: write, check, review, fix, and — with `--publish` — open the pull request |
 
-`admit`, `approve`, `edit`, `list`, `sync`, `serve`, `agent`, `interview`, `drift`, `mcp`, `stops`, `escapes` and `principle` build a ticket queue across many repositories on top of the same loop. `index` is the one command that reads your code rather than your records. `perbo --help` has every command and flag; [docs/04](../../docs/04-ticket-workspace-and-review.md) is the specification.
+`admit`, `approve`, `edit`, `list`, `sync`, `serve`, `agent`, `interview`, `drift`, `options`, `mcp`, `stops`, `escapes` and `principle` build a ticket queue across many repositories on top of the same loop. `index` is the one command that reads your code rather than your records. `perbo --help` has every command and flag; [docs/04](../../docs/04-ticket-workspace-and-review.md) is the specification.
 
 ## Commands
 
@@ -119,8 +119,9 @@ perbo sync <local run id>
 perbo serve [--publish] [--interval 60s] [--once] [--json] [--no-endpoint]
 perbo mcp [--drafter] [--json]
 perbo agent [--provider claude|codex] [-- <provider args>]
-perbo interview --repo . --spec specs/<slug> [--session <id>] [--model <id>] [--provider claude|codex]
-perbo drift PRB-1 --repo . [--provider anthropic|claude-cli|codex-cli] [--model <id>] [--dismiss] [--json]
+perbo interview --repo . --spec specs/<slug> [--session <id>] [--model <id>] [--provider claude|codex|opencode]
+perbo drift PRB-1 --repo . [--provider anthropic|claude-cli|codex-cli|opencode-cli] [--model <id>] [--dismiss] [--json]
+perbo options PRB-1 --finding <finding key> [--finding <finding key>]… [--provider anthropic|claude-cli|codex-cli|opencode-cli] [--model <id>] [--json]
 perbo stops [--json] [--since <ISO date>] [--by-week]
 perbo verdict <review> --endorse|--override <stop key> [--note "..."] [--replace]
 perbo verdict <review> --accept|--reject <finding key> [--note "..."] [--replace]
@@ -168,10 +169,10 @@ head from and whether that was a `fork` or the `same_repository` (SCP-211).
 `interview` is where a piece of work starts. It runs your own session, in this checkout, oriented
 with the bundled grilling and domain-modelling skills, to question you until the intent is sharp and
 write it down: `specs/<slug>/spec.md`, with any terms in `CONTEXT.md` and any decision that crosses
-components as an ADR. `--provider claude` runs Claude Code through the Claude Agent SDK and
-`--provider codex` runs Codex through `codex app-server`; the interview's rules are the same behind
-either. It reads anything and runs read-only commands; that spec's own folder, `CONTEXT.md` and the
-ADR folder are the only places it may write, and a write outside them is refused rather than put to
+components as an ADR. `--provider claude` runs Claude Code through the Claude Agent SDK,
+`--provider codex` runs Codex through `codex app-server` and `--provider opencode` runs OpenCode
+through `opencode acp`; the interview's rules are the same behind each. It reads anything and runs
+read-only commands; that spec's own folder, `CONTEXT.md` and the ADR folder are the only places it may write, and a write outside them is refused rather than put to
 you — there are no permission prompts, and a refusal is streamed and printed with the rule that
 refused it. It writes the spec's `#` line as a title, named as a ticket is and shown the other tickets' names
 (D-127), and admission rewrites it to the ticket's name unless it is given `--keep-title` (D-127). It writes the spec and stops there: drafting one ticket from it is yours, through
@@ -182,8 +183,13 @@ of questions with the answers to pick from, and returns rather than waiting, so 
 an ordinary turn in the option's own words. It cannot approve, publish or merge: there is no tool for
 any of the three. Your turns arrive as JSON lines on stdin and every event leaves as one on stdout, so a
 host can relay it; the session id is printed and kept in `.interview.json` beside the spec, and
-`--session <id>` continues the conversation — the SDK's own session on Claude, and the app server's
-thread resume on Codex. On Codex the session runs on your login and none of the rest of your Codex
+`--session <id>` continues the conversation — the SDK's own session on Claude, the app server's
+thread resume on Codex, and ACP's `session/resume` on OpenCode, whose sessions are kept outside the
+checkout in `~/.perbo/opencode/`, a directory per repository the chat refuses to start in where it
+holds anything Perbo does not recognise from OpenCode 2.0.14. On OpenCode the session reads none of your OpenCode configuration or data,
+every command, file change and read outside the checkout is put to the interview's rules, and a
+refusal ends OpenCode's turn, so the transport starts the next one with it
+(D-NEW-opencode-is-a-provider). On Codex the session runs on your login and none of the rest of your Codex
 configuration, because a tool server or an approval rule in it would decide a call before the
 interview's rules were consulted, and every approval the app server asks for is answered by those
 rules; anything it asks that they do not admit, an escalation for the rest of the session included,
@@ -571,7 +577,11 @@ same reading under `corpus_cache`, with `state`, `cached_commit`, `scored_commit
 attempt, so it never moves the exit code.
 
 A checkout with no `.perbo/config.json` is shown a proposed one — checks from the scripts
-`package.json` declares, the materialisation manifest the diagnostic proposed with a portable
+`package.json` declares, `model` as Claude Opus 5.5 where the agent binary's catalog offers it
+(asked with one `initialize` request that starts no turn) and Claude Opus 5 where it does not or
+cannot say — with `reviewer_model` pinned to Claude Opus 5 beside Opus 5.5, because the reviewer
+keeps its default until a regression-suite run makes another model the default (D-010) — the
+materialisation manifest the diagnostic proposed with a portable
 `source_checkout`, and every default limit written out so each has a key to raise.
 `--write-config` writes it. It never overwrites a file that exists.
 

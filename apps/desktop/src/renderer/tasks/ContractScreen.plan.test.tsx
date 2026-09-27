@@ -179,3 +179,30 @@ describe("the marks on a basic ticket's contract (D-128)", () => {
     }
   });
 });
+
+describe("the models on a basic ticket's contract while its planning writes", () => {
+  /**
+   * A choice made while the planning's editor is writing would reach the
+   * ticket but not the planning, and that write would put the old models
+   * back, so the pickers are held until it is done and say why.
+   */
+  it("holds the pickers while a criterion is being written, and offers them otherwise", async () => {
+    const context = await contextFor({ flat: true, approved: false });
+    const request = sampleBridge.request.bind(sampleBridge);
+    vi.spyOn(sampleBridge, "request").mockImplementation(((input: Parameters<typeof request>[0]) =>
+      input.kind === "editingSubmit" ? new Promise(() => undefined) : request(input)) as typeof sampleBridge.request);
+    mount(<InPlanning {...context} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit criterion 1" }, { timeout: 5000 }));
+    const executor = screen.getByRole("button", { name: "Change executor model" }) as HTMLButtonElement;
+    expect(executor.disabled).toBe(false);
+    expect(screen.queryByText("The models can be changed once the planning has written this contract.")).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Criterion 1" }), {
+      target: { value: "The importer and its routes are gone, and nothing links to them." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("The models can be changed once the planning has written this contract.");
+    expect((screen.getByRole("button", { name: "Change executor model" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Change reviewer model" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+

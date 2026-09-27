@@ -46,12 +46,12 @@ describe("runEnding", () => {
       ...overrides,
     }) as AttemptView;
   const terminated = (termination: string, ceilings: AttemptView["ceilings"] = []) =>
-    runEnding([job()], attempt({ termination, ceilings, reviewDecision: null }), "failed");
+    runEnding([job()], attempt({ termination, ceilings, reviewDecision: null }));
 
-  it("says nothing of a command that neither failed nor was cut off", () => {
-    expect(runEnding([job({ state: "completed", error: null })], attempt(), "pr_open")).toBeNull();
-    expect(runEnding([job({ state: "cancelled" })], attempt(), "cancelled")).toBeNull();
-    expect(runEnding([], undefined, "ready")).toBeNull();
+  it("says nothing of a command that neither failed, was cut off, nor was a run that was stopped", () => {
+    expect(runEnding([job({ state: "completed", error: null })], attempt())).toBeNull();
+    expect(runEnding([job({ kind: "publish", label: "Publish", state: "cancelled" })], attempt())).toBeNull();
+    expect(runEnding([], undefined)).toBeNull();
   });
 
   it("says a command Perbo closed on in the message it stored", () => {
@@ -59,39 +59,28 @@ describe("runEnding", () => {
       state: "interrupted",
       error: "Perbo closed before the command reported an outcome. Refresh the ticket from its CLI records before starting again.",
     });
-    expect(runEnding([cut], attempt(), "executing")).toEqual({
+    expect(runEnding([cut], attempt())).toEqual({
       job: cut,
       title: "The run ended",
-      sentence: "Perbo closed before the command reported an outcome.",
+      sentence: "Perbo closed while the run was going.",
       reason: cut.error,
       log: cut.error,
+      byPerson: false,
+      reasons: [{ text: "Perbo closed while the run was going.", detail: cut.error }],
     });
   });
 
-  it("reads the review's verdict off the attempt the run recorded, and not the log", () => {
-    expect(runEnding([job()], attempt(), "changes_requested")).toMatchObject({
-      title: "The run ended",
-      sentence: "The review requested changes.",
-      log: null,
-    });
-  });
-
-  it("gives the review's open findings, in its own statements, as the fuller reason", () => {
-    const findings = [
-      { statement: "The letter names no date.", status: "open", blocking: true },
-      { statement: "A typo in the greeting.", status: "open", blocking: false },
-      { statement: "Already fixed.", status: "closed", blocking: true },
-    ];
-    const ended = runEnding(
-      [job()],
-      attempt({ review: { decision: "changes_requested", findings } as unknown as AttemptView["review"] }),
-      "changes_requested",
-    );
-    expect(ended?.reason).toBe(
-      "The independent review read the change against the contract and asked for changes to 2 things:\n" +
-        "1. The letter names no date. (holds the merge)\n" +
-        "2. A typo in the greeting.",
-    );
+  /**
+   * A review that asked for changes or put a decision to the person is a pause,
+   * which the host completes (`RUN_VERDICTS`). A run that failed with such a
+   * review on record failed for its command's own reason, which is what it says.
+   */
+  it("never says a run stopped because its review asked for changes or put a decision to the person", () => {
+    for (const decision of ["changes_requested", "escalate"]) {
+      const ended = runEnding([job({ error: "error: gh is not signed in" })], attempt({ reviewDecision: decision }));
+      expect(ended).toMatchObject({ sentence: "The run failed after the loop recorded its attempt.", reason: "gh is not signed in" });
+      expect(JSON.stringify(ended)).not.toMatch(/requested changes|escalated|put to you/);
+    }
   });
 
   it("says the agent changed nothing, rather than that it was terminated", () => {
@@ -162,74 +151,276 @@ describe("runEnding", () => {
     const failed = job({
       error: "review approve\nerror: the pull request could not be opened: gh is not signed in\nPRB-1 is now failed",
     });
-    expect(runEnding([failed], attempt({ reviewDecision: "approve" }), "ready")).toEqual({
+    expect(runEnding([failed], attempt({ reviewDecision: "approve" }))).toEqual({
       job: failed,
       title: "The run ended",
       sentence: "The review approved the change, and the run failed after it.",
       reason: "the pull request could not be opened: gh is not signed in\nPRB-1 is now failed",
       log: failed.error,
+      byPerson: false,
+      reasons: [
+        {
+          text: "The review approved the change, and the run failed after it.",
+          detail: "the pull request could not be opened: gh is not signed in\nPRB-1 is now failed",
+        },
+      ],
     });
-  });
-
-  it("says an escalation as the verdict it is, with the findings put to the person behind the i", () => {
-    const findings = [{ statement: "Which queue takes a bounce?", status: "open", blocking: true }];
-    const ended = runEnding(
-      [job()],
-      attempt({ reviewDecision: "escalate", review: { decision: "escalate", findings } as unknown as AttemptView["review"] }),
-      "changes_requested",
-    );
-    expect(ended).toMatchObject({ sentence: "The review escalated the change to you.", log: null });
-    expect(ended?.reason).toMatch(/put to you one thing:\n1\. Which queue takes a bounce\? \(holds the merge\)$/);
-  });
-
-  it("says findings left open by refinement as the verdict it is, listing them", () => {
-    const findings = [{ statement: "The date is still missing.", status: "open", blocking: true }];
-    const ended = runEnding(
-      [job()],
-      attempt({
-        outcome: "1 closure(s) still open",
-        reviewDecision: null,
-        review: { decision: "changes_requested", findings } as unknown as AttemptView["review"],
-      }),
-      "failed",
-    );
-    // The review on record asked for changes, so that is its verdict; with no
-    // decision on the attempt, the closures are what it says.
-    expect(ended?.log).toBeNull();
-    const closures = runEnding(
-      [job()],
-      attempt({ outcome: "1 closure(s) still open", reviewDecision: null, review: null }),
-      "failed",
-    );
-    expect(closures).toMatchObject({ sentence: "Refinement ended with findings still open.", log: null });
-    expect(closures?.reason).toBe("The refinement rounds ended with 1 closure(s) still open; the review on the ticket lists them.");
   });
 
   it("carries a failure that is not the loop's own verdict in the command's words", () => {
     const refused = job({ error: "PRB-14 was not touched: the run did not start because this machine is missing something it needs" });
     // The attempt on record is an earlier run's, from before this command started.
     const earlier = attempt({ startedAt: "2026-09-23T23:36:20.000Z" });
-    expect(runEnding([refused], earlier, "ready")).toEqual({
+    expect(runEnding([refused], earlier)).toEqual({
       job: refused,
       title: "The run ended",
       sentence: "The run ended before the loop recorded an attempt.",
       reason: refused.error,
       log: refused.error,
+      byPerson: false,
+      reasons: [{ text: "The run ended before the loop recorded an attempt.", detail: refused.error }],
     });
     // The CLI's own lines, where it marks them: each blocking check and what it did about them.
     const preflight = job({
       error: "  ✗ codex    not found\n  blocking  agent_binary_missing: the coding agent `codex` is not on PATH\n" +
         "           fix: install `codex`\nPRB-14 was not touched: the run did not start",
     });
-    expect(runEnding([preflight], earlier, "ready")?.reason).toBe(
+    expect(runEnding([preflight], earlier)?.reason).toBe(
       "agent_binary_missing: the coding agent `codex` is not on PATH\nPRB-14 was not touched: the run did not start",
     );
     const edit = job({ kind: "edit", label: "Save contract edits", error: "The contract changed since you opened it." });
-    expect(runEnding([edit], attempt(), "plan_review")).toMatchObject({
+    expect(runEnding([edit], attempt())).toMatchObject({
       title: "Save contract edits failed",
       sentence: "The contract changed since you opened it.",
       log: "The contract changed since you opened it.",
     });
+  });
+});
+
+/**
+ * The reasons the stopped page lists, one line each, read from the same
+ * records as the loop page's ended card, with the whole of each behind an `i`.
+ */
+describe("runEnding's reasons", () => {
+  const job = (overrides: Partial<Job> = {}): Job => ({
+    id: "job-1",
+    repoId: "repo",
+    key: "PRB-1",
+    kind: "run",
+    label: "Run engineering loop",
+    state: "failed",
+    startedAt: "2026-09-24T02:17:34.000Z",
+    endedAt: "2026-09-24T02:20:02.000Z",
+    log: "the whole run log",
+    error: "the whole run log",
+    resultKey: null,
+    result: null,
+    ...overrides,
+  });
+  const attempt = (overrides: Partial<AttemptView> = {}): AttemptView =>
+    ({
+      id: "att_1",
+      run: 1,
+      round: 0,
+      startedAt: "2026-09-24T02:17:38.000Z",
+      outcome: "terminated",
+      termination: "completed: the attempt ran to its end",
+      ceilings: [],
+      review: null,
+      reviewDecision: null,
+      ...overrides,
+    }) as AttemptView;
+  const reasons = (termination: string, overrides: Partial<AttemptView> = {}) =>
+    runEnding([job()], attempt({ termination, ...overrides }))?.reasons;
+
+  it("says the person's own stop, settled or still settling, whatever the attempt recorded as it was cut off", () => {
+    for (const state of ["cancelled", "stopping"] as const) {
+      const ended = runEnding([job({ state, error: null })], attempt({ termination: "cancelled: aborted" }));
+      expect(ended?.byPerson).toBe(true);
+      expect(ended?.reasons).toEqual([
+        {
+          text: "You stopped the run.",
+          detail: "The run was stopped from this desktop while its attempt was going, and the work that attempt had done is kept.",
+        },
+      ]);
+    }
+    // Stopped before the loop recorded an attempt of it.
+    const early = runEnding([job({ state: "cancelled" })], attempt({ startedAt: "2026-09-24T02:00:00.000Z" }));
+    expect(early?.reasons).toEqual([
+      { text: "You stopped the run.", detail: "The run was stopped from this desktop before the loop recorded an attempt of it." },
+    ]);
+    // A run that failed is not the person's stop, even where its attempt says cancelled.
+    expect(runEnding([job()], attempt({ termination: "cancelled: aborted" }))?.byPerson).toBe(false);
+  });
+
+  it("names the ceiling reached", () => {
+    expect(
+      reasons("wall_clock_exceeded: would reach 3900000", {
+        ceilings: [{ resource: "attempt_wall_clock_ms", used: 3_900_000, ceiling: 3_600_000, hit: true }],
+      }),
+    ).toEqual([
+      {
+        text: "The attempt ran for 65 minutes, past its 60-minute limit.",
+        detail:
+          "The attempt ran for 65 minutes, past its 60-minute limit. The runner stops an attempt at this limit, " +
+          "which the repository's configuration sets as `attempt_wall_clock_ms`; raise it there to let a run go further.",
+      },
+    ]);
+  });
+
+  it("names the host the agent reached for that the repository does not list", () => {
+    expect(reasons("unlisted_egress_host: registry.example.com is not on the resolved allow-list")).toEqual([
+      {
+        text: "The agent reached for registry.example.com, a host the repository does not list.",
+        detail:
+          "The runner ends an attempt whose agent reaches for a host outside the hosts the repository lists for its " +
+          "executor. It recorded: registry.example.com is not on the resolved allow-list",
+      },
+    ]);
+    expect(reasons("unlisted_egress_host: Command requested a host outside the network allow-list")?.[0]?.text).toBe(
+      "The agent reached for a host the repository does not list.",
+    );
+    // Asked about, and nobody answered in time.
+    expect(
+      reasons(
+        "unlisted_egress_host: registry.example.com is not on the resolved allow-list, and nobody answered whether to allow it within 20 minute(s)",
+      )?.[0]?.text,
+    ).toBe("The agent reached for registry.example.com, a host the repository does not list, and nobody answered whether to allow it.");
+  });
+
+  it("gives each command the guard refused a line of its own, with the command", () => {
+    expect(
+      reasons(
+        "prohibited_action: write_outside_worktree: a redirect to /tmp/out_1: echo a > /tmp/out_1; ls; " +
+          "destructive_git: rewriting history: git push --force",
+      ),
+    ).toEqual([
+      {
+        text: "The guard refused `echo a > /tmp/out_1; ls`, a write outside the worktree.",
+        detail:
+          "The guard refused the command `echo a > /tmp/out_1; ls`: it read it as a redirect to /tmp/out_1, " +
+          "which is a write outside the worktree.\nSo it ended the attempt.",
+      },
+      {
+        text: "The guard refused `git push --force`, a destructive git operation.",
+        detail:
+          "The guard refused the command `git push --force`: it read it as rewriting history, which is a destructive git operation.\nSo it ended the attempt.",
+      },
+    ]);
+  });
+
+  it("says a provider error, the executor's and the reviewer's", () => {
+    expect(reasons("transport_unavailable: HTTP 529 overloaded")).toEqual([
+      {
+        text: "The model provider was unavailable, so the attempt ended without doing the work.",
+        detail:
+          "The provider kept answering that it could not take the request until the agent's retries ran out. It recorded: HTTP 529 overloaded",
+      },
+    ]);
+    expect(reasons("agent_error: exited 1")?.[0]?.text).toBe("The agent exited with an error.");
+    const unreached = runEnding(
+      [job()],
+      attempt({
+        reviewDecision: "error",
+        review: {
+          decision: "error",
+          findings: [],
+          error: { kind: "provider_unavailable", message: "claude exited 1" },
+        } as unknown as AttemptView["review"],
+      }),
+    );
+    expect(unreached?.reasons).toEqual([
+      { text: "The reviewer's model provider was unavailable, so the change was not reviewed.", detail: "claude exited 1" },
+    ]);
+  });
+
+  /**
+   * A run the CLI refused by a limit is said in Perbo's words: where the
+   * number comes from — the repository's .perbo/config.json and its key, or
+   * Perbo's default that key overrides — and never the CLI's line as it was.
+   */
+  it("says a run refused by the repository's limit on runs at once, and that another ticket's run was going (D-049)", () => {
+    const refused = job({
+      error:
+        "the run was refused by a limit: concurrent_local_attempts would reach 2, above the limit of 1. " +
+        "Raise limits.limits.concurrent_local_attempts in .perbo/config.json to allow it.",
+    });
+    const ended = runEnding([refused], undefined);
+    expect(ended).toMatchObject({
+      sentence:
+        "The run did not start: this repository's configuration allows one run at a time on this machine, and a run of another ticket was going.",
+      reason:
+        "Runs of different tickets go side by side unless a repository's own configuration names a number. " +
+        "This repository's .perbo/config.json sets limits.limits.concurrent_local_attempts to 1, and a run of another " +
+        "ticket was going when this one was started, so it was refused before anything ran. Raise the number there, " +
+        "or remove limits.limits.concurrent_local_attempts, to let runs go side by side.",
+      log: null,
+    });
+    expect(ended?.reasons).toEqual([{ text: ended!.sentence, detail: ended!.reason }]);
+    const three = job({ error: "the run was refused by a limit: concurrent_local_attempts would reach 4, above the limit of 3. Raise it." });
+    expect(runEnding([three], undefined)?.sentence).toBe(
+      "The run did not start: this repository's configuration allows 3 runs at a time on this machine, and 3 runs of other tickets were going.",
+    );
+  });
+
+  it("says a repository that allows no runs at all, and blames no other ticket's run", () => {
+    const zero = job({ error: "the run was refused by a limit: concurrent_local_attempts would reach 1, above the limit of 0. Raise it." });
+    expect(runEnding([zero], undefined)).toMatchObject({
+      sentence: "The run did not start: this repository's configuration allows no runs at all on this machine.",
+      reason:
+        "This repository's .perbo/config.json sets limits.limits.concurrent_local_attempts to 0, so no run starts on " +
+        "this machine, whatever else is going. Raise the number there, or remove limits.limits.concurrent_local_attempts, to let runs start.",
+    });
+  });
+
+  it("says every other limit refusal by what it bounds, and whose number it is", () => {
+    const said = (line: string) => runEnding([job({ error: line })], undefined);
+    // A number only the repository sets.
+    expect(said("the run was refused by a limit: attempt_commands would reach 41, above the limit of 40. Raise it.")).toMatchObject({
+      sentence: "The run was refused by a limit on the commands one attempt may run: it would reach 41 commands, above the limit of 40 commands.",
+      reason:
+        "This repository's .perbo/config.json sets limits.limits.attempt_commands to 40 commands. The run was refused " +
+        "where it would have gone past it. Raise limits.limits.attempt_commands in .perbo/config.json to let a run go further.",
+      log: null,
+    });
+    // A number that is Perbo's default unless the repository names it.
+    expect(said("the run was refused by a limit: remediation_rounds would reach 7, above the limit of 6. Raise it.")).toMatchObject({
+      sentence: "The run was refused by a limit on the refinement rounds one ticket may take: it would reach 7 rounds, above the limit of 6 rounds.",
+      reason:
+        "The limit is 6 rounds: Perbo's own unless this repository's .perbo/config.json names limits.limits.remediation_rounds, " +
+        "which then sets it. The run was refused where it would have gone past it. Raise limits.limits.remediation_rounds " +
+        "in .perbo/config.json to let a run go further.",
+    });
+    expect(said("the run was refused by a limit: ticket_cost_micros would reach 61000000, above the limit of 60000000. Raise it.")?.sentence).toBe(
+      "The run was refused by a limit on what one ticket may spend: it would reach $61.00, above the limit of $60.00.",
+    );
+    // A kill switch, named by its key.
+    expect(
+      said("the run was refused by a limit: provider anthropic is disabled by kill switch. Clear the kill switch in the limits table to allow it."),
+    ).toMatchObject({
+      sentence: "The run was refused: a kill switch in this repository's configuration is on.",
+      reason:
+        "This repository's .perbo/config.json turns on limits.kill_switches.disabled_providers, which names the provider " +
+        "anthropic. Turn it off there to let a run start.",
+      log: null,
+    });
+    // A limit this does not know keeps the command's own words.
+    expect(said("the run was refused by a limit: seats would reach 2, above the limit of 1. Raise it.")?.sentence).toBe(
+      "The run ended before the loop recorded an attempt.",
+    );
+  });
+
+  it("says an attempt that did not complete", () => {
+    expect(reasons("workspace_error: the worktree could not be made")).toEqual([
+      {
+        text: "The attempt was terminated: workspace error.",
+        detail: "The runner ended the attempt (workspace error). It recorded: the worktree could not be made.",
+      },
+    ]);
+    const none = runEnding([job({ error: "error: the CLI could not start" })], undefined);
+    expect(none?.reasons).toEqual([
+      { text: "The run ended before the loop recorded an attempt.", detail: "the CLI could not start" },
+    ]);
   });
 });
 

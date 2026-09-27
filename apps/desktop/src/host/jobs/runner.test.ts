@@ -9,7 +9,7 @@ import type { Change, Job } from "../../shared/protocol.js";
 import { runnerProgress, spokenWords } from "../../shared/runner-progress.js";
 import { spokenLine } from "@perbo/contracts/browser";
 import { LOG_TAIL_CHARS, type ProcessResult } from "../process.js";
-import type { RegisteredRepository } from "../profile/store.js";
+import { CLOSED_MID_COMMAND, type RegisteredRepository } from "../profile/store.js";
 
 const scratchDirectory = createScratch("perbo-runner-");
 afterEach(() => {
@@ -80,7 +80,7 @@ function runner(
       return settle();
     },
   });
-  return { jobs, profile, told, logs, order, runs, started, changes };
+  return { jobs, profile, told, logs, order, runs, started, changes, directory };
 }
 /** Waits until every job has settled, which is what the runner's own promises do. */
 async function quiet(jobs: JobRunner): Promise<void> {
@@ -376,7 +376,12 @@ describe("shutdown", () => {
     expect(w.jobs.live()).toEqual([]);
   });
 
-  it("aborts every lane, and marks each job it closed cancelled", async () => {
+  /**
+   * Perbo closing, quit or crashed, is one event to the work: a job the quit
+   * cut off ends `interrupted`, as the profile marks one a crash left running,
+   * with the same words for its error.
+   */
+  it("aborts every lane, and marks each job it closed interrupted, as a crash leaves it", async () => {
     const w = runner();
     const aborted: string[] = [];
     const lanes = [
@@ -395,7 +400,84 @@ describe("shutdown", () => {
     for (const one of held) one.finish();
     await closing;
     expect([...aborted].sort()).toEqual(["admit", "run"]);
-    expect(jobs.map((job) => job.state)).toEqual(["cancelled", "cancelled"]);
+    expect(jobs.map((job) => job.state)).toEqual(["interrupted", "interrupted"]);
+    expect(jobs.map((job) => job.error)).toEqual([CLOSED_MID_COMMAND, CLOSED_MID_COMMAND]);
     expect(w.jobs.live()).toEqual([]);
+  });
+
+  it("keeps a stop the person asked for before Perbo closed as their stop", async () => {
+    const w = runner();
+    const held = pending();
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, held.operation);
+    await held.started;
+    w.jobs.cancel(job.id);
+    const closing = w.jobs.shutdown();
+    held.finish();
+    await closing;
+    expect(job.state).toBe("cancelled");
+  });
+
+  it("marks a job the person stopped while Perbo stays open cancelled", async () => {
+    const w = runner();
+    const held = pending();
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, held.operation);
+    await held.started;
+    w.jobs.cancel(job.id);
+    held.finish();
+    await quiet(w.jobs);
+    expect(job.state).toBe("cancelled");
+  });
+});
+
+/**
+ * `perbo run` exits 2 on a verdict for the person — the review asked for
+ * changes or put a decision to them, or refinement ran out or closed nothing —
+ * with its result on stdout. That run completed, paused for the person; exit 3
+ * and every other non-zero exit is the run failing.
+ */
+describe("a run's exit", () => {
+  const verdict = (outcome: string, code: number): ProcessResult => ({
+    code,
+    stdout: JSON.stringify({ ticket_id: "tkt_1", outcome, detail: "the review put a decision to the person" }),
+    stderr: "  ceilings commands none\n  egress allow-list: registry.npmjs.org\n  base pinned at 1234567",
+    cancelled: false,
+  });
+  let reopened: Profile | undefined;
+  const ended = async (result: ProcessResult, verdictRead: boolean): Promise<Job> => {
+    const w = runner(result);
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "--ticket", "PRB-1", "--json"], verdictRead ? { verdict: true } : {});
+    });
+    await quiet(w.jobs);
+    w.profile.save();
+    reopened = Profile.open(w.directory);
+    return job;
+  };
+
+  it.each(["changes_requested", "escalated", "remediation_exhausted", "remediation_stalled"])(
+    "completes a run that exits 2 on %s, with the outcome on the job and nothing as its error",
+    async (outcome) => {
+      const job = await ended(verdict(outcome, 2), true);
+      expect(job).toMatchObject({ state: "completed", outcome, error: null });
+      expect(job.result).toMatchObject({ outcome });
+      // Kept with the job through a restart.
+      expect(reopened!.state.jobs.find((entry) => entry.id === job.id)).toMatchObject({ state: "completed", outcome });
+    },
+  );
+
+  it("fails a run that did not complete, and any exit it is not asked to read as a verdict", async () => {
+    const failed = (job: Job): { state: Job["state"]; outcome: Job["outcome"] } => ({ state: job.state, outcome: job.outcome });
+    // Exit 3: the run did not complete.
+    expect(failed(await ended(verdict("terminated", 3), true))).toEqual({ state: "failed", outcome: undefined });
+    // Exit 2 with no verdict on stdout, or one that is not a verdict for the person.
+    const refused = await ended({ code: 2, stdout: "", stderr: "error: refused", cancelled: false }, true);
+    expect(failed(refused)).toEqual({ state: "failed", outcome: undefined });
+    expect(refused.error).toBe("error: refused");
+    expect(failed(await ended(verdict("terminated", 2), true))).toEqual({ state: "failed", outcome: undefined });
+    // A stopped process that exited 2 with a verdict on stdout is no verdict.
+    const cut = await ended({ ...verdict("escalated", 2), cancelled: true }, true);
+    expect(cut.outcome).toBeUndefined();
+    // Another command's exit 2 is its own failure.
+    expect(failed(await ended(verdict("escalated", 2), false))).toEqual({ state: "failed", outcome: undefined });
   });
 });

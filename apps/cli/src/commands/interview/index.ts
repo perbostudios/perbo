@@ -15,7 +15,6 @@ import {
   type PlanContract,
 } from "@perbo/contracts";
 import {
-  INTERVIEW_SAID_MAX_CHARS,
   InterviewQuestionGroupSchema,
   MAX_QUESTION_GROUPS,
   decodeInterviewTurn,
@@ -821,11 +820,11 @@ function judgedInvocations(command: string, name: string, scope: WorktreeScope):
 }
 
 /**
- * The two sessions the interview runs on, spelled as `perbo agent` spells
- * them: the person's own Claude Code through the Claude Agent SDK, and their
- * own Codex through `codex app-server` (D-102).
+ * The three sessions the interview runs on: the person's own Claude Code
+ * through the Claude Agent SDK, their own Codex through `codex app-server`
+ * (D-102), and OpenCode through `opencode acp` (D-NEW-opencode-is-a-provider).
  */
-export const INTERVIEW_PROVIDERS = ["claude", "codex"] as const;
+export const INTERVIEW_PROVIDERS = ["claude", "codex", "opencode"] as const;
 export type InterviewProvider = (typeof INTERVIEW_PROVIDERS)[number];
 
 export interface InterviewArgs {
@@ -1846,8 +1845,14 @@ about to look is a line they read for nothing. The spec is on the screen beside 
 away, both of them better read there than described here, and a summary of them buries the one line
 that did need reading. When the spec is first written, before there is a plan, say nothing more: the
 app says so, and the plan is theirs to generate from it. Once there is a plan, say what is ready for
-them to approve, in a sentence. A message runs to ${INTERVIEW_SAID_MAX_CHARS.toLocaleString("en-US")} characters at most, which
-is all the chat holds: write concisely, and a message past that is handed back to you to condense.
+them to approve, in a sentence.
+
+Hold every message to that. A message is two sentences at most, none where nothing needs them, and a
+question is one sentence. No preamble, no recap, no list of what you wrote or read, and no offer of
+what you could do next. A group of questions goes through ask_options and is read on its card, so
+the message beside it is at most one sentence on why the questions arise, and never restates a
+question, an option or your pick. A message longer than the chat holds is handed back to you to
+condense.
 
 ${namesBlock(input.names)}`;
   return withExecutorSkills(base, [...INTERVIEW_SKILLS]).prompt;
@@ -2233,6 +2238,16 @@ async function loadInterviewTransport(
   if (provider === "codex") {
     const { codexInterviewTransport } = await import("./codex.js");
     return codexInterviewTransport({ binary: "codex" });
+  }
+  if (provider === "opencode") {
+    const { openCodeDataDirectory, openCodeInterviewTransport } = await import("./opencode.js");
+    // Perbo's own directory for this repository's OpenCode sessions, outside
+    // the checkout, so `--session` continues one and nothing the repository
+    // carries reaches the database OpenCode keeps approvals in.
+    return openCodeInterviewTransport({
+      binary: process.env.PERBO_OPENCODE_BINARY ?? "opencode",
+      dataDirectory: openCodeDataDirectory(repositoryRoot),
+    });
   }
   const { claudeInterviewTransport, loadInterviewSdk, resolveClaudeExecutable } = await import(
     "./claude.js"

@@ -419,7 +419,7 @@ export function ReviewScreen(context: TaskContext) {
 }
 export function OutputScreen(context: TaskContext) {
   const { detail, repoId, show } = context,
-    { ticket, jobs, active, latest } = taskRecords(context);
+    { ticket, jobs, active, latest, recoverable } = taskRecords(context);
   const [tab, setTab] = useState("Transcript"),
     [copied, setCopied] = useState(false),
     [follow, setFollow] = useState(true);
@@ -635,8 +635,9 @@ export function OutputScreen(context: TaskContext) {
         >
           {copied ? "Copied" : "Copy transcript"}
         </Button>
+        {/* A stopped ticket's loop is the paused one its stopped page opened. */}
         <Button variant="primary" onClick={() => show("loop")}>
-          Back to the loop
+          {recoverable ? "Back to the paused loop" : "Back to the loop"}
         </Button>
       </PageFooter>
       {action.error && (
