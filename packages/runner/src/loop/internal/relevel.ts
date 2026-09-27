@@ -209,6 +209,7 @@ export async function judgeRelevel(
     node_reviews,
     // Nothing was sealed by this run, so nothing was excluded from a seal.
     sealed: { excluded_paths: [] },
+    attempt_id: null,
     round: 0,
     remediation_available: false,
   });

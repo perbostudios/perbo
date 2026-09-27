@@ -4,6 +4,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
+  admittedCommands,
   invocationShapeHash,
   type BriefReinjection,
   type CommandRecord,
@@ -372,8 +373,13 @@ export async function runCodexAgent(
    * counts as written once the runner has admitted that change.
    */
   const writtenBy = new Map<CommandRecord, string[]>();
-  /** The attempt's figures so far, to whoever tallies the run (D-104). Codex reports no dollars. */
-  const tell = (): void => {
+  /**
+   * The attempt's figures so far, to whoever tallies the run (D-104). Codex
+   * reports no dollars. A command counts once the runner has admitted it; one
+   * Codex ran without asking counts once the turn is over, when the record it
+   * keeps holds it as allowed.
+   */
+  const tell = (over = false): void => {
     if (request.onTally === undefined) return;
     const written = new Set<string>();
     for (const [entry, paths] of writtenBy) {
@@ -382,7 +388,9 @@ export async function runCodexAgent(
     }
     const total = usage.total();
     request.onTally({
-      commands: commands.length,
+      commands: admittedCommands(
+        over ? commands : commands.filter((entry) => entry.decided_by === "runner_admission"),
+      ),
       input_tokens: total.inputTokens,
       output_tokens: total.outputTokens,
       cost_micros: 0,
@@ -723,7 +731,7 @@ export async function runCodexAgent(
     process.removeListener("SIGTERM", cancel);
     process.removeListener("SIGINT", cancel);
   }
-  tell();
+  tell(true);
   return {
     invocation: {
       adapter: "codex",

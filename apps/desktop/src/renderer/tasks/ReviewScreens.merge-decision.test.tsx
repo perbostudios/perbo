@@ -40,9 +40,10 @@ describe("the merge screen after Merge on GitHub", () => {
     const detail = await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: KEY });
     sample = { workspace, detail, repoId: row.repoId };
   });
-  const syncJob = (state: Job["state"]): Job =>
+  /** A check of GitHub; the press's own is `sync-1`, which the host answers the request with. */
+  const syncJob = (state: Job["state"], id = "sync-1"): Job =>
     ({
-      id: "sync-" + state,
+      id,
       repoId: sample.repoId,
       key: KEY,
       kind: "sync",
@@ -144,6 +145,29 @@ describe("the merge screen after Merge on GitHub", () => {
     // A check that failed says why.
     page.rerender([syncJob("failed")]);
     expect(screen.getByText(/gh: not signed in/)).toBeTruthy();
+  });
+
+  it("reads only the checks this press asked for, never one an earlier visit left completed or failed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const page = mergeScreen();
+    const earlier = [syncJob("failed", "sync-earlier"), syncJob("completed", "sync-before")];
+    page.rerender(earlier);
+    await press();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await wait(0);
+    expect(page.syncs()).toBe(1);
+    // The check the return asked for is still running: nothing is said of the pull request yet.
+    expect(screen.queryByText(/still open on GitHub/)).toBeNull();
+    expect(screen.queryByText(/gh: not signed in/)).toBeNull();
+    page.rerender([...earlier, syncJob("running")]);
+    expect(screen.queryByText(/still open on GitHub/)).toBeNull();
+    page.rerender([...earlier, syncJob("completed")]);
+    expect(screen.getByText("The pull request is still open on GitHub. Merge it there, then refresh its status here.")).toBeTruthy();
+    // Pressed again, the page reads only what that press asks for.
+    await press();
+    expect(screen.queryByText(/still open on GitHub/)).toBeNull();
   });
 });
 
@@ -302,9 +326,13 @@ describe("the merge decision's pages", () => {
     const app = await mergedPage();
     fireEvent.click(screen.getByRole("button", { name: "Create another ticket" }));
     const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
-    // The picker is over the page: nothing is left yet, and nothing filed.
+    // The picker is over the page, which holds the timed return while the
+    // person chooses: past its three seconds nothing is left, and nothing filed.
+    expect(screen.getByText("Staying here until you go.")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    expect(location.hash).not.toBe("#home");
     expect(screen.getByRole("heading", { name: "example/webstore#418 is merged" })).toBeTruthy();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("dialog", { name: "Plan a piece of work" })).toBe(picker);
     expect(app.archives()).toEqual([]);
     fireEvent.click(picker.querySelector<HTMLElement>(".picker-row")!);
     await waitFor(() => expect(screen.queryByRole("heading", { name: "example/webstore#418 is merged" })).toBeNull());

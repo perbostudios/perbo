@@ -12,7 +12,9 @@ import { delimiter, join, resolve, toNamespacedPath } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LIMITS_TABLE, LimitExceededError, LimitsTableSchema } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
+import { hostname } from "node:os";
 import {
+  LOCAL_LEASE_CAP_MS,
   WorkspaceError,
   cleanup,
   leaseIsStale,
@@ -214,6 +216,62 @@ describe("leases", () => {
     };
     expect(leaseIsStale(lease, new Date("2020-01-02T00:00:00.000Z"))).toBe(true);
     expect(leaseIsStale(lease, new Date("2020-01-01T00:30:00.000Z"))).toBe(false);
+  });
+
+  const local = (pid: number, created: Date) => ({
+    attempt_id: "a",
+    root_attempt_id: "a",
+    repository_id: "repo_x",
+    branch: "ayo/x/y",
+    path: "/tmp/x",
+    base_commit: "abc1234",
+    created_at: created.toISOString(),
+    expires_at: new Date(created.getTime() + 60 * 60 * 1000).toISOString(),
+    pid,
+    host: hostname(),
+    port_range_start: null,
+    port_range_end: null,
+  });
+
+  it("holds a lease on this host while its process lives, past its time, up to the cap", () => {
+    const created = new Date();
+    const lease = local(process.pid, created);
+    expect(leaseIsStale(lease, new Date(created.getTime() + 2 * 60 * 60 * 1000))).toBe(false);
+    expect(leaseIsStale(lease, new Date(created.getTime() + LOCAL_LEASE_CAP_MS - 1))).toBe(false);
+  });
+
+  it("counts a lease on this host stale once the cap has passed, even if its process id answers", () => {
+    const created = new Date();
+    expect(LOCAL_LEASE_CAP_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(leaseIsStale(local(process.pid, created), new Date(created.getTime() + LOCAL_LEASE_CAP_MS))).toBe(true);
+  });
+
+  it("counts a lease on this host stale once its process is gone", () => {
+    const departed = spawnSync(process.execPath, ["-e", ""], { stdio: "ignore" });
+    expect(leaseIsStale(local(departed.pid!, new Date()), new Date())).toBe(true);
+  });
+
+  it("holds a lease whose process this user may not signal, which is still a process", () => {
+    // pid 1 is always running; a non-root user asking it gets EPERM, root gets an answer.
+    expect(leaseIsStale(local(1, new Date()), new Date())).toBe(false);
+  });
+
+  it("takes a continued lease anew, so the cap counts from the process that holds it now", async () => {
+    const repo = workspaceRepository(scratch);
+    const root = scratch();
+    const first = new Date();
+    await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1", now: first });
+    const later = new Date(first.getTime() + 60 * 60 * 1000);
+    const second = await provision({
+      ...base(repo.dir, repo.head, root),
+      attempt_id: "att_2",
+      continues: { root_attempt_id: "att_1" },
+      now: later,
+    });
+    expect(second.continued).toBe(true);
+    const [lease] = listLeases(root);
+    expect(lease?.created_at).toBe(later.toISOString());
+    expect(leaseIsStale(lease!, new Date(first.getTime() + LOCAL_LEASE_CAP_MS + 30 * 60 * 1000))).toBe(false);
   });
 
   it("reclaims a stale worktree so its branch can be provisioned again", async () => {

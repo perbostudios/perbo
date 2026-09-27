@@ -11,7 +11,11 @@
  * This module imports nothing, so a browser bundle can carry it.
  */
 export interface Tally {
-  /** The commands the run's attempts asked for, as their records count them. */
+  /**
+   * The commands the run's attempts were let run: the ones their records hold
+   * as allowed (`admittedCommands`), never one the guard or the agent's own
+   * permission layer refused.
+   */
   commands: number;
   /** The paths the run changed that no earlier attempt on the ticket's record had. */
   files: number;
@@ -25,6 +29,15 @@ export interface Tally {
   unpriced: number;
   /** Priced components that are a charge up to a stop rather than a total. */
   partial: number;
+}
+
+/**
+ * How many of an attempt's commands were admitted: the entries its record holds
+ * as allowed. One rule for the tally a run prints, the record it ends on and
+ * the loop page that reads either (D-104).
+ */
+export function admittedCommands(commands: readonly { decision: string }[]): number {
+  return commands.filter((command) => command.decision === "allowed").length;
 }
 
 const TALLY =

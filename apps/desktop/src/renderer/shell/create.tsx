@@ -404,25 +404,32 @@ export function confirmDelete(stage: "name" | "spec" | "plan", title: string): s
 
 /**
  * What to ask before an archived ticket is deleted, in the picker's words for
- * the stage it is at: what the host's delete takes — the ticket, its contract
- * and plan, the attempts it recorded, the evidence they sealed and, where it
- * was drafted from one, the spec folder — and what it leaves, the branch it
- * ran on and a pull request on GitHub, which are git's and GitHub's (D-129).
+ * the stage it is at, saying exactly what the host's delete does (D-129): it
+ * takes the ticket, its contract and plan, the attempts it recorded and the
+ * evidence they sealed, and the spec folder it was drafted from only where no
+ * other ticket or open planning names it (`removeSpecFolder`). It leaves the
+ * branch the ticket ran on and its pull request, which are git's and
+ * GitHub's, and any worktree a run left, which the next provisioning
+ * reclaims. The branch is named where the ticket's delivery or its attempts
+ * record one (`recordedBranch`, the summary's); where neither does, or the
+ * summary is not read yet, it is "any branch it left".
  */
 export function confirmDeleteFiled(
   title: string,
   ticket: { admission: { spec?: { path?: string } | null }; delivery: { branch?: string | null; pull_request_url?: string | null } },
+  recordedBranch?: string | null,
 ): string {
   const named = title.trim().length > 0 ? `“${title.trim()}”` : "this ticket";
-  const spec = ticket.admission.spec?.path ? ", and the spec folder it came from" : "";
+  const spec = ticket.admission.spec?.path ? ", with the spec folder it came from when nothing else names it," : "";
+  const branch = ticket.delivery.branch ?? recordedBranch ?? null;
   const left = [
-    ...(ticket.delivery.branch ? [`the branch ${ticket.delivery.branch} in git`] : []),
+    branch === null ? "any branch it left in git" : `the branch ${branch} in git`,
     ...(ticket.delivery.pull_request_url ? ["its pull request on GitHub"] : []),
   ];
   return (
     `Delete ${named}? It is archived: its ticket, contract and plan, every attempt it recorded and ` +
-    `the evidence those attempts sealed${spec} all go, and nothing of this is kept.` +
-    (left.length > 0 ? ` This leaves ${left.join(" and ")}.` : "")
+    `the evidence those attempts sealed${spec} all go, and nothing of this is kept. ` +
+    `This leaves ${left.join(" and ")}, and any worktree a run left, which is reclaimed later.`
   );
 }
 

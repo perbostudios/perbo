@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
+  admittedCommands,
   costOf,
   parseUnifiedDiff,
   rollCosts,
@@ -17,7 +18,7 @@ import { attemptBundles, type BundleStore } from "./bundle.js";
  * have moved; nothing in it is read from what the agent said (ADR-0023).
  */
 export interface AttemptTally {
-  /** The commands the attempt's record holds so far: the count it keeps once the attempt ends. */
+  /** The commands admitted so far (`admittedCommands`): the count its record comes to once the attempt ends. */
   commands: number;
   /** Input tokens as the provider has reported them so far. */
   input_tokens: number;
@@ -66,7 +67,7 @@ const NOTHING: Recorded = { commands: 0, paths: new Set(), input_tokens: 0, outp
  * them moves (`tallyLine` in `@perbo/contracts`, docs/15).
  *
  * An attempt of this run that is on record counts as the ticket's record counts
- * it: its commands from the attempt, its tokens and dollars from the bundles
+ * it: its admitted commands from the attempt, its tokens and dollars from the bundles
  * `attemptBundles` joins to it — the executor's, the review's and the closure
  * verification's — and its paths from the change set its execution bundle
  * retained, less every path an attempt before the run changed. So once the run
@@ -95,15 +96,7 @@ export class RunTally {
     this.progress = args.progress;
     const bundles = this.bundles.forTicket(this.ticketId);
     this.before = new Set(
-      args.before.flatMap((attempt) =>
-        this.changed(
-          {
-            attempt_id: attempt.attempt_id,
-            changeset_id: typeof attempt["changeset_id"] === "string" ? attempt["changeset_id"] : null,
-          },
-          bundles,
-        ),
-      ),
+      args.before.flatMap((attempt) => this.changed({ attempt_id: attempt.attempt_id }, bundles)),
     );
   }
 
@@ -130,7 +123,7 @@ export class RunTally {
     let output_tokens = 0;
     const costs: Cost[] = [];
     for (const attempt of attempts) {
-      commands += attempt.usage.commands;
+      commands += admittedCommands(attempt.commands);
       const joined = attemptBundles(attempt, bundles);
       for (const bundle of [joined.execution, joined.review, joined.verification]) {
         if (bundle === undefined) continue;
@@ -151,7 +144,7 @@ export class RunTally {
 
   /** The paths an attempt's change set holds, as its execution bundle retained it; none where it retained none. */
   private changed(
-    attempt: Pick<ExecutionAttempt, "attempt_id" | "changeset_id">,
+    attempt: Pick<ExecutionAttempt, "attempt_id">,
     bundles: readonly RunBundle[],
   ): string[] {
     const { execution } = attemptBundles(attempt, bundles);

@@ -122,7 +122,7 @@ describe("discardTicket", () => {
     ]) {
       const repo = repository();
       await expect(discardTicket(deps({ jobs: [own] }), repo, "PRB-1")).resolves.toBe(
-        "Wait for the commands running in this repository to finish before deleting a contract.",
+        "Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.",
       );
       expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
     }

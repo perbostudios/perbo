@@ -293,7 +293,7 @@ export {
 export type { SourceContract } from "./source.js";
 export { oneLine, readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
 export type { Speaker } from "./spoken.js";
-export { readTally, tallyLine } from "./tally.js";
+export { admittedCommands, readTally, tallyLine } from "./tally.js";
 export type { Tally } from "./tally.js";
 export {
   readStandingProhibited,

@@ -22,15 +22,27 @@ export const isPreLoop = (row: { ticket: { state: string } }): boolean =>
 /** Where a ticket's journey ends once its merge is decided: merged, or closed without merge, and what follows a merge. */
 const DECIDED_STATES: readonly string[] = ["merged", "closed", "done", "deployed", "observing"];
 /**
- * Whether the person called this ticket's merge off with Don't merge: its
- * pull request stays open, and the call-off is recorded on this machine
- * (D-097).
+ * A recorded call-off, `repoId:key:<pull request URL>`: the ticket and the
+ * pull request its merge was called off on, so a later pull request of the
+ * same ticket is never taken for one already decided (D-097).
+ */
+export const calledOffEntry = (repoId: string, key: string, pullRequestUrl: string): string =>
+  `${repoId}:${key}:${pullRequestUrl}`;
+/** What every call-off recorded on this ticket starts with, whichever pull request it names. */
+export const calledOffPrefix = (repoId: string, key: string): string => `${repoId}:${key}:`;
+/**
+ * Whether the person called this ticket's merge off with Don't merge on the
+ * pull request it has open now: that pull request stays open, and the
+ * call-off is recorded on this machine (D-097).
  */
 export const isCalledOff = (
   snapshot: Pick<Snapshot, "calledOff">,
   row: Pick<TaskRow, "repoId" | "ticket">,
 ): boolean =>
-  row.ticket.state === "pr_open" && (snapshot.calledOff?.includes(row.repoId + ":" + row.ticket.key) ?? false);
+  row.ticket.state === "pr_open" &&
+  row.ticket.delivery.pull_request_url !== null &&
+  (snapshot.calledOff?.includes(calledOffEntry(row.repoId, row.ticket.key, row.ticket.delivery.pull_request_url)) ??
+    false);
 /**
  * Whether this ticket's merge is decided: merged, closed without merge, or
  * called off with its pull request left open. Home lists such a ticket last,

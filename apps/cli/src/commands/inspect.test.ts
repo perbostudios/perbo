@@ -187,7 +187,7 @@ function storeWithAttempts(
     cost_basis: "unavailable",
     ...(checks ? { checks } : {}),
   });
-  write("review", review.review_id, { changeset_id: "cs_inspect0001", decision: "remediable", remediation_round: 0 }, [
+  write("review", review.review_id, { attempt_id: SECOND, changeset_id: "cs_inspect0001", decision: "remediable", remediation_round: 0 }, [
     { name: "review.json", media_type: "application/json", body: JSON.stringify(review) },
   ], "2026-08-28T11:52:30.000Z");
   const decline = JSON.stringify({
@@ -292,7 +292,7 @@ function storeWithRejectedVerdicts(name: string): { repo: string; store: string 
     kind: "review",
     subject_id: review.review_id,
     ticket_id: TICKET_ID,
-    inputs: { changeset_id: "cs_inspect0003", decision: "error", remediation_round: 0 },
+    inputs: { attempt_id: SECOND, changeset_id: "cs_inspect0003", decision: "error", remediation_round: 0 },
     context_manifest: [],
     versions: { code: "stage-2", prompt: "executor_v4", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
     usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },

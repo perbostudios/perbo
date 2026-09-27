@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  admittedCommands,
   CheckResultsFileSchema,
   CostBasisSchema,
   EXIT_CODES,
@@ -296,6 +297,8 @@ export interface AttemptReport {
   /** SCP-194: what this round was given and what it closed. Null for round 0. */
   ladder: LadderRung | null;
   declines: Decline[];
+  /** The commands the attempt was let run (`admittedCommands`), which the run's tally counts (D-104). */
+  admitted_commands: number;
   /** Every command the attempt was refused, once each, in the order it asked. */
   denials: DenialReport[];
   bundles: RunBundle[];
@@ -810,6 +813,7 @@ export function reportAttempt(
     verification,
     ladder,
     declines,
+    admitted_commands: admittedCommands(attempt.commands),
     denials,
     bundles: [execution, reviewBundle, verificationBundle].filter(
       (bundle): bundle is RunBundle => bundle !== undefined,

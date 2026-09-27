@@ -246,14 +246,15 @@ describe("a run with nothing admitted behind it", () => {
     expect(checks.map((check) => [check.name, check.status])).toEqual([["unit", "passed"]]);
     expect(checks).toEqual(result.rounds[0]!.checks);
 
-    // And the one independent review, joined to the attempt by the change set:
-    // the reviewer was handed the one the runner sealed, and both records name
-    // it, which is what `inspect` reads a review back through.
+    // And the one independent review, of the change set the runner sealed and
+    // joined to the attempt by its id, which is what `inspect` reads a review
+    // back through.
     const review = bundles.find(
       (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
     );
     expect(review).toBeDefined();
     expect(review!.inputs.changeset_id).toBe(attempt.changeset_id);
+    expect(review!.inputs.attempt_id).toBe(attempt.attempt_id);
     expect(JSON.parse(artifactOf(store, review!, "review.json")).decision).toBe("approve");
 
     // Nothing left the machine: no socket this process opened, and no host the

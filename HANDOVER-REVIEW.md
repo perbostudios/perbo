@@ -20,7 +20,8 @@ It is written for the agent the founder runs locally to check this work. It says
 - `2e11323`: the Graph pane's outside paths held to a two-row bar that scrolls.
 - `6d9eb1a`: a later group of questions queued behind the one being answered.
 - `bee77cb`: the contract page names the run its approval waits for.
-- This commit: six bundles, one builder each, integrated in one pass: parallel runs, the immediate delete and the Archive's Delete, live stages on the loop page, the merge outcome pages with the Archive ticket box and a recorded call-off, the live tally, and the executor's `network_allow_list`. What each does is `HANDOFF-ROUND8.md` section 7. Not yet independently reviewed.
+- `b551d4f`: six bundles, one builder each, integrated in one pass: parallel runs, the immediate delete and the Archive's Delete, live stages on the loop page, the merge outcome pages with the Archive ticket box and a recorded call-off, the live tally, and the executor's `network_allow_list`. What each does is `HANDOFF-ROUND8.md` section 7.
+- This commit: closes both independent reviews of `b551d4f`. A worktree lease on this host holds seven days at most; a rate-limited review waits and runs once more; a call-off is keyed to its pull request and forgotten when a run starts; the tally counts admitted commands, joins a review by `attempt_id` and counts a file-tool write once settled; the Archive's Delete is hidden at `pr_open` and says exactly what goes and stays; every stage anchor, the remediation numbering and a captured real run's log against its records are tested; each behaviour is proven by mutation. Review bundles written before `attempt_id` join no attempt in `perbo inspect`.
 
 ### What wave 2 does, by the founder's rulings
 **Planning flow** (D-NEW-basic-and-epic-flows, D-128, D-130):

@@ -321,16 +321,20 @@ const recordedAttempt = (input: {
   id: string;
   run: number;
   startedAt: string;
+  /** The commands the attempt was let run. */
   commands: number;
   paths: string[];
   execution: Usage;
   review?: Usage;
+  /** The loop's round, counting from 0, and the kind of round its execution bundle records. */
+  round?: number;
+  kind?: "execute" | "remediate" | "resolve_conflict";
 }): AttemptView => {
   const bundle = (kind: string, subject_id: string, usage: Usage, extra: Record<string, unknown> = {}) => ({
     kind,
     subject_id,
     created_at: new Date(Date.parse(input.startedAt) + 60_000).toISOString(),
-    inputs: { round_kind: "execute", ...extra },
+    inputs: { round_kind: input.kind ?? "execute", ...extra },
     usage: {
       input_tokens: usage.input,
       output_tokens: usage.output,
@@ -343,7 +347,7 @@ const recordedAttempt = (input: {
   return {
     id: input.id,
     run: input.run,
-    round: 0,
+    round: input.round ?? 0,
     startedAt: input.startedAt,
     outcome: "review approve",
     termination: "completed: ",
@@ -351,7 +355,9 @@ const recordedAttempt = (input: {
     costMicros: input.execution.micros,
     costBasis: "transport_reported",
     partial: false,
-    ceilings: [{ resource: "attempt_commands", used: input.commands, ceiling: null, hit: false }],
+    // One command more asked for than admitted: the guard refused one, which the strip does not count.
+    ceilings: [{ resource: "attempt_commands", used: input.commands + 1, ceiling: null, hit: false }],
+    admittedCommands: input.commands,
     review: null,
     reviewDecision: "approve",
     changes: input.paths.map((path) => ({ path, change_kind: "modified", additions: 1, deletions: 0 })),
@@ -474,6 +480,39 @@ describe("loopTally", () => {
     // Before the records are read again, the ended run's log stands in.
     expect(loopTally({ jobs: [first, ended], active: undefined, attempts: [firstRun] })).toEqual(during);
     expect(loopTally({ jobs: [first, ended], active: undefined, attempts: [firstRun, ...second] })).toEqual(during);
+  });
+});
+
+describe("loopSteps from the records", () => {
+  it("numbers each refinement round from 1 within its run, as the runner announced it, whatever round of the loop it was", () => {
+    const at = (minute: number) => `2026-09-24T01:${String(minute).padStart(2, "0")}:05.000Z`;
+    const attempt = (id: string, run: number, round: number, kind: "execute" | "remediate" | "resolve_conflict", minute: number) =>
+      recordedAttempt({ id, run, round, kind, startedAt: at(minute), commands: 1, paths: [], execution: { input: 1, output: 1, micros: 0 } });
+    const attempts = [
+      attempt("att_1", 1, 0, "execute", 0),
+      // A conflict with the base takes a round of the loop and is no refinement.
+      attempt("att_2", 1, 1, "resolve_conflict", 5),
+      attempt("att_3", 1, 2, "remediate", 10),
+      // The same round again, after a transport failure: still the first refinement.
+      attempt("att_4", 1, 2, "remediate", 15),
+      attempt("att_5", 1, 3, "remediate", 20),
+      // The next run counts its own from 1.
+      attempt("att_6", 2, 0, "execute", 30),
+      attempt("att_7", 2, 1, "remediate", 35),
+    ];
+    const steps = loopSteps({ history: [], jobs: [], active: undefined, attempts, log: new StageLog(), now: at(59) });
+    expect(
+      steps
+        .map(({ text }) => text)
+        .filter((text) => /^(Refinement|Resolving)/.test(text))
+        .reverse(),
+    ).toEqual([
+      "Resolving a conflict with the base",
+      "Refinement round 1",
+      "Refinement round 1",
+      "Refinement round 2",
+      "Refinement round 1",
+    ]);
   });
 });
 

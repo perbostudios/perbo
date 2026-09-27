@@ -77,6 +77,7 @@ export const LeaseSchema = z.strictObject({
   branch: z.string().min(1),
   path: z.string().min(1),
   base_commit: z.string().min(1),
+  /** When the process `pid` names took this lease; a continuation takes it anew. */
   created_at: z.iso.datetime(),
   expires_at: z.iso.datetime(),
   pid: z.number().int().min(0),
@@ -165,22 +166,33 @@ export function readLease(path: string): Lease | null {
 }
 
 /**
- * A lease is stale when the process that holds it is gone.
+ * How long a lease on this host holds while its process answers: seven days
+ * from when that process took it (D-049). A process id the system has since
+ * handed to another program answers too, so without this a lease whose run is
+ * long gone could hold its worktree forever.
+ */
+export const LOCAL_LEASE_CAP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * A lease is stale when the process that holds it is gone, or once
+ * `LOCAL_LEASE_CAP_MS` has passed since that process took it.
  *
- * On this host the process is asked, and its answer is the whole of it: runs
- * of different tickets go on side by side (D-049), and a run that has worked
- * or waited on a provider past its lease's time is still using its worktree,
- * which the next ticket's provisioning must not take from under it. A lease
- * another host wrote names a process this one cannot ask, so it is stale once
- * its time is up.
+ * On this host the process is asked: runs of different tickets go on side by
+ * side (D-049), and a run that has worked or waited on a provider past its
+ * lease's time is still using its worktree, which the next ticket's
+ * provisioning must not take from under it. `kill(pid, 0)` sends no signal and
+ * answers only the question: `EPERM` is a process this user may not signal,
+ * which is still a process, and `ESRCH` is none. A lease another host wrote
+ * names a process this one cannot ask, so it is stale once its time is up.
  */
 export function leaseIsStale(lease: Lease, now: Date): boolean {
   if (lease.host !== hostname()) return new Date(lease.expires_at).getTime() <= now.getTime();
+  if (now.getTime() - new Date(lease.created_at).getTime() >= LOCAL_LEASE_CAP_MS) return true;
   try {
     process.kill(lease.pid, 0);
     return false;
-  } catch {
-    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "EPERM";
   }
 }
 
@@ -363,6 +375,7 @@ export async function provision(request: ProvisionRequest): Promise<Workspace> {
     const lease: Lease = {
       ...continuing,
       attempt_id: request.attempt_id,
+      created_at: now.toISOString(),
       expires_at: new Date(now.getTime() + (request.lease_ms ?? DEFAULT_LEASE_MS)).toISOString(),
       pid: process.pid,
     };

@@ -12,9 +12,9 @@ import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
 import { openDrafts, problemsHoldApproval, titleChanged, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
-import { archiveCsv, archiveRows, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
+import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { heldTicket, isLive, isRun } from "../shared/jobs.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
+import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
 import type { Job, ReplyMap, Request, RequestHandlers, TaskRow } from "../shared/protocol.js";
@@ -202,7 +202,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // so the discard is refused before anything goes, as the host refuses it;
     // another ticket's run does not.
     if (held.key !== null && held.admitted && heldTicket(snapshot.jobs, held.repoId, held.key))
-      throw new Error(DELETE_WAITS_FOR_COMMANDS);
+      throw new Error(DELETE_WAITS_FOR_TICKET_COMMAND);
     const session = editing.discard(request.id, request.revision);
     endPlanningChat(request.id);
     let refused: string | null = null;
@@ -752,7 +752,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const { ticket } = ticketRow(request.key);
     if (ticket.state !== "pr_open" || ticket.delivery.pull_request_url === null)
       throw new Error(notCallable(request.key));
-    snapshot.calledOff = [...new Set([...(snapshot.calledOff ?? []), request.repoId + ":" + request.key])];
+    snapshot.calledOff = [
+      ...new Set([...(snapshot.calledOff ?? []), calledOffEntry(request.repoId, request.key, ticket.delivery.pull_request_url)]),
+    ];
     emitPreferences();
     return null;
   },
@@ -1074,10 +1076,13 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
   streamProgress(opened, key);
   row.ticket.approved_at = at;
   start(row.ticket);
-  // A filed ticket whose loop starts again is back on Home, as the host has it.
+  // A filed ticket whose loop starts again is back on Home, and a call-off it
+  // carried is over, as the host has it.
   const entry = repoId + ":" + row.ticket.key;
-  if (snapshot.archived?.includes(entry)) {
-    snapshot.archived = snapshot.archived.filter((item) => item !== entry);
+  const calledOff = (snapshot.calledOff ?? []).filter((item) => !item.startsWith(calledOffPrefix(repoId, row.ticket.key)));
+  if (snapshot.archived?.includes(entry) || calledOff.length !== (snapshot.calledOff ?? []).length) {
+    snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+    snapshot.calledOff = calledOff;
     emitPreferences();
   }
   // Approved, so what the plan promises is settled: every planning over it

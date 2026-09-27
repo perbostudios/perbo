@@ -6,6 +6,7 @@ import {
   spokenLine,
   type CheckResult,
   type Finding,
+  type AttemptWait,
   type NodeReview,
   type PlanContract,
   type PlanContractWithCriteria,
@@ -25,6 +26,8 @@ import {
 } from "@perbo/review";
 import { createModel, type Model } from "@perbo/model";
 import type { BundleStore } from "../../bundle.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "../../transport.js";
+import { providerPark } from "./attempt.js";
 import type { SealResult } from "../../seal.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
@@ -285,6 +288,12 @@ export function writeReviewBundle(args: {
   /** The graph's per-node reviews, recorded beside `review` (D-107); empty for a flat plan. */
   node_reviews: NodeReview[];
   sealed: { excluded_paths: string[] };
+  /**
+   * The attempt whose change set this review judged: the key every reader joins
+   * a review to its attempt by (`attemptBundles`). Null for a re-level's review
+   * of a merged change set, which no attempt sealed.
+   */
+  attempt_id: string | null;
   round: number;
   remediation_available: boolean;
 }): void {
@@ -294,10 +303,9 @@ export function writeReviewBundle(args: {
     subject_id: review.review_id,
     ticket_id: contract.ticket_id,
     inputs: {
-      // The target the verdict states, which is the key every reader joins
-      // a review to its attempt by — `perbo inspect` among them. Copied,
-      // never restated from the seal: what a bundle records as reviewed is
-      // what the review says it reviewed.
+      attempt_id: args.attempt_id,
+      // The target the verdict states. Copied, never restated from the seal:
+      // what a bundle records as reviewed is what the review says it reviewed.
       changeset_id: review.target.id,
       base_commit: review.target.base_commit,
       head_commit: review.target.head_commit,
@@ -516,6 +524,12 @@ export async function reviewRound(args: {
   configPath: string;
   secrets: SecretIndex;
   review: LoopPorts["review"];
+  /** `wait_for_provider_ms`: the longest a provider's stated reset is waited for. */
+  waitBoundMs: number;
+  /** How the loop waits, so a test observes the wait rather than serving it. */
+  wait: (ms: number) => Promise<void>;
+  /** The run lock's record of a wait, set before it and cleared after. */
+  parked: (wait: AttemptWait | null) => void;
   clock: () => Date;
   progress: (message: string) => void;
 }): Promise<Reviewed> {
@@ -530,7 +544,7 @@ export async function reviewRound(args: {
   // executor's: the review asks once for a correction and, failing that,
   // records `review_failed` with the reasons (SCP-165). The change set is
   // sealed either way and stays on the branch.
-  const graphOutcome = await reviewGraph(
+  const reviewOnce = () => reviewGraph(
     {
       contract,
       diff: sealed.diff,
@@ -562,6 +576,41 @@ export async function reviewRound(args: {
     args.review,
     { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
   );
+  let graphOutcome = await reviewOnce();
+  // A review its provider refused has judged nothing, and runs of different
+  // tickets side by side (D-049) make a rate limit likely. So the review waits
+  // and is taken once more over the same sealed commit before its verdict is
+  // routed: until the reset the provider stated where it named one within
+  // `wait_for_provider_ms`, and the fixed transport delay where it named none.
+  // A reset past the bound is not waited for, because waking before it spends
+  // a review against a limit still in force. The reset is read from the
+  // transport's own sentence, as an attempt's is, and only ever sets a wait.
+  const outage = graphOutcome.combined.error;
+  if (graphOutcome.combined.decision === "error" && outage?.kind === "provider_unavailable") {
+    const { reset, park } = providerPark({
+      termination: { reason: "transport_unavailable", detail: outage.message },
+      transportRetry: 0,
+      waitBoundMs: args.waitBoundMs,
+      clock,
+    });
+    if (park !== null) {
+      args.parked(park);
+      progress(
+        `the review's provider resets at ${park.until} (${park.zone}); waiting ` +
+          `${Math.round(park.waited_ms / 60_000)} minute(s) and reviewing the same change set once more`,
+      );
+      await args.wait(park.waited_ms);
+      args.parked(null);
+      graphOutcome = await reviewOnce();
+    } else if (reset === null) {
+      progress(
+        `the review's provider was unavailable; waiting ${Math.round(TRANSPORT_RETRY_DELAY_MS / 1000)}s ` +
+          "and reviewing the same change set once more",
+      );
+      await args.wait(TRANSPORT_RETRY_DELAY_MS);
+      graphOutcome = await reviewOnce();
+    }
+  }
   const reviewOutcome = graphOutcome.overall;
 
   // The artifact is the review as written. Provenance stamping belonged to
@@ -602,6 +651,7 @@ export async function reviewRound(args: {
     outcome: reviewOutcome,
     node_reviews: nodeReviewsThisRound,
     sealed,
+    attempt_id: args.attempt.attempt_id,
     round: state.round,
     remediation_available: state.remediationRound < args.maxRounds,
   });

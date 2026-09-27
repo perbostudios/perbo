@@ -3,7 +3,7 @@ import type { Ticket } from "@perbo/contracts";
 import { heldTicket } from "../../shared/jobs.js";
 import {
   DELETE_TICKET_GONE,
-  DELETE_WAITS_FOR_COMMANDS,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
   deletePullRequestOpen,
 } from "../../shared/discard.js";
 import { listBundles } from "../records.js";
@@ -53,7 +53,7 @@ export async function discardTicket(
   repo: RegisteredRepository,
   key: string,
 ): Promise<string | null> {
-  if (heldTicket(deps.liveJobs(), repo.id, key)) return DELETE_WAITS_FOR_COMMANDS;
+  if (heldTicket(deps.liveJobs(), repo.id, key)) return DELETE_WAITS_FOR_TICKET_COMMAND;
   const ticket = (await deps.tickets.list(repo)).tickets.find((entry) => entry.key === key);
   if (!ticket) return DELETE_TICKET_GONE;
   // The one stage a delete does not reach: the pull request is on GitHub and

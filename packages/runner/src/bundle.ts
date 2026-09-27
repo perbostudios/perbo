@@ -188,8 +188,9 @@ export class BundleStore {
 
 /**
  * The bundles one attempt wrote. The execution bundle is keyed by the attempt
- * id; the review by the change set it judged; a verification by the
- * `cv_<attempt>` subject the loop gives it.
+ * id; the review by the attempt id its bundle records; a verification by the
+ * `cv_<attempt>` subject the loop gives it. A review bundle that records no
+ * attempt id joins no attempt.
  *
  * One join, read by everything that needs it: `perbo inspect`'s report and
  * its `--verify`, which re-hashes what these name, and the tally a run prints
@@ -204,22 +205,19 @@ export interface AttemptBundles {
 }
 
 export function attemptBundles(
-  attempt: Pick<ExecutionAttempt, "attempt_id" | "changeset_id">,
+  attempt: Pick<ExecutionAttempt, "attempt_id">,
   bundles: readonly RunBundle[],
 ): AttemptBundles {
   return {
     execution: bundles.find(
       (bundle) => bundle.kind === "execution" && bundle.subject_id === attempt.attempt_id,
     ),
-    review:
-      attempt.changeset_id === null
-        ? undefined
-        : bundles.find(
-            (bundle) =>
-              bundle.kind === "review" &&
-              bundle.subject_id.startsWith("rev_") &&
-              bundle.inputs["changeset_id"] === attempt.changeset_id,
-          ),
+    review: bundles.find(
+      (bundle) =>
+        bundle.kind === "review" &&
+        bundle.subject_id.startsWith("rev_") &&
+        bundle.inputs["attempt_id"] === attempt.attempt_id,
+    ),
     verification: bundles.find(
       (bundle) => bundle.kind === "review" && bundle.subject_id === `cv_${attempt.attempt_id}`,
     ),

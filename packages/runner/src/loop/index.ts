@@ -739,6 +739,9 @@ async function runLockedTicket(
         configPath,
         secrets,
         review: reviewRunner,
+        waitBoundMs,
+        wait,
+        parked: (park) => lock.parked(park),
         clock,
         progress,
       });

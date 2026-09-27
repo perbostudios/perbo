@@ -304,6 +304,23 @@ describe("perbo run --publish-retained", () => {
     );
   }, TIMEOUT_MS);
 
+  it("prints what the push says on one physical line, gh's own error line included", async () => {
+    const at = fixture("one-line");
+    await retained(at);
+    const push = (async (request: { branch: string; onProgress?: (line: string) => void }) => {
+      // As `git push` or `gh` answers a refusal: its own `error:` line, then more.
+      request.onProgress?.("the remote said: rejected\nerror: failed to push some refs\r\nhint: pull request review round 2");
+      return { pushed: true, detail: "recorded" };
+    }) as never;
+
+    const published = await run(at, ["--publish-retained"], { hooks: { push, review: noReview } });
+
+    expect(published.code, published.err).toBe(0);
+    const lines = published.err.split("\n");
+    expect(lines).toContain("  the remote said: rejected error: failed to push some refs hint: pull request review round 2");
+    expect(lines.some((line) => line.startsWith("error:") || line.startsWith("hint:"))).toBe(false);
+  }, TIMEOUT_MS);
+
   it("pushes an approved run's retained branch, opens its pull request and records it, the ticket staying at pr_open", async () => {
     const at = fixture("published");
     const branch = await retained(at);

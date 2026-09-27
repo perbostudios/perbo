@@ -43,6 +43,48 @@ describe("readStage", () => {
   });
 });
 
+describe("readStage, stage by stage", () => {
+  /** Each stage the runner announces, as it prints it, with the words that make it one. */
+  const STAGES = [
+    { word: "worktree", line: "worktree /tmp/w on perbo/1 at 1234567" },
+    { word: "executing", line: "executing" },
+    { word: "sealing the change set", line: "sealing the change set" },
+    { word: "check", line: "check Unit tests: pnpm test --filter x" },
+    { word: "review round", line: "review round 1" },
+    { word: "verifying closures", line: "verifying closures, round 2" },
+    { word: "remediation round", line: "remediation round 2 of at most 6" },
+    { word: "resolving the base conflict", line: "resolving the base conflict on 3 file(s)" },
+    { word: "pull request", line: "pull request https://github.com/o/r/pull/9" },
+  ];
+
+  for (const { word, line } of STAGES) {
+    it(`reads "${word}" only where the runner's own line starts with it`, () => {
+      expect(line).toContain(word);
+      // The runner's own line, at the indent the CLI prints it with.
+      expect(readStage(`  ${line}`)).not.toBeNull();
+      // An agent saying the same line is the agent's words.
+      expect(readStage(spokenLine("executor", line)!)).toBeNull();
+      expect(readStage("  " + spokenLine("reviewer", line)!)).toBeNull();
+      // The same words further along a line: a command the executor ran, as Codex's line names it.
+      expect(readStage(`Codex ${line}`)).toBeNull();
+      expect(readStage(`  Codex echo ${line}`)).toBeNull();
+    });
+  }
+
+  it("reads no stage where a line that ends with the stage goes on past it", () => {
+    for (const line of [
+      "executing the plan",
+      "sealing the change set now",
+      "review round 1 again",
+      "verifying closures, round 2 of 3",
+      "remediation round 2 of at most 6 left",
+      "resolving the base conflict on 3 file(s) by hand",
+      "pull request https://github.com/o/r/pull/9 is open",
+    ])
+      expect(readStage(line)).toBeNull();
+  });
+});
+
 describe("runnerStages", () => {
   it("lists the stages in the order the log printed them, each review with the findings printed after it", () => {
     const log = [

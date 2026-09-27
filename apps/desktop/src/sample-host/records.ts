@@ -57,10 +57,11 @@ import {
 } from "../shared/contract-editing.js";
 import { ChangeMarks } from "../shared/change-marks.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
+import { calledOffPrefix } from "../shared/archive.js";
 import { busyMessage, heldTicket, inTheWay, isLive, journal } from "../shared/jobs.js";
 import {
   DELETE_TICKET_GONE,
-  DELETE_WAITS_FOR_COMMANDS,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
   deletePullRequestOpen,
 } from "../shared/discard.js";
 import type {
@@ -670,6 +671,7 @@ export function detail(key: string): Detail {
     costBasis: "sample",
     partial: false,
     ceilings: [{ resource: "attempt_commands", used: 23, ceiling: 40, hit: false }],
+    admittedCommands: 21,
     review: reviewFor(key),
     reviewDecision: "escalate",
     changes: sampleChanges,
@@ -2660,7 +2662,7 @@ export function answerSampleTurn(id: string, text: string): void {
  * store of their own, so they go with it.
  */
 export function discardTicket(repoId: string, key: string): string | null {
-  if (heldTicket(snapshot.jobs, repoId, key)) return DELETE_WAITS_FOR_COMMANDS;
+  if (heldTicket(snapshot.jobs, repoId, key)) return DELETE_WAITS_FOR_TICKET_COMMAND;
   const row = snapshot.tasks.find((entry) => entry.repoId === repoId && entry.ticket.key === key);
   if (row === undefined) return DELETE_TICKET_GONE;
   if (row.ticket.state === "pr_open") return deletePullRequestOpen(key);
@@ -2683,7 +2685,7 @@ export function discardTicket(repoId: string, key: string): string | null {
   snapshot.titles = titles;
   snapshot.taskModels = taskModels;
   snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
-  snapshot.calledOff = (snapshot.calledOff ?? []).filter((item) => item !== entry);
+  snapshot.calledOff = (snapshot.calledOff ?? []).filter((item) => !item.startsWith(calledOffPrefix(repoId, key)));
   snapshot.lastOpened = Object.fromEntries(Object.entries(snapshot.lastOpened ?? {}).filter(([item]) => item !== entry));
   // And every planning over it, as the host discards them, with their chats
   // (D-102): a planning over a ticket that is gone has nothing left to open.

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import {
+  admittedCommands,
   invocationShapeHash,
   type AgentInvocation,
   type CostBasis,
@@ -672,10 +673,13 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   const pendingHits: Array<{ hit: ProhibitedHit; at: string; toolUseId: string | undefined }> = [];
   /**
    * The worktree paths each file-tool call names, by the index of the command
-   * record it made: a path counts as written for as long as that record says
-   * the call was allowed, which the hook's answer can still change.
+   * record it made. A path counts as written once the call is settled and for
+   * as long as the record says it was allowed; a tool result that is an error
+   * wrote nothing.
    */
   const writtenBy = new Map<number, string[]>();
+  /** Each call's `tool_use_id` whose result has arrived, and whether that result was an error. */
+  const resultOf = new Map<string, { is_error: boolean }>();
   const prohibited: Array<ProhibitedHit & { at: string }> = [];
   const transcript: string[] = [];
   /** D-096: filled from the hook's own file as the guard directory is retired. */
@@ -940,6 +944,22 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
      * every `user` event on this stream is a tool answering.
      */
     if (type === "user") request.ceilings.noteToolActivity();
+    /**
+     * A tool's result: the hook answered before the tool ran, so its answer is
+     * in the decisions file now and is folded in before the tally reads
+     * whether the call was admitted and what it wrote.
+     */
+    if (type === "user") {
+      const content = ((event.message ?? {}) as { content?: unknown }).content;
+      let answered = false;
+      for (const block of Array.isArray(content) ? (content as Array<Record<string, unknown>>) : []) {
+        if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+        if (!recordOfToolUse.has(block.tool_use_id)) continue;
+        resultOf.set(block.tool_use_id, { is_error: block.is_error === true });
+        answered = true;
+      }
+      if (answered) reconcile();
+    }
     // A child can flush several stream lines in one stdout chunk before the
     // stop signal lands. Continue reading their audit evidence, as before, but
     // freeze accounting at the event that tripped the stop.
@@ -1254,15 +1274,36 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     }
   };
 
-  /** The attempt's figures so far, to whoever tallies the run. */
-  const tell = (): void => {
+  /**
+   * The attempt's figures so far, to whoever tallies the run (D-104).
+   *
+   * While the stream goes, a call counts once it is settled: the hook's answer
+   * folded into its record, or its result read. Until then the record holds
+   * only the transcript's reading, which the hook may still refuse, and a tally
+   * that counted it would name a command that never ran or a path never
+   * written. Once the process has closed, every record is as final as the
+   * attempt keeps it, and the tally comes to what the record holds.
+   */
+  const tell = (over = false): void => {
     if (request.onTally === undefined) return;
+    const toolUseOf = new Map([...recordOfToolUse].map(([id, index]) => [index, id]));
+    const settled = (index: number): boolean => {
+      const id = toolUseOf.get(index);
+      return (
+        over ||
+        commands[index]?.decided_by === "pre_execution_hook" ||
+        (id !== undefined && resultOf.has(id))
+      );
+    };
     const written = new Set<string>();
     for (const [index, paths] of writtenBy) {
-      if (commands[index]?.decision === "allowed") for (const path of paths) written.add(path);
+      const id = toolUseOf.get(index);
+      if (commands[index]?.decision !== "allowed" || !settled(index)) continue;
+      if (id !== undefined && resultOf.get(id)?.is_error === true) continue;
+      for (const path of paths) written.add(path);
     }
     request.onTally({
-      commands: commands.length,
+      commands: admittedCommands(commands.filter((_, index) => settled(index))),
       input_tokens: inputTokens,
       output_tokens: outputTokens,
       cost_micros: costMicros,
@@ -1308,7 +1349,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
       // result envelope and its refusals are the ones a reader most needs.
       reconcile();
       settlePendingHits();
-      tell();
+      tell(true);
       /**
        * An exit the runner did not ask for. Two of them, and they mean
        * opposite things (SCP-172): an agent that ran and failed is evidence

@@ -665,13 +665,22 @@ export function MergeScreen(context: TaskContext) {
     [polls, setPolls] = useState(0),
     // Whether the person has come back to the app since it opened there.
     [returned, setReturned] = useState(false),
-    [pressed, setPressed] = useState<string | null>(null);
+    [pressed, setPressed] = useState<string | null>(null),
+    // The checks of GitHub this press asked for, by job: what the page says of
+    // the pull request is read from these alone, never from a check an earlier
+    // visit made.
+    [checks, setChecks] = useState<readonly string[]>([]);
   const url = ticket.delivery.pull_request_url;
   const merged = ticket.delivery.state === "merged";
-  const sync = (): void => action.mutate({ kind: "sync", repoId, key: ticket.key });
+  const sync = (): void =>
+    void action
+      .mutateAsync({ kind: "sync", repoId, key: ticket.key })
+      .then((job) => setChecks((ids) => [...ids, (job as Job).id]))
+      .catch(() => undefined);
   const open = (): void => {
     setOpened(true);
     setPolls(SYNC_POLLS);
+    setChecks([]);
   };
   // No pull request yet: the branch the run retained, which the press
   // publishes first, or why there is none (D-NEW-publish-a-retained-branch-later).
@@ -726,7 +735,7 @@ export function MergeScreen(context: TaskContext) {
     window.addEventListener("focus", back);
     return () => window.removeEventListener("focus", back);
   }, [opened, merged, busy]);
-  const checked = jobs.filter((job) => job.kind === "sync").at(-1);
+  const checked = jobs.filter((job) => job.kind === "sync" && checks.includes(job.id)).at(-1);
   const stillOpen = opened && !merged && (returned || polls === 0) && checked?.state === "completed";
   useShortcut("openPullRequest", mergeable ? merge : null);
   return (

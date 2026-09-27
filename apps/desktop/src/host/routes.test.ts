@@ -102,7 +102,7 @@ describe("throwing a planning away beside a run", () => {
     const { table, discarded } = planningBeside([live("PRB-2")]);
     await expect(
       route(table, { kind: "editingDiscard", id: "80000000-0000-4000-8000-000000000012" }, {}),
-    ).rejects.toThrow("Wait for the commands running in this repository to finish before deleting a contract.");
+    ).rejects.toThrow("Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.");
     expect(discarded).toEqual([]);
   });
 });

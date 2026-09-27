@@ -9,6 +9,7 @@ import { disposeFixtures, fixture } from "../host/test-support/host-fixture.js";
 import { handlers } from "./handlers.js";
 import { sampleBridge } from "./bridge.js";
 import { snapshot as sampleRecords } from "./records.js";
+import { calledOffEntry } from "../shared/archive.js";
 import { runProcess } from "../host/process.js";
 import type { Change, DesktopBridge, Draft, Job, ReplyMap, Request } from "../shared/protocol.js";
 import { describeBridgeContract } from "../test-support/bridge-contract.js";
@@ -420,17 +421,65 @@ it("records Don't merge on a pull request left open and files it only then, as t
       onHost: "KEY has no open pull request, so there is no merge to call off.",
       onSample: "KEY has no open pull request, so there is no merge to call off.",
     });
-    const ticket = JSON.parse(readFileSync(path, "utf8")) as { state: string; delivery: Record<string, unknown> };
-    ticket.state = "pr_open";
-    ticket.delivery = { ...ticket.delivery, pull_request_url: "https://github.com/example/repo/pull/1", pull_request_number: 1, state: "open" };
-    writeFileSync(path, JSON.stringify(ticket, null, 2));
+    const PULL_REQUEST = "https://github.com/example/repo/pull/1";
+    const planned = JSON.parse(readFileSync(path, "utf8")) as { state: string; delivery: Record<string, unknown> };
+    /** PRB-1 on the host at `state`, with a pull request on its record or none. */
+    const hostAt = (state: string, pullRequest: string | null) =>
+      writeFileSync(
+        path,
+        JSON.stringify(
+          {
+            ...planned,
+            state,
+            delivery: {
+              ...planned.delivery,
+              pull_request_url: pullRequest,
+              pull_request_number: pullRequest === null ? null : 1,
+              state: pullRequest === null ? planned.delivery["state"] : "open",
+            },
+          },
+          null,
+          2,
+        ),
+      );
     const open = (await sampleBridge.request({ kind: "snapshot" })).tasks.find(
       (row) => row.ticket.state === "pr_open" && row.ticket.delivery.pull_request_url !== null,
     )!;
+    const sampleRow = sampleRecords.tasks.find((row) => row.ticket.key === open.ticket.key)!;
+    const sampleTicket = structuredClone(sampleRow.ticket);
+    /** The sample's open ticket at `state`, with a pull request on its record or none. */
+    const sampleAt = (state: string, pullRequest: string | null) => {
+      sampleRow.ticket = {
+        ...structuredClone(sampleTicket),
+        state: state as never,
+        delivery: { ...structuredClone(sampleTicket.delivery), pull_request_url: pullRequest },
+      };
+    };
+    // Each half of the refusal on its own: a pull request on the record of a
+    // ticket not at `pr_open`, and a ticket at `pr_open` with none on its record.
+    const halves: Record<string, unknown> = {};
+    for (const [state, pullRequest] of [["failed", PULL_REQUEST], ["pr_open", null]] as const) {
+      hostAt(state, pullRequest);
+      sampleAt(state, pullRequest);
+      halves[`${state} ${pullRequest === null ? "without" : "with"} a pull request`] = {
+        onHost: await refusal(host.request({ kind: "callOff", repoId: hostRepo, key: "PRB-1" }), "PRB-1"),
+        onSample: await refusal(sampleBridge.request({ kind: "callOff", repoId: open.repoId, key: open.ticket.key }), open.ticket.key),
+      };
+    }
+    sampleRow.ticket = sampleTicket;
+    const refused = {
+      onHost: "KEY has no open pull request, so there is no merge to call off.",
+      onSample: "KEY has no open pull request, so there is no merge to call off.",
+    };
+    expect(halves).toEqual({ "failed with a pull request": refused, "pr_open without a pull request": refused });
+    expect(sampleRecords.calledOff).toEqual([]);
+    hostAt("pr_open", PULL_REQUEST);
     const file = async (bridge: DesktopBridge, repoId: string, key: string) => {
       const refused = await refusal(bridge.request({ kind: "archive", repoId, keys: [key], archived: true }), key);
       await bridge.request({ kind: "callOff", repoId, key });
-      const recorded = (await bridge.request({ kind: "snapshot" })).calledOff?.includes(repoId + ":" + key) ?? false;
+      const read = await bridge.request({ kind: "snapshot" });
+      const url = read.tasks.find((row) => row.repoId === repoId && row.ticket.key === key)!.ticket.delivery.pull_request_url!;
+      const recorded = read.calledOff?.includes(calledOffEntry(repoId, key, url)) ?? false;
       await bridge.request({ kind: "archive", repoId, keys: [key], archived: true });
       const filed = (await bridge.request({ kind: "snapshot" })).archived?.includes(repoId + ":" + key) ?? false;
       await bridge.request({ kind: "archive", repoId, keys: [key], archived: false });

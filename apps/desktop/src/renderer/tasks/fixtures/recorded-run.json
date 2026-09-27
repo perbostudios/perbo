@@ -1,0 +1,1311 @@
+{
+  "log": "  ceilings  stall 20m · remediation rounds 6 · provider wait 6h · per-token cost $5.00 · per-token ticket budget $60.00\n  base      main — branch: the branch this checkout is on\n  run recorded in /tmp/perbo-capture/capture-NU8DxJ/.perbo/runs/ticket_local_98572de4cd59.run.json\n  worktree /tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830 on prb/local-98572de4cd59/the-feature-module-exports-a-com at df6774d60fb3af1b88b8189a4cb9d954dce7fc17\n  verify: node -e process.exit(0)\n  df6774d60fb3 passes the manifest's verify\n  executing\n  agent ready: 0 tool servers, 0 skills, credential subscription\n  tally: 0 commands, 0 files, 0 input tokens, 0 output tokens, 0 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 0 commands, 0 files, 7 input tokens, 2 output tokens, 0 micro-dollars priced, 1 unpriced, 0 partial\n  tally: 1 commands, 0 files, 7 input tokens, 2 output tokens, 4000 micro-dollars priced, 0 unpriced, 0 partial\n  sealing the change set\n  check unit: node -e process.exit(0)\n  tally: 1 commands, 1 files, 7 input tokens, 2 output tokens, 4000 micro-dollars priced, 0 unpriced, 0 partial\n  review round 0\n  reviewer says: No test exercises total(); nothing establishes ac_1.\n  tally: 1 commands, 1 files, 8 input tokens, 3 output tokens, 4000 micro-dollars priced, 1 unpriced, 0 partial\n  branch carries 1 commit(s) sealed before this attempt\n  remediation round 1 of at most 6\n  agent ready: 0 tool servers, 0 skills, credential subscription\n  tally: 1 commands, 1 files, 8 input tokens, 3 output tokens, 4000 micro-dollars priced, 2 unpriced, 0 partial\n  tally: 1 commands, 1 files, 15 input tokens, 5 output tokens, 4000 micro-dollars priced, 2 unpriced, 0 partial\n  tally: 2 commands, 1 files, 15 input tokens, 5 output tokens, 8000 micro-dollars priced, 1 unpriced, 0 partial\n  sealing the change set\n  check unit: node -e process.exit(0)\n  verifying closures, round 1\n  tally: 2 commands, 1 files, 16 input tokens, 6 output tokens, 8030 micro-dollars priced, 1 unpriced, 0 partial\n  recorded 2 attempt(s) as run 1 of local_98572de4cd59; 2 on record\n\ncost      $0.2180 — 4 of 4 priced, 2 reported, 1 estimated\nread it back with: perbo inspect ticket_local_98572de4cd59 --repo /tmp/perbo-capture/capture-NU8DxJ\n",
+  "report": {
+    "kind": "local",
+    "ticket": "local_98572de4cd59",
+    "ticket_id": "ticket_local_98572de4cd59",
+    "title": null,
+    "outcome": "The feature module exports a computed total",
+    "contract_source": {
+      "source": "arguments",
+      "reference": null,
+      "url": null,
+      "title": null,
+      "outcome": "The feature module exports a computed total",
+      "outcome_from": "argument",
+      "criteria": [
+        {
+          "id": "ac_1",
+          "text": "total() returns the sum of its inputs",
+          "assertion": "total([1,2]) is 3",
+          "kind": "test"
+        }
+      ]
+    },
+    "refusal": null,
+    "state": null,
+    "pull_request_url": null,
+    "base": {
+      "ref": "main",
+      "from": "branch"
+    },
+    "handed_off": false,
+    "delivery_checks": null,
+    "admission": null,
+    "source": null,
+    "queue": null,
+    "spec_staleness": null,
+    "runs_started": null,
+    "nodes": null,
+    "edges": null,
+    "approach_problem": null,
+    "size": null,
+    "attempts_path": "/tmp/perbo-capture/capture-NU8DxJ/.perbo/state/ticket_local_98572de4cd59.attempts.json",
+    "attempts": [
+      {
+        "attempt_id": "att_01d7a6dc3d3cb830",
+        "run": 1,
+        "sequence": 1,
+        "round": 0,
+        "started_at": "2026-09-27T00:37:29.048Z",
+        "wait": null,
+        "ended_at": "2026-09-27T00:37:30.406Z",
+        "outcome": "review remediable",
+        "termination": {
+          "reason": "completed",
+          "detail": ""
+        },
+        "agent": {
+          "model": "double",
+          "binary_version": "fake-agent 1.0.0",
+          "adapter": "claude-code",
+          "credential_class": "subscription"
+        },
+        "ceilings": [
+          {
+            "resource": "attempt_stall_ms",
+            "used": null,
+            "ceiling": 1200000,
+            "hit": false
+          },
+          {
+            "resource": "attempt_iterations",
+            "used": 1,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_commands",
+            "used": 1,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_wall_clock_ms",
+            "used": 1358,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_tokens",
+            "used": 9,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_cost_micros",
+            "used": 4000,
+            "ceiling": null,
+            "hit": false
+          }
+        ],
+        "tokens": {
+          "input": 7,
+          "cache_read": 0,
+          "output": 2
+        },
+        "cost": {
+          "micros": 4000,
+          "basis": "transport_reported",
+          "partial": false
+        },
+        "round_cost": {
+          "micros": 214000,
+          "components": 2,
+          "priced": 2,
+          "reported": 1,
+          "estimated": 1,
+          "unavailable": 0,
+          "partial": 0
+        },
+        "checks": [
+          {
+            "check_id": "check_unit",
+            "name": "unit",
+            "kind": "unit",
+            "status": "passed",
+            "summary": "exited 0",
+            "command": "node -e process.exit(0)",
+            "detail": null,
+            "duration_ms": 43,
+            "source": "file",
+            "failing_tests": [],
+            "reruns": 0,
+            "flaky": false,
+            "rerun": null,
+            "tmpdir": "/tmp/"
+          }
+        ],
+        "review": {
+          "schema_version": 1,
+          "review_id": "rev_0000000000000001",
+          "resumed_from": null,
+          "created_at": "2026-09-04T00:00:00.000Z",
+          "target": {
+            "type": "changeset",
+            "id": "cs_ef222516fa208c95",
+            "base_commit": "abc1234",
+            "head_commit": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+            "prior_commits": []
+          },
+          "plan_id": "plan_x",
+          "plan_version": 1,
+          "planned_risk": "P1",
+          "actual_risk": "P1",
+          "escalated": false,
+          "independence": {
+            "context_builder": "reviewer_v2",
+            "executor_narrative_visible": false,
+            "executor_transcript_visible": false,
+            "separate_process": true,
+            "model_family": "same",
+            "grounded_in": [
+              "plan.acceptance_criteria",
+              "diff",
+              "check_results",
+              "selected_files"
+            ]
+          },
+          "context_manifest": [],
+          "checks": [],
+          "overrides": [],
+          "coverage": [
+            {
+              "criterion_id": "ac_1",
+              "status": "not_met",
+              "verification_strength": "asserted_only",
+              "evidence": null,
+              "note": null,
+              "authored_in_response_to": null
+            }
+          ],
+          "findings": [
+            {
+              "key": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "rule_id": "test.missing_for_criterion",
+              "source": "semantic",
+              "criterion_id": "ac_1",
+              "severity": "major",
+              "blocking": false,
+              "blocking_reason": "verification: routed to the executor",
+              "routing": "remediable",
+              "row": null,
+              "closure": null,
+              "direction": null,
+              "caused_by_change": null,
+              "confidence": 0.9,
+              "file": "src/feature.ts",
+              "line": 1,
+              "symbol": "total",
+              "statement": "No test exercises total(); nothing establishes ac_1.",
+              "status": "open",
+              "outcome": "unknown",
+              "waiver": null
+            }
+          ],
+          "scope_deviation": {
+            "files_outside_scope": [],
+            "files_in_prohibited_paths": [],
+            "files_exempt_as_generated": [],
+            "within_expansion_budget": true,
+            "expansion_budget_files": 3
+          },
+          "rejected_verdicts": [],
+          "decision": "remediable",
+          "routing_policy": "d051",
+          "remediation": null,
+          "confidence": 0.9,
+          "cost_micros": 210000,
+          "latency_ms": 100,
+          "model": {
+            "provider": "stub",
+            "model_id": "stub",
+            "prompt_version": "reviewer_v2",
+            "input_tokens": 1,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 1,
+            "cost_basis": "provider_list_estimate"
+          },
+          "error": null
+        },
+        "node_reviews": [],
+        "review_decision": "remediable",
+        "verification": null,
+        "ladder": null,
+        "declines": [],
+        "admitted_commands": 1,
+        "denials": [],
+        "bundles": [
+          {
+            "schema_version": 1,
+            "bundle_id": "bundle_1ac88d727957b4b2",
+            "kind": "execution",
+            "created_at": "2026-09-27T00:37:30.458Z",
+            "subject_id": "att_01d7a6dc3d3cb830",
+            "ticket_id": "ticket_local_98572de4cd59",
+            "inputs": {
+              "plan_id": "plan_local_98572de4cd59",
+              "plan_version": 1,
+              "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+              "merged_base": null,
+              "round_kind": "execute",
+              "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
+              "remediation_round": 0,
+              "findings_given": "",
+              "findings_given_count": 0,
+              "invocation_shape": "6df07883483ed9370da19365d4e8b8852e58e903eedf5638a213942cbbb1a7db",
+              "binary_version": "fake-agent 1.0.0",
+              "termination": "completed",
+              "resumed_from_bundle": null,
+              "resumed_from_attempt": null,
+              "resumed_diff_sha256": null,
+              "resumed_diff": null,
+              "resumed_diff_at": null
+            },
+            "context_manifest": [],
+            "versions": {
+              "code": "stage-2",
+              "prompt": "executor_v14",
+              "policy": "A2b",
+              "model": "double",
+              "tool": "fake-agent 1.0.0"
+            },
+            "usage": {
+              "input_tokens": 7,
+              "output_tokens": 2,
+              "cost_micros": 4000,
+              "cost_basis": "transport_reported",
+              "wall_clock_ms": 1358
+            },
+            "artifacts": [
+              {
+                "name": "attempt.json",
+                "sha256": "608e063048025c519aafcce2971b71e494c113b862c6808128d19636a1387d9f",
+                "bytes": 10172,
+                "media_type": "application/json",
+                "retained": true
+              },
+              {
+                "name": "transcript.jsonl",
+                "sha256": "2188da6f7d75486f37e8d51db18b2d462e9d980d0b9e9e16bc850e4f87eefe36",
+                "bytes": 447,
+                "media_type": "application/x-ndjson",
+                "retained": true
+              },
+              {
+                "name": "prompt.txt",
+                "sha256": "e6336d75625bb34c4c7bf49ef935ed45a378e469c4fc92c452b88b72f01b9304",
+                "bytes": 5878,
+                "media_type": "text/plain",
+                "retained": true
+              },
+              {
+                "name": "checks.json",
+                "sha256": "68bd756bfdbcad9ed24796d5fdfad67deb00e980f6c497db8535920e2bab9658",
+                "bytes": 386,
+                "media_type": "application/json",
+                "retained": true
+              },
+              {
+                "name": "change.diff",
+                "sha256": "1a27a0b139188c53f4364a3061f50897321c4d4ceaa34bdc46d37cee4b0af6ee",
+                "bytes": 163,
+                "media_type": "text/x-diff",
+                "retained": true
+              }
+            ],
+            "errors": [],
+            "transitions": [
+              {
+                "at": "2026-09-27T00:37:29.048Z",
+                "from": "PROVISIONING",
+                "to": "EXECUTING",
+                "reason": "worktree materialized"
+              },
+              {
+                "at": "2026-09-27T00:37:30.458Z",
+                "from": "EXECUTING",
+                "to": "VERIFYING",
+                "reason": "completed"
+              }
+            ],
+            "retention": {
+              "class": "raw_transcript",
+              "expires_at": null
+            },
+            "redaction": {
+              "secret_content_sha256": [],
+              "secret_value_count": 0,
+              "redactions": 0,
+              "excluded_paths": []
+            },
+            "replayability": "re_executable",
+            "replayability_reason": "the materialized context bytes the model saw were retained, against a pinned model"
+          },
+          {
+            "schema_version": 1,
+            "bundle_id": "bundle_327e0c5e63df84cc",
+            "kind": "review",
+            "created_at": "2026-09-27T00:37:30.469Z",
+            "subject_id": "rev_0000000000000001",
+            "ticket_id": "ticket_local_98572de4cd59",
+            "inputs": {
+              "attempt_id": "att_01d7a6dc3d3cb830",
+              "changeset_id": "cs_ef222516fa208c95",
+              "base_commit": "abc1234",
+              "head_commit": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+              "decision": "remediable",
+              "remediation_round": 0,
+              "remediation_available": true
+            },
+            "context_manifest": [],
+            "versions": {
+              "code": "stage-2",
+              "prompt": "reviewer_v2",
+              "policy": "blocking-matrix-v2",
+              "model": "stub",
+              "tool": "stub"
+            },
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 1,
+              "cost_micros": 210000,
+              "cost_basis": "unavailable",
+              "wall_clock_ms": 100
+            },
+            "artifacts": [
+              {
+                "name": "review.json",
+                "sha256": "71d8c9bf7e9023251ecfd2690d841d3b7d52b288acfbccf8a7733f1879f62cc8",
+                "bytes": 2059,
+                "media_type": "application/json",
+                "retained": true
+              },
+              {
+                "name": "node-reviews.json",
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "bytes": 2,
+                "media_type": "application/json",
+                "retained": true
+              },
+              {
+                "name": "reviewer-system-prompt.txt",
+                "sha256": "043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89",
+                "bytes": 1,
+                "media_type": "text/plain",
+                "retained": true
+              }
+            ],
+            "errors": [],
+            "transitions": [
+              {
+                "at": "2026-09-27T00:37:30.469Z",
+                "from": "VERIFYING",
+                "to": "INDEPENDENT_REVIEW",
+                "reason": "remediable"
+              }
+            ],
+            "retention": {
+              "class": "replay_retained",
+              "expires_at": null
+            },
+            "redaction": {
+              "secret_content_sha256": [],
+              "secret_value_count": 0,
+              "redactions": 0,
+              "excluded_paths": []
+            },
+            "replayability": "re_executable",
+            "replayability_reason": "the materialized context bytes the model saw were retained, against a pinned model"
+          }
+        ],
+        "changed_files": [
+          {
+            "path": "src/feature.ts",
+            "change_kind": "added",
+            "additions": 1,
+            "deletions": 0
+          }
+        ],
+        "record": {
+          "schema_version": 1,
+          "attempt_id": "att_01d7a6dc3d3cb830",
+          "root_attempt_id": "att_01d7a6dc3d3cb830",
+          "continues_attempt_id": null,
+          "remediation_round": 0,
+          "created_at": "2026-09-27T00:37:29.048Z",
+          "ticket_id": "ticket_local_98572de4cd59",
+          "plan_id": "plan_local_98572de4cd59",
+          "plan_version": 1,
+          "planned_risk": "P1",
+          "repository_id": "repo_capture-NU8DxJ",
+          "base_ref": "main",
+          "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+          "provider": "local_worktree",
+          "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
+          "worktree_path": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+          "autonomy_class": "A2b",
+          "permission_profile": {
+            "autonomy_class": "A2b",
+            "command_allow_list": [
+              "Read",
+              "Edit",
+              "Write",
+              "Glob",
+              "Grep",
+              "Bash(ls:*)",
+              "Bash(cat:*)",
+              "Bash(head:*)",
+              "Bash(tail:*)",
+              "Bash(wc:*)",
+              "Bash(rg:*)",
+              "Bash(find:*)",
+              "Bash(git status:*)",
+              "Bash(git diff:*)",
+              "Bash(git log:*)",
+              "Bash(git show:*)",
+              "Bash(git rev-parse:*)",
+              "Bash(git merge-base:*)",
+              "Bash(git ls-files:*)",
+              "Bash(date:*)",
+              "Bash(node:*)",
+              "Bash(pnpm test:*)",
+              "Bash(pnpm run:*)",
+              "Bash(pnpm exec:*)",
+              "Bash(pnpm typecheck:*)",
+              "Bash(pnpm lint:*)",
+              "Bash(pnpm build:*)",
+              "Bash(pnpm -r:*)",
+              "Bash(pnpm --filter:*)",
+              "Bash(npm test:*)",
+              "Bash(npm run:*)",
+              "Bash(npx:*)",
+              "Bash(vitest:*)",
+              "Bash(tsc:*)",
+              "Bash(eslint:*)",
+              "Bash(./node_modules/.bin/:*)",
+              "Bash(python3:*)",
+              "Bash(pytest:*)",
+              "Bash(make:*)",
+              "Agent",
+              "Task"
+            ],
+            "command_deny_list": [
+              "Bash(git push:*)",
+              "Bash(git commit:*)",
+              "Bash(git reset:*)",
+              "Bash(git rebase:*)",
+              "Bash(git branch:*)",
+              "Bash(git remote:*)",
+              "Bash(git tag:*)",
+              "Bash(gh auth:*)",
+              "Bash(gh config set:*)",
+              "Bash(gh:*)",
+              "Bash(curl:*)",
+              "Bash(wget:*)",
+              "Bash(ssh:*)",
+              "Bash(scp:*)",
+              "Bash(nc:*)",
+              "Bash(npm publish:*)",
+              "Bash(pnpm publish:*)",
+              "Bash(cargo publish:*)",
+              "Bash(pip install:*)",
+              "Bash(sudo:*)",
+              "Bash(date -s:*)",
+              "Bash(date --set:*)",
+              "WebFetch",
+              "WebSearch"
+            ],
+            "path_jail_root": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+            "env_allow_list": [
+              "PATH",
+              "HOME",
+              "SHELL",
+              "LANG",
+              "LC_ALL",
+              "TMPDIR",
+              "TMP",
+              "TEMP",
+              "TERM",
+              "USER",
+              "TZ"
+            ],
+            "network_allow_list": [
+              "api.anthropic.com",
+              "statsig.anthropic.com",
+              "github.com",
+              "api.github.com",
+              "codeload.github.com",
+              "objects.githubusercontent.com",
+              "registry.npmjs.org",
+              "registry.yarnpkg.com",
+              "pypi.org",
+              "files.pythonhosted.org",
+              "crates.io",
+              "proxy.golang.org"
+            ],
+            "provider_base_url": "https://api.anthropic.com",
+            "lifecycle_scripts": "disabled",
+            "prohibited_actions": [
+              "self_merge",
+              "write_policy_path",
+              "write_outside_worktree",
+              "write_outside_scope",
+              "write_prohibited_path",
+              "destructive_git",
+              "registry_publication",
+              "non_local_migration",
+              "modify_judging_artifact",
+              "unlisted_egress_host",
+              "external_communication",
+              "new_registry_dependency",
+              "enable_own_tooling"
+            ]
+          },
+          "agent": {
+            "adapter": "claude-code",
+            "binary_path": "/tmp/perbo-capture/agent-capture-R37nOH/agent.cjs",
+            "binary_version": "fake-agent 1.0.0",
+            "binary_sha256": "549c2c672f179170466ceae0bf936dcc0ab5d82c9afe011aac3c5340efc5d8b7",
+            "model": "double",
+            "credential_class": "subscription",
+            "argv": [
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "stream-json",
+              "--verbose",
+              "--setting-sources",
+              "user",
+              "--strict-mcp-config",
+              "--mcp-config",
+              "{\"mcpServers\":{}}",
+              "--settings",
+              "/tmp/perbo-guard-0Btj2t/settings.json",
+              "--disable-slash-commands",
+              "--permission-mode",
+              "manual",
+              "--tools",
+              "Bash,Read,Edit,Write,Glob,Grep,Agent,Task",
+              "--allowedTools",
+              "Read,Edit,Write,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(rg:*),Bash(find:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(date:*),Bash(node:*),Bash(pnpm test:*),Bash(pnpm run:*),Bash(pnpm exec:*),Bash(pnpm typecheck:*),Bash(pnpm lint:*),Bash(pnpm build:*),Bash(pnpm -r:*),Bash(pnpm --filter:*),Bash(npm test:*),Bash(npm run:*),Bash(npx:*),Bash(vitest:*),Bash(tsc:*),Bash(eslint:*),Bash(./node_modules/.bin/:*),Bash(python3:*),Bash(pytest:*),Bash(make:*),Agent,Task",
+              "--disallowedTools",
+              "Bash(git push:*),Bash(git commit:*),Bash(git reset:*),Bash(git rebase:*),Bash(git branch:*),Bash(git remote:*),Bash(git tag:*),Bash(gh auth:*),Bash(gh config set:*),Bash(gh:*),Bash(curl:*),Bash(wget:*),Bash(ssh:*),Bash(scp:*),Bash(nc:*),Bash(npm publish:*),Bash(pnpm publish:*),Bash(cargo publish:*),Bash(pip install:*),Bash(sudo:*),Bash(date -s:*),Bash(date --set:*),WebFetch,WebSearch",
+              "--model",
+              "double",
+              "--agents",
+              "{\"perbo-explorer\":{\"description\":\"Reads the worktree and answers one question about it. Asked to write nothing; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are an explorer inside one approved ticket's worktree. Read the code and answer the question you were given. Write nothing: your answer is your whole output. Quote paths and line numbers so the answer can be checked.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-implementer\":{\"description\":\"Writes one part of the change, and the tests that prove it.\",\"prompt\":\"You are implementing one part of an approved ticket in a Git worktree. Make the change you were given and the tests that prove it, and nothing beyond it. The runner's write guard judges every write you make against the ticket's scope, so a refusal is the contract speaking and not a fault to work around. Do not commit, push, or open a pull request. End by saying which files you touched and what you ran.\",\"tools\":[\"Read\",\"Edit\",\"Write\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-verifier\":{\"description\":\"Runs checks and reports what passed and what failed. Asked to change nothing it is judging; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are verifying work in one approved ticket's worktree. Run the checks you were asked to run and report exactly what passed and what failed, quoting the output that says so. Write nothing and change nothing: a verifier that edits the code it is judging is worth nothing.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]}}",
+              "--no-session-persistence"
+            ],
+            "shape_sha256": "6df07883483ed9370da19365d4e8b8852e58e903eedf5638a213942cbbb1a7db",
+            "neutralisation": {
+              "suppressed_at_invocation": [
+                "--setting-sources user",
+                "--strict-mcp-config --mcp-config {}",
+                "--settings <the attempt's own two hooks, and no hook from anywhere else>",
+                "--disable-slash-commands",
+                "env: CLAUDE_CODE_DISABLE_CLAUDE_MDS, CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+                "never passed: --add-dir, --plugin-dir, --plugin-url, --dangerously-skip-permissions, --allow-dangerously-skip-permissions"
+              ],
+              "withheld_from_worktree": [],
+              "asserted_empty": [
+                "mcp_servers",
+                "mcp_server_errors",
+                "plugins.path",
+                "memory_paths"
+              ],
+              "reported": {
+                "mcp_servers": [],
+                "plugins": [],
+                "skills": [],
+                "subagents": [],
+                "memory_paths": []
+              }
+            }
+          },
+          "executor_skills": [],
+          "environment": {
+            "manifest_hash": "sha256:76828232896a521b99b58dc5381c6a5940bc835d6efca32726b6836159a3a07f",
+            "install_pinned": true,
+            "materialized_paths": [],
+            "secret_content_sha256": [],
+            "port_range_start": 41000,
+            "port_range_end": 41009,
+            "database_schema": null,
+            "env_names_passed": [
+              "PATH",
+              "HOME",
+              "SHELL",
+              "TMPDIR",
+              "USER",
+              "ANTHROPIC_BASE_URL",
+              "PERBO_WORKTREE",
+              "PERBO_PORT_START",
+              "PERBO_PORT_END",
+              "CI",
+              "TMP",
+              "TEMP"
+            ],
+            "env_names_dropped": 86
+          },
+          "commands": [
+            {
+              "sequence": 0,
+              "tool": "Bash",
+              "detail": "echo 'export const total = 1;' >> src/feature.ts",
+              "decision": "allowed",
+              "denial_reason": null,
+              "denial_rule": null,
+              "denial_target": null,
+              "cwd": ".",
+              "decided_by": "pre_execution_hook",
+              "second_reading": null,
+              "agent": null,
+              "at": "2026-09-27T00:37:29.780Z"
+            }
+          ],
+          "egress": [],
+          "prohibited_action_hits": [],
+          "user_instructions": [],
+          "usage": {
+            "input_tokens": 7,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 2,
+            "cost_micros": 4000,
+            "cost_basis": "transport_reported",
+            "token_ceiling_tokens": 9,
+            "wall_clock_ms": 1358,
+            "commands": 1,
+            "iterations": 1
+          },
+          "termination": {
+            "reason": "completed",
+            "detail": ""
+          },
+          "changeset_id": "cs_ef222516fa208c95",
+          "head_commit": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+          "prior_commits": [],
+          "change_set_origin": "attempt",
+          "executor_account": null,
+          "brief_reinjections": [],
+          "resumed_from": null,
+          "merged_base": null,
+          "spec_commit": null,
+          "swept_processes": [],
+          "base_verification": {
+            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "verified": true
+          },
+          "provisioning_verify": {
+            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "verified": true
+          },
+          "wait": null,
+          "declines": []
+        }
+      },
+      {
+        "attempt_id": "att_c970757a1df1c922",
+        "run": 1,
+        "sequence": 2,
+        "round": 1,
+        "started_at": "2026-09-27T00:37:30.477Z",
+        "wait": null,
+        "ended_at": "2026-09-27T00:37:31.497Z",
+        "outcome": "closures verified",
+        "termination": {
+          "reason": "completed",
+          "detail": ""
+        },
+        "agent": {
+          "model": "double",
+          "binary_version": "fake-agent 1.0.0",
+          "adapter": "claude-code",
+          "credential_class": "subscription"
+        },
+        "ceilings": [
+          {
+            "resource": "attempt_stall_ms",
+            "used": null,
+            "ceiling": 1200000,
+            "hit": false
+          },
+          {
+            "resource": "attempt_iterations",
+            "used": 1,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_commands",
+            "used": 1,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_wall_clock_ms",
+            "used": 1020,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_tokens",
+            "used": 9,
+            "ceiling": null,
+            "hit": false
+          },
+          {
+            "resource": "attempt_cost_micros",
+            "used": 4000,
+            "ceiling": null,
+            "hit": false
+          }
+        ],
+        "tokens": {
+          "input": 7,
+          "cache_read": 0,
+          "output": 2
+        },
+        "cost": {
+          "micros": 4000,
+          "basis": "transport_reported",
+          "partial": false
+        },
+        "round_cost": {
+          "micros": 4030,
+          "components": 2,
+          "priced": 2,
+          "reported": 1,
+          "estimated": 1,
+          "unavailable": 0,
+          "partial": 0
+        },
+        "checks": [
+          {
+            "check_id": "check_unit",
+            "name": "unit",
+            "kind": "unit",
+            "status": "passed",
+            "summary": "exited 0",
+            "command": "node -e process.exit(0)",
+            "detail": null,
+            "duration_ms": 49,
+            "source": "file",
+            "failing_tests": [],
+            "reruns": 0,
+            "flaky": false,
+            "rerun": null,
+            "tmpdir": "/tmp/"
+          }
+        ],
+        "review": null,
+        "node_reviews": [],
+        "review_decision": null,
+        "verification": {
+          "prompt_version": "closure_verify_v1",
+          "per_finding": [
+            {
+              "finding_key": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "status": "closed",
+              "pointer": "src/feature.ts"
+            }
+          ],
+          "deterministic_failure": null,
+          "all_closed": true,
+          "open_keys": [],
+          "cost_micros": 30,
+          "cost_basis": "provider_list_estimate"
+        },
+        "ladder": {
+          "kind": "remediate",
+          "given": [
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          ],
+          "closed": [
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          ],
+          "open": []
+        },
+        "declines": [],
+        "admitted_commands": 1,
+        "denials": [],
+        "bundles": [
+          {
+            "schema_version": 1,
+            "bundle_id": "bundle_f5913bc00e1a8e8a",
+            "kind": "execution",
+            "created_at": "2026-09-27T00:37:31.552Z",
+            "subject_id": "att_c970757a1df1c922",
+            "ticket_id": "ticket_local_98572de4cd59",
+            "inputs": {
+              "plan_id": "plan_local_98572de4cd59",
+              "plan_version": 1,
+              "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+              "merged_base": null,
+              "round_kind": "remediate",
+              "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
+              "remediation_round": 1,
+              "findings_given": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "findings_given_count": 1,
+              "invocation_shape": "47c3abb7319970430dcde2d54ffe8d2e052eea11a8dfdf267516c5e3a97cbd32",
+              "binary_version": "fake-agent 1.0.0",
+              "termination": "completed",
+              "resumed_from_bundle": null,
+              "resumed_from_attempt": null,
+              "resumed_diff_sha256": null,
+              "resumed_diff": null,
+              "resumed_diff_at": null
+            },
+            "context_manifest": [],
+            "versions": {
+              "code": "stage-2",
+              "prompt": "executor_remediation_v8",
+              "policy": "A2b",
+              "model": "double",
+              "tool": "fake-agent 1.0.0"
+            },
+            "usage": {
+              "input_tokens": 7,
+              "output_tokens": 2,
+              "cost_micros": 4000,
+              "cost_basis": "transport_reported",
+              "wall_clock_ms": 1020
+            },
+            "artifacts": [
+              {
+                "name": "attempt.json",
+                "sha256": "acaa67a83f52dd756031be6080041561188223e3507c808439d25d600c7d46aa",
+                "bytes": 10305,
+                "media_type": "application/json",
+                "retained": true
+              },
+              {
+                "name": "transcript.jsonl",
+                "sha256": "2188da6f7d75486f37e8d51db18b2d462e9d980d0b9e9e16bc850e4f87eefe36",
+                "bytes": 447,
+                "media_type": "application/x-ndjson",
+                "retained": true
+              },
+              {
+                "name": "prompt.txt",
+                "sha256": "ebedf36e8d0ce313ef1c26f30b5db18819c8f8862884de64be76699f03bff3d6",
+                "bytes": 7727,
+                "media_type": "text/plain",
+                "retained": true
+              },
+              {
+                "name": "checks.json",
+                "sha256": "70319f42de76fd36d138658fc4786c8270480f9b4b944a19a224eaf4e96d3f8b",
+                "bytes": 386,
+                "media_type": "application/json",
+                "retained": true
+              },
+              {
+                "name": "change.diff",
+                "sha256": "9c0ee567011889ce3988ffacf40d249dee7b802838cf7b64d72979c58ba17b84",
+                "bytes": 190,
+                "media_type": "text/x-diff",
+                "retained": true
+              }
+            ],
+            "errors": [],
+            "transitions": [
+              {
+                "at": "2026-09-27T00:37:30.477Z",
+                "from": "PROVISIONING",
+                "to": "EXECUTING",
+                "reason": "worktree materialized"
+              },
+              {
+                "at": "2026-09-27T00:37:31.552Z",
+                "from": "EXECUTING",
+                "to": "VERIFYING",
+                "reason": "completed"
+              }
+            ],
+            "retention": {
+              "class": "raw_transcript",
+              "expires_at": null
+            },
+            "redaction": {
+              "secret_content_sha256": [],
+              "secret_value_count": 0,
+              "redactions": 0,
+              "excluded_paths": []
+            },
+            "replayability": "re_executable",
+            "replayability_reason": "the materialized context bytes the model saw were retained, against a pinned model"
+          },
+          {
+            "schema_version": 1,
+            "bundle_id": "bundle_673a7757532afda0",
+            "kind": "review",
+            "created_at": "2026-09-27T00:37:31.557Z",
+            "subject_id": "cv_att_c970757a1df1c922",
+            "ticket_id": "ticket_local_98572de4cd59",
+            "inputs": {
+              "changeset_id": "cs_149fa550fd34b431",
+              "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+              "head_commit": "6bf2d42002b89510e29f1a715d171e6f3ca51578",
+              "remediation_round": 1,
+              "round_kind": "remediate",
+              "verification": true,
+              "all_closed": true,
+              "deterministic_failure": null,
+              "findings_given": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "findings_closed": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "findings_open": ""
+            },
+            "context_manifest": [],
+            "versions": {
+              "code": "stage-3",
+              "prompt": "closure_verify_v1",
+              "policy": "closure-verification",
+              "model": "double",
+              "tool": "claude-cli"
+            },
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 1,
+              "cost_micros": 30,
+              "cost_basis": "provider_list_estimate",
+              "wall_clock_ms": 0
+            },
+            "artifacts": [
+              {
+                "name": "verification.json",
+                "sha256": "a082b54bcb5c5975281eabdd512fcef1ed07f82bec068741f81d9ad6e4603f2d",
+                "bytes": 501,
+                "media_type": "application/json",
+                "retained": true
+              }
+            ],
+            "errors": [],
+            "transitions": [
+              {
+                "at": "2026-09-27T00:37:31.557Z",
+                "from": "VERIFYING",
+                "to": "INDEPENDENT_REVIEW",
+                "reason": "closures verified"
+              }
+            ],
+            "retention": {
+              "class": "replay_retained",
+              "expires_at": null
+            },
+            "redaction": {
+              "secret_content_sha256": [],
+              "secret_value_count": 0,
+              "redactions": 0,
+              "excluded_paths": []
+            },
+            "replayability": "re_executable",
+            "replayability_reason": "the materialized context bytes the model saw were retained, against a pinned model"
+          }
+        ],
+        "changed_files": [
+          {
+            "path": "src/feature.ts",
+            "change_kind": "added",
+            "additions": 2,
+            "deletions": 0
+          }
+        ],
+        "record": {
+          "schema_version": 1,
+          "attempt_id": "att_c970757a1df1c922",
+          "root_attempt_id": "att_01d7a6dc3d3cb830",
+          "continues_attempt_id": "att_01d7a6dc3d3cb830",
+          "remediation_round": 1,
+          "created_at": "2026-09-27T00:37:30.477Z",
+          "ticket_id": "ticket_local_98572de4cd59",
+          "plan_id": "plan_local_98572de4cd59",
+          "plan_version": 1,
+          "planned_risk": "P1",
+          "repository_id": "repo_capture-NU8DxJ",
+          "base_ref": "main",
+          "base_commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+          "provider": "local_worktree",
+          "branch": "prb/local-98572de4cd59/the-feature-module-exports-a-com",
+          "worktree_path": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+          "autonomy_class": "A2b",
+          "permission_profile": {
+            "autonomy_class": "A2b",
+            "command_allow_list": [
+              "Read",
+              "Edit",
+              "Write",
+              "Glob",
+              "Grep",
+              "Bash(ls:*)",
+              "Bash(cat:*)",
+              "Bash(head:*)",
+              "Bash(tail:*)",
+              "Bash(wc:*)",
+              "Bash(rg:*)",
+              "Bash(find:*)",
+              "Bash(git status:*)",
+              "Bash(git diff:*)",
+              "Bash(git log:*)",
+              "Bash(git show:*)",
+              "Bash(git rev-parse:*)",
+              "Bash(git merge-base:*)",
+              "Bash(git ls-files:*)",
+              "Bash(date:*)",
+              "Bash(node:*)",
+              "Bash(pnpm test:*)",
+              "Bash(pnpm run:*)",
+              "Bash(pnpm exec:*)",
+              "Bash(pnpm typecheck:*)",
+              "Bash(pnpm lint:*)",
+              "Bash(pnpm build:*)",
+              "Bash(pnpm -r:*)",
+              "Bash(pnpm --filter:*)",
+              "Bash(npm test:*)",
+              "Bash(npm run:*)",
+              "Bash(npx:*)",
+              "Bash(vitest:*)",
+              "Bash(tsc:*)",
+              "Bash(eslint:*)",
+              "Bash(./node_modules/.bin/:*)",
+              "Bash(python3:*)",
+              "Bash(pytest:*)",
+              "Bash(make:*)",
+              "Agent",
+              "Task"
+            ],
+            "command_deny_list": [
+              "Bash(git push:*)",
+              "Bash(git commit:*)",
+              "Bash(git reset:*)",
+              "Bash(git rebase:*)",
+              "Bash(git branch:*)",
+              "Bash(git remote:*)",
+              "Bash(git tag:*)",
+              "Bash(gh auth:*)",
+              "Bash(gh config set:*)",
+              "Bash(gh:*)",
+              "Bash(curl:*)",
+              "Bash(wget:*)",
+              "Bash(ssh:*)",
+              "Bash(scp:*)",
+              "Bash(nc:*)",
+              "Bash(npm publish:*)",
+              "Bash(pnpm publish:*)",
+              "Bash(cargo publish:*)",
+              "Bash(pip install:*)",
+              "Bash(sudo:*)",
+              "Bash(date -s:*)",
+              "Bash(date --set:*)",
+              "WebFetch",
+              "WebSearch"
+            ],
+            "path_jail_root": "/tmp/perbo-capture/capture-worktrees/att_01d7a6dc3d3cb830",
+            "env_allow_list": [
+              "PATH",
+              "HOME",
+              "SHELL",
+              "LANG",
+              "LC_ALL",
+              "TMPDIR",
+              "TMP",
+              "TEMP",
+              "TERM",
+              "USER",
+              "TZ"
+            ],
+            "network_allow_list": [
+              "api.anthropic.com",
+              "statsig.anthropic.com",
+              "github.com",
+              "api.github.com",
+              "codeload.github.com",
+              "objects.githubusercontent.com",
+              "registry.npmjs.org",
+              "registry.yarnpkg.com",
+              "pypi.org",
+              "files.pythonhosted.org",
+              "crates.io",
+              "proxy.golang.org"
+            ],
+            "provider_base_url": "https://api.anthropic.com",
+            "lifecycle_scripts": "disabled",
+            "prohibited_actions": [
+              "self_merge",
+              "write_policy_path",
+              "write_outside_worktree",
+              "write_outside_scope",
+              "write_prohibited_path",
+              "destructive_git",
+              "registry_publication",
+              "non_local_migration",
+              "modify_judging_artifact",
+              "unlisted_egress_host",
+              "external_communication",
+              "new_registry_dependency",
+              "enable_own_tooling"
+            ]
+          },
+          "agent": {
+            "adapter": "claude-code",
+            "binary_path": "/tmp/perbo-capture/agent-capture-R37nOH/agent.cjs",
+            "binary_version": "fake-agent 1.0.0",
+            "binary_sha256": "549c2c672f179170466ceae0bf936dcc0ab5d82c9afe011aac3c5340efc5d8b7",
+            "model": "double",
+            "credential_class": "subscription",
+            "argv": [
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "stream-json",
+              "--verbose",
+              "--setting-sources",
+              "user",
+              "--strict-mcp-config",
+              "--mcp-config",
+              "{\"mcpServers\":{}}",
+              "--settings",
+              "/tmp/perbo-guard-7Qjo9Q/settings.json",
+              "--disable-slash-commands",
+              "--permission-mode",
+              "manual",
+              "--tools",
+              "Bash,Read,Edit,Write,Glob,Grep,Agent,Task",
+              "--allowedTools",
+              "Read,Edit,Write,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(rg:*),Bash(find:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(date:*),Bash(node:*),Bash(pnpm test:*),Bash(pnpm run:*),Bash(pnpm exec:*),Bash(pnpm typecheck:*),Bash(pnpm lint:*),Bash(pnpm build:*),Bash(pnpm -r:*),Bash(pnpm --filter:*),Bash(npm test:*),Bash(npm run:*),Bash(npx:*),Bash(vitest:*),Bash(tsc:*),Bash(eslint:*),Bash(./node_modules/.bin/:*),Bash(python3:*),Bash(pytest:*),Bash(make:*),Agent,Task",
+              "--disallowedTools",
+              "Bash(git push:*),Bash(git commit:*),Bash(git reset:*),Bash(git rebase:*),Bash(git branch:*),Bash(git remote:*),Bash(git tag:*),Bash(gh auth:*),Bash(gh config set:*),Bash(gh:*),Bash(curl:*),Bash(wget:*),Bash(ssh:*),Bash(scp:*),Bash(nc:*),Bash(npm publish:*),Bash(pnpm publish:*),Bash(cargo publish:*),Bash(pip install:*),Bash(sudo:*),Bash(date -s:*),Bash(date --set:*),WebFetch,WebSearch",
+              "--model",
+              "double",
+              "--agents",
+              "{\"perbo-explorer\":{\"description\":\"Reads the worktree and answers one question about it. Asked to write nothing; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are an explorer inside one approved ticket's worktree. Read the code and answer the question you were given. Write nothing: your answer is your whole output. Quote paths and line numbers so the answer can be checked.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-implementer\":{\"description\":\"Writes one part of the change, and the tests that prove it.\",\"prompt\":\"You are implementing one part of an approved ticket in a Git worktree. Make the change you were given and the tests that prove it, and nothing beyond it. The runner's write guard judges every write you make against the ticket's scope, so a refusal is the contract speaking and not a fault to work around. Do not commit, push, or open a pull request. End by saying which files you touched and what you ran.\",\"tools\":[\"Read\",\"Edit\",\"Write\",\"Glob\",\"Grep\",\"Bash\"]},\"perbo-verifier\":{\"description\":\"Runs checks and reports what passed and what failed. Asked to change nothing it is judging; it carries Bash, and the ticket's scope guard is what enforces where a write may land.\",\"prompt\":\"You are verifying work in one approved ticket's worktree. Run the checks you were asked to run and report exactly what passed and what failed, quoting the output that says so. Write nothing and change nothing: a verifier that edits the code it is judging is worth nothing.\",\"tools\":[\"Read\",\"Glob\",\"Grep\",\"Bash\"]}}",
+              "--no-session-persistence"
+            ],
+            "shape_sha256": "47c3abb7319970430dcde2d54ffe8d2e052eea11a8dfdf267516c5e3a97cbd32",
+            "neutralisation": {
+              "suppressed_at_invocation": [
+                "--setting-sources user",
+                "--strict-mcp-config --mcp-config {}",
+                "--settings <the attempt's own two hooks, and no hook from anywhere else>",
+                "--disable-slash-commands",
+                "env: CLAUDE_CODE_DISABLE_CLAUDE_MDS, CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+                "never passed: --add-dir, --plugin-dir, --plugin-url, --dangerously-skip-permissions, --allow-dangerously-skip-permissions"
+              ],
+              "withheld_from_worktree": [],
+              "asserted_empty": [
+                "mcp_servers",
+                "mcp_server_errors",
+                "plugins.path",
+                "memory_paths"
+              ],
+              "reported": {
+                "mcp_servers": [],
+                "plugins": [],
+                "skills": [],
+                "subagents": [],
+                "memory_paths": []
+              }
+            }
+          },
+          "executor_skills": [],
+          "environment": {
+            "manifest_hash": "sha256:76828232896a521b99b58dc5381c6a5940bc835d6efca32726b6836159a3a07f",
+            "install_pinned": true,
+            "materialized_paths": [],
+            "secret_content_sha256": [],
+            "port_range_start": 41000,
+            "port_range_end": 41009,
+            "database_schema": null,
+            "env_names_passed": [
+              "PATH",
+              "HOME",
+              "SHELL",
+              "TMPDIR",
+              "USER",
+              "ANTHROPIC_BASE_URL",
+              "PERBO_WORKTREE",
+              "PERBO_PORT_START",
+              "PERBO_PORT_END",
+              "CI",
+              "TMP",
+              "TEMP"
+            ],
+            "env_names_dropped": 86
+          },
+          "commands": [
+            {
+              "sequence": 0,
+              "tool": "Bash",
+              "detail": "echo 'export const total = 1;' >> src/feature.ts",
+              "decision": "allowed",
+              "denial_reason": null,
+              "denial_rule": null,
+              "denial_target": null,
+              "cwd": ".",
+              "decided_by": "pre_execution_hook",
+              "second_reading": null,
+              "agent": null,
+              "at": "2026-09-27T00:37:30.983Z"
+            }
+          ],
+          "egress": [],
+          "prohibited_action_hits": [],
+          "user_instructions": [],
+          "usage": {
+            "input_tokens": 7,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 2,
+            "cost_micros": 4000,
+            "cost_basis": "transport_reported",
+            "token_ceiling_tokens": 9,
+            "wall_clock_ms": 1020,
+            "commands": 1,
+            "iterations": 1
+          },
+          "termination": {
+            "reason": "completed",
+            "detail": ""
+          },
+          "changeset_id": "cs_149fa550fd34b431",
+          "head_commit": "6bf2d42002b89510e29f1a715d171e6f3ca51578",
+          "prior_commits": [
+            {
+              "sha": "d7362aeb3f405f6b7b72ce921b763bc7a3b156e0",
+              "attempt_id": "att_01d7a6dc3d3cb830"
+            }
+          ],
+          "change_set_origin": "attempt",
+          "executor_account": null,
+          "brief_reinjections": [],
+          "resumed_from": null,
+          "merged_base": null,
+          "spec_commit": null,
+          "swept_processes": [],
+          "base_verification": {
+            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "verified": true
+          },
+          "provisioning_verify": {
+            "commit": "df6774d60fb3af1b88b8189a4cb9d954dce7fc17",
+            "verified": true
+          },
+          "wait": null,
+          "declines": []
+        }
+      }
+    ],
+    "total_cost": {
+      "micros": 218030,
+      "components": 4,
+      "priced": 4,
+      "reported": 2,
+      "estimated": 2,
+      "unavailable": 0,
+      "partial": 0
+    },
+    "verdicts": []
+  }
+}

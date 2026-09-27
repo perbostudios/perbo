@@ -1600,6 +1600,8 @@ export interface AttemptView {
     ceiling: number | null;
     hit: boolean;
   }[];
+  /** The commands the attempt was let run, as `perbo inspect` counts them: the loop page's strip counts these (D-104). */
+  admittedCommands: number;
   review: ReviewArtifact | null;
   reviewDecision: string | null;
   changes: {

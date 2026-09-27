@@ -289,19 +289,25 @@ function ArchiveRow({
             : row.ticket.state}
       </span>
       {/* Delete first and to Home at the right: the way back is the row's
-          own action, and a destructive one is never the one at the end. */}
+          own action, and a destructive one is never the one at the end. A
+          ticket whose pull request is open is not offered it, as its contract
+          page does not offer it and the host refuses it (D-129): a called-off
+          ticket is filed with its pull request still open, and the delete is
+          offered again once that pull request is merged or closed. */}
       <span role="cell" className="archive-actions">
-        <button
-          className="text-button small muted archive-delete"
-          aria-label={`Delete ticket: ${title}`}
-          disabled={held}
-          onClick={(event) => {
-            event.stopPropagation();
-            remove(row);
-          }}
-        >
-          Delete
-        </button>
+        {row.ticket.state !== "pr_open" && (
+          <button
+            className="text-button small muted archive-delete"
+            aria-label={`Delete ticket: ${title}`}
+            disabled={held}
+            onClick={(event) => {
+              event.stopPropagation();
+              remove(row);
+            }}
+          >
+            Delete
+          </button>
+        )}
         <button
           className="text-button small muted"
           aria-label="Return this ticket to Home"
@@ -338,6 +344,8 @@ export function HomePage({
     [renaming, setRenaming] = useState<string | null>(null),
     // The archived ticket whose Delete was pressed and not yet answered.
     [removing, setRemoving] = useState<TaskRow | null>(null);
+  // Its summary, for the branch its attempts ran on where its delivery names none.
+  const removingSummary = useTaskSummary(removing?.repoId ?? "", removing?.ticket.key ?? "", removing !== null);
   // Deleted where it is listed: the row leaves the Archive at the click and
   // the person stays on the Archive; a refusal puts it back and says why below.
   const discard = useDiscardTicket(action.mutateAsync, () => undefined);
@@ -660,7 +668,7 @@ export function HomePage({
         // at, asked here and not by the browser, so the row stays in view.
         <ConfirmDelete
           label="Delete ticket"
-          confirm={confirmDeleteFiled(titleOf(removing), removing.ticket)}
+          confirm={confirmDeleteFiled(titleOf(removing), removing.ticket, removingSummary.data?.branch)}
           disabled={action.isPending}
           keep={() => setRemoving(null)}
           remove={() => {

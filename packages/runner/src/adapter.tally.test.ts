@@ -42,6 +42,19 @@ describe("the attempt's tally", () => {
             // The attempt's scratch directory, which no change set holds.
             ...call("toolu_scratch", "Write", { file_path: join(scratchPath(worktree), "draft.txt"), content: "x" }),
             ...call("toolu_edit", "Edit", { file_path: "src/retry.ts", old_string: "x", new_string: "y" }),
+            // A write the tool itself failed: its result is an error, and nothing was written.
+            { step: "tool_use", id: "toolu_failed", tool: "Write", input: { file_path: join(worktree, "src", "failed.ts"), content: "x" } },
+            { step: "hook", id: "toolu_failed", tool: "Write", input: { file_path: join(worktree, "src", "failed.ts"), content: "x" } },
+            { step: "tool_result", id: "toolu_failed", text: "could not write", is_error: true },
+            // The hook refused what the transcript reading admitted, the disagreement a
+            // record's second reading keeps: the hook's answer is the one that held.
+            { step: "tool_use", id: "toolu_disagreed", tool: "Write", input: { file_path: join(worktree, "src", "held.ts"), content: "x" } },
+            { step: "hook", id: "toolu_disagreed", tool: "Write", input: { file_path: join(worktree, "docs", "held.md"), content: "x" } },
+            { step: "tool_result", id: "toolu_disagreed", text: "ok" },
+            // A call no hook answered and no result followed: the record keeps the
+            // transcript's reading of it, and the tally comes to the record at the end.
+            { step: "tool_use", id: "toolu_unanswered", tool: "Read", input: { file_path: "src/mailer.ts" } },
+            { step: "text", text: "done" },
             { step: "result" },
           ],
         },
@@ -59,13 +72,25 @@ describe("the attempt's tally", () => {
         onTally: (tally) => tallies.push(tally),
       });
 
+      // No tally ever named the refused path, not even between the call and the hook's answer.
+      for (const tally of tallies) {
+        expect(tally.written).not.toContain("docs/notes.md");
+        expect(tally.written).not.toContain("src/failed.ts");
+        expect(tally.written).not.toContain("src/held.ts");
+      }
+      // A write counts once it is settled, and not on the block alone.
+      expect(tallies.some((tally) => tally.written.includes("src/retry.ts"))).toBe(true);
       // The words came first, and counted as no command.
       expect(tallies[0]?.commands).toBe(0);
       expect(result.commands.find((command) => command.detail.includes("notes.md"))?.decision).toBe("denied");
-      expect(result.commands).toHaveLength(5);
+      expect(result.commands).toHaveLength(8);
       const last = tallies.at(-1)!;
+      // Only the commands the guard admitted: the refused write and the one the hook refused are not.
+      const admitted = result.commands.filter((command) => command.decision === "allowed").length;
+      expect(admitted).toBe(result.commands.length - 2);
+      for (const tally of tallies) expect(tally.commands).toBeLessThanOrEqual(admitted);
       expect(last).toEqual({
-        commands: result.commands.length,
+        commands: admitted,
         input_tokens: result.usage.input_tokens,
         output_tokens: result.usage.output_tokens,
         cost_micros: result.usage.cost_micros,

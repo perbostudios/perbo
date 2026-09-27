@@ -884,10 +884,21 @@ export function observedPath(result: TicketRunResult): ReturnType<typeof statesO
   return statesObserved(result);
 }
 
+/**
+ * `text` on one physical line: every line break in it, and any run of them,
+ * read as one space. What a run writes to stderr is read a line at a time — the
+ * desktop takes a stage, a tally or a spoken turn from a line's start — so a
+ * message that carries another program's output, such as `gh`'s own
+ * `error: …` lines, must not print a line that reads as one of the run's own.
+ */
+export function physicalLine(text: string): string {
+  return text.replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, " ");
+}
+
 async function runExecute(options: ExecuteOptions): Promise<number> {
   const { args, streams } = options;
   const now = options.now ?? new Date();
-  const progress = args.quiet ? undefined : (message: string) => streams.stderr(`  ${message}\n`);
+  const progress = args.quiet ? undefined : (message: string) => streams.stderr(`  ${physicalLine(message)}\n`);
   // SCP-180: a run with nothing admitted behind it mints its contract here,
   // from the flags or from the pull request that already describes the work.
   // Read before anything is spent, so a reference that does not resolve — or a
@@ -1037,8 +1048,10 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     } catch (error) {
       if (!(error instanceof ResumeRefusedError)) throw error;
       streams.stderr(
-        `error: the run did not start because it could not resume from ` +
-          `${args.resumeFrom ?? config.resume_from} — ${error.message}\n`,
+        `error: ${physicalLine(
+          `the run did not start because it could not resume from ` +
+            `${args.resumeFrom ?? config.resume_from} — ${error.message}`,
+        )}\n`,
       );
       return EXIT_CODES.did_not_complete;
     }
@@ -1302,7 +1315,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
       if (at !== null) streams.stderr(`  refusal recorded in ${at}\n`);
     }
     const failure = describeFailure("run", error);
-    streams.stderr(`error: ${failure.message}\n`);
+    streams.stderr(`error: ${physicalLine(failure.message)}\n`);
     return failure.code;
   }
 
@@ -1472,7 +1485,7 @@ async function publishRetainedTicket(input: {
     });
   } catch (error) {
     if (!(error instanceof RunRefusedError)) throw error;
-    streams.stderr(`error: ${admitted.key}'s retained branch was not published: ${error.message}\n`);
+    streams.stderr(`error: ${physicalLine(`${admitted.key}'s retained branch was not published: ${error.message}`)}\n`);
     return EXIT_CODES.did_not_complete;
   }
   const { state, delivery_checks } = recorded!;

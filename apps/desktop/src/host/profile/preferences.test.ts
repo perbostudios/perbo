@@ -4,12 +4,16 @@ import { SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
 import { ProfileStateSchema, type ProfileState } from "./store.js";
 import {
   discardEditingFor,
+  forgetCalledOff,
   forgetRepository,
   forgetTicket,
   recordOpened,
   recordCalledOff,
   setArchived,
 } from "./preferences.js";
+
+/** A pull request's URL, as the ticket's delivery records it. */
+const PR = (number: number): string => `https://github.com/example/webstore/pull/${number}`;
 
 const alpha = "80000000-0000-4000-8000-000000000001";
 const beta = "80000000-0000-4000-8000-000000000002";
@@ -47,7 +51,7 @@ function profile(over: Record<string, unknown> = {}): ProfileState {
     titles: { [alpha + ":PRB-1"]: "Renamed", [beta + ":PRB-9"]: "Another repository's" },
     taskModels: { [alpha + ":PRB-1"]: TaskModelsSchema.strip().parse(SettingsSchema.parse({})) },
     archived: [alpha + ":PRB-1", alpha + ":PRB-2", beta + ":PRB-9"],
-    calledOff: [alpha + ":PRB-1", beta + ":PRB-9"],
+    calledOff: [alpha + ":PRB-1:" + PR(1), alpha + ":PRB-10:" + PR(10), beta + ":PRB-9:" + PR(9)],
     lastOpened: { [alpha + ":PRB-1"]: "2026-09-20T09:00:00.000Z", [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" },
     ...over,
   });
@@ -61,7 +65,7 @@ describe("forgetRepository", () => {
     expect(state.titles).toEqual({ [beta + ":PRB-9"]: "Another repository's" });
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([beta + ":PRB-9"]);
-    expect(state.calledOff).toEqual([beta + ":PRB-9"]);
+    expect(state.calledOff).toEqual([beta + ":PRB-9:" + PR(9)]);
     expect(state.lastOpened).toEqual({ [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" });
   });
 
@@ -80,7 +84,8 @@ describe("forgetTicket", () => {
     expect(state.titles).toEqual({ [beta + ":PRB-9"]: "Another repository's" });
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([alpha + ":PRB-2", beta + ":PRB-9"]);
-    expect(state.calledOff).toEqual([beta + ":PRB-9"]);
+    // Every call-off of that ticket, and not one of a key it prefixes.
+    expect(state.calledOff).toEqual([alpha + ":PRB-10:" + PR(10), beta + ":PRB-9:" + PR(9)]);
     expect(state.lastOpened).toEqual({ [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" });
   });
 
@@ -119,11 +124,21 @@ describe("setArchived", () => {
 });
 
 describe("recordCalledOff", () => {
-  it("records a merge called off once, keyed to its repository", () => {
-    const state = profile({ calledOff: [alpha + ":PRB-1"] });
-    recordCalledOff(state, alpha, "PRB-1");
-    recordCalledOff(state, beta, "PRB-1");
-    expect(state.calledOff).toEqual([alpha + ":PRB-1", beta + ":PRB-1"]);
+  it("records a merge called off once, keyed to its repository and the pull request it was called off on", () => {
+    const state = profile({ calledOff: [alpha + ":PRB-1:" + PR(1)] });
+    recordCalledOff(state, alpha, "PRB-1", PR(1));
+    recordCalledOff(state, beta, "PRB-1", PR(1));
+    recordCalledOff(state, alpha, "PRB-1", PR(2));
+    expect(state.calledOff).toEqual([alpha + ":PRB-1:" + PR(1), beta + ":PRB-1:" + PR(1), alpha + ":PRB-1:" + PR(2)]);
+  });
+});
+
+describe("forgetCalledOff", () => {
+  it("drops every call-off of the ticket, whichever pull request it names, and says whether there was one", () => {
+    const state = profile({ calledOff: [alpha + ":PRB-1:" + PR(1), alpha + ":PRB-1:" + PR(2), alpha + ":PRB-10:" + PR(10)] });
+    expect(forgetCalledOff(state, alpha, "PRB-1")).toBe(true);
+    expect(state.calledOff).toEqual([alpha + ":PRB-10:" + PR(10)]);
+    expect(forgetCalledOff(state, alpha, "PRB-1")).toBe(false);
   });
 });
 

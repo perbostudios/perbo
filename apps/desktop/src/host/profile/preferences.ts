@@ -1,9 +1,11 @@
+import { calledOffEntry, calledOffPrefix } from "../../shared/archive.js";
 import type { ProfileState } from "./store.js";
 
 /**
  * The preferences a person set beside a ticket, keyed `repoId:key`: its title,
- * the models it drafts and runs with, whether it has been filed, whether its
- * merge was called off and when its page was last opened. They are this host's own, so they are dropped here
+ * the models it drafts and runs with, whether it has been filed and when its
+ * page was last opened; a call-off is keyed by the pull request as well
+ * (`calledOffEntry`). They are this host's own, so they are dropped here
  * rather than written to a repository.
  */
 const entryKey = (repoId: string, key: string): string => repoId + ":" + key;
@@ -32,7 +34,7 @@ export function forgetTicket(state: ProfileState, repoId: string, key: string): 
   delete state.titles[entry];
   delete state.taskModels[entry];
   state.archived = state.archived.filter((item) => item !== entry);
-  state.calledOff = state.calledOff.filter((item) => item !== entry);
+  forgetCalledOff(state, repoId, key);
   delete state.lastOpened[entry];
 }
 
@@ -63,9 +65,20 @@ export function setArchived(
     : state.archived.filter((entry) => !entries.includes(entry));
 }
 
-/** The person's Don't merge on this ticket, recorded once (D-097). */
-export function recordCalledOff(state: ProfileState, repoId: string, key: string): void {
-  state.calledOff = [...new Set([...state.calledOff, entryKey(repoId, key)])];
+/** The person's Don't merge on this ticket's open pull request, recorded once (D-097). */
+export function recordCalledOff(state: ProfileState, repoId: string, key: string, pullRequestUrl: string): void {
+  state.calledOff = [...new Set([...state.calledOff, calledOffEntry(repoId, key, pullRequestUrl)])];
+}
+
+/**
+ * Every call-off recorded on this ticket, dropped: the ticket is deleted, or a
+ * run of it starts, which puts it back in the loop and may open a pull request
+ * of its own. Answers whether one was there.
+ */
+export function forgetCalledOff(state: ProfileState, repoId: string, key: string): boolean {
+  const before = state.calledOff.length;
+  state.calledOff = state.calledOff.filter((item) => !item.startsWith(calledOffPrefix(repoId, key)));
+  return state.calledOff.length !== before;
 }
 
 /**

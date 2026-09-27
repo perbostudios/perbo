@@ -65,7 +65,7 @@ export const costLabel = ({ cost }: Pick<Detail, "cost">): string =>
 
 /** The loop page's strip, over every run of the ticket. */
 export interface LoopTally {
-  /** The commands every attempt asked for. */
+  /** The commands every attempt was let run. */
   commands: number;
   /** The distinct paths every attempt's change set touched. */
   files: number;
@@ -82,7 +82,7 @@ export interface LoopTally {
  * The loop page's strip: the commands, the files and the spend of the whole
  * ticket, every run of it (D-104).
  *
- * Read from the records of every attempt: each attempt's commands, the paths
+ * Read from the records of every attempt: each attempt's admitted commands, the paths
  * its change set holds, and the usage its bundles record — the executor's, the
  * review's and the closure verification's. While a run goes, what it has done
  * so far comes from the runner's tally line in its log, added to the records
@@ -117,12 +117,7 @@ export function loopTally(input: { jobs: readonly Job[]; active: Job | undefined
     bundles.reduce((total, bundle) => total + bundle.usage.input_tokens + bundle.usage.output_tokens, 0) +
     (running === null ? 0 : running.input_tokens + running.output_tokens);
   return {
-    commands:
-      recorded.reduce(
-        (total, attempt) =>
-          total + (attempt.ceilings.find((ceiling) => ceiling.resource === "attempt_commands")?.used ?? 0),
-        0,
-      ) + (running?.commands ?? 0),
+    commands: recorded.reduce((total, attempt) => total + attempt.admittedCommands, 0) + (running?.commands ?? 0),
     files: paths.size + (running?.files ?? 0),
     tokens: `${tokens.toLocaleString("en-US")} ${tokens === 1 ? "token" : "tokens"}`,
     dollars:

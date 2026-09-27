@@ -65,7 +65,7 @@ export { readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
 export type { Speaker } from "./spoken.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";
-export { readTally, tallyLine } from "./tally.js";
+export { admittedCommands, readTally, tallyLine } from "./tally.js";
 export type { Tally } from "./tally.js";
 export type { SymbolIndex, UnsupportedRepository } from "./symbol-index.js";
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";

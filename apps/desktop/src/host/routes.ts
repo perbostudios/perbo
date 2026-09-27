@@ -13,7 +13,7 @@ import { draftedReading, nameSpecAfterRename, saveSpec, specPath, specTexts, spe
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
+import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import {
   deleteDraftedFromSpec,
   deleteSpec,
@@ -24,7 +24,7 @@ import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/op
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
 import { objectsPath } from "./repository/layout.js";
 import { findingsOnRecord } from "./records.js";
-import { recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
+import { forgetCalledOff, recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
 import {
@@ -255,7 +255,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // the person finds the work as it was and why. Another ticket's run in
       // the same repository holds nothing of this one.
       if (session.key !== null && session.admitted && heldTicket(m.jobs.live(), session.repoId, session.key))
-        throw new Error(DELETE_WAITS_FOR_COMMANDS);
+        throw new Error(DELETE_WAITS_FOR_TICKET_COMMAND);
       const discarded = m.editing.discard(request.id, request.revision);
       // Waited out before anything is deleted: a session whose stdin has closed
       // finishes the turn it is in, and a turn that writes the spec after the
@@ -462,7 +462,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       if (ticket === undefined) throw new Error("The ticket is not in the repository's ticket store.");
       if (ticket.state !== "pr_open" || ticket.delivery.pull_request_url === null)
         throw new Error(notCallable(request.key));
-      recordCalledOff(m.profile.state, repo.id, request.key);
+      recordCalledOff(m.profile.state, repo.id, request.key, ticket.delivery.pull_request_url);
       m.changes.preferences(m.profile.state);
       return null;
     }),
@@ -1002,12 +1002,13 @@ function loop(
     },
   );
   // A filed ticket whose loop starts again is back on Home, and stays there
-  // when that run ends until it is filed again (S4).
+  // when that run ends until it is filed again (S4). A call-off it carried is
+  // over: the run is the loop again, and a pull request it opens waits on a
+  // merge decision of its own (D-097).
   const entry = repo.id + ":" + request.key;
-  if (m.profile.state.archived.includes(entry)) {
-    setArchived(m.profile.state, repo.id, [request.key], false);
-    m.changes.preferences(m.profile.state);
-  }
+  const filed = m.profile.state.archived.includes(entry);
+  if (filed) setArchived(m.profile.state, repo.id, [request.key], false);
+  if (forgetCalledOff(m.profile.state, repo.id, request.key) || filed) m.changes.preferences(m.profile.state);
   return job;
 }
 

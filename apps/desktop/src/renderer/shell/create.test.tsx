@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { nameOfRoute, ticketsNoDraftStandsFor, titleOfDraft, unclaimedSpecs } from "./create.js";
+import { confirmDeleteFiled, nameOfRoute, ticketsNoDraftStandsFor, titleOfDraft, unclaimedSpecs } from "./create.js";
 import { openDrafts } from "../../shared/contract-editing.js";
 import type { EditingSession, OpenDraft, Snapshot } from "../../shared/protocol.js";
 
@@ -167,5 +167,47 @@ describe("which specs the picker offers", () => {
 
   it("is unbothered by a ticket that was never drafted from a spec", () => {
     expect(unclaimedSpecs({ specs: [spec], tasks: [ticketFor(null)] }, [])).toEqual([spec]);
+  });
+});
+
+describe("what the Archive's Delete asks (D-129)", () => {
+  const ticket = (over: { spec?: string; branch?: string | null; pullRequest?: string | null } = {}) => ({
+    admission: { spec: over.spec === undefined ? null : { path: over.spec } },
+    delivery: { branch: over.branch ?? null, pull_request_url: over.pullRequest ?? null },
+  });
+  const GOES =
+    "Delete “Retry”? It is archived: its ticket, contract and plan, every attempt it recorded and the evidence " +
+    "those attempts sealed";
+
+  it("names the branch its delivery records, and the pull request it has", () => {
+    expect(confirmDeleteFiled("Retry", ticket({ branch: "prb/409/retry", pullRequest: "https://github.com/o/r/pull/9" }))).toBe(
+      `${GOES} all go, and nothing of this is kept. This leaves the branch prb/409/retry in git and its pull ` +
+        "request on GitHub, and any worktree a run left, which is reclaimed later.",
+    );
+  });
+
+  it("names the branch its attempts record where its delivery records none, and prefers the delivery's", () => {
+    expect(confirmDeleteFiled("Retry", ticket(), "prb/409/from-the-attempts")).toContain(
+      "This leaves the branch prb/409/from-the-attempts in git, and any worktree",
+    );
+    expect(confirmDeleteFiled("Retry", ticket({ branch: "prb/409/delivered" }), "prb/409/from-the-attempts")).toContain(
+      "the branch prb/409/delivered in git",
+    );
+  });
+
+  it("says any branch it left where nothing records one, or the attempts are not read yet", () => {
+    for (const recorded of [null, undefined])
+      expect(confirmDeleteFiled("Retry", ticket(), recorded)).toBe(
+        `${GOES} all go, and nothing of this is kept. This leaves any branch it left in git, and any worktree a ` +
+          "run left, which is reclaimed later.",
+      );
+  });
+
+  it("takes the spec folder it came from only when nothing else names it", () => {
+    expect(confirmDeleteFiled("Retry", ticket({ spec: "specs/retry/spec.md" }))).toContain(
+      `${GOES}, with the spec folder it came from when nothing else names it, all go`,
+    );
+    expect(confirmDeleteFiled("Retry", ticket())).not.toContain("spec folder");
+    expect(confirmDeleteFiled(" ", ticket())).toMatch(/^Delete this ticket\?/);
   });
 });

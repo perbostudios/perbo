@@ -287,7 +287,7 @@ function storeWith(
       { name: "attempt.json", media_type: "application/json", body: JSON.stringify(attempt) },
       { name: "transcript.jsonl", media_type: "application/x-ndjson", body: "" },
     ]);
-    write("review", "rev_verdict0001", { changeset_id: "cs_verdict0001", decision: "changes_requested", remediation_round: 0 }, [
+    write("review", "rev_verdict0001", { attempt_id: ATTEMPT, changeset_id: "cs_verdict0001", decision: "changes_requested", remediation_round: 0 }, [
       {
         name: "review.json",
         media_type: "application/json",
@@ -926,14 +926,14 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
         now: new Date("2026-09-04T09:05:00.000Z"),
       });
 
-    // The unrelated, still-intact review: a different changeset, so this
+    // The unrelated, still-intact review: an earlier round's attempt, so this
     // attempt's own `reviewBundle` lookup never picks it, but it is still
     // scanned for the finding keys a decline is allowed to name.
     if (includeRoutingEvidence) {
       write(
         "review",
         "rev_still_intact001",
-        { changeset_id: "cs_earlier_round", decision: "remediable", remediation_round: 0 },
+        { attempt_id: "att_earlier_round", changeset_id: "cs_earlier_round", decision: "remediable", remediation_round: 0 },
         [
           {
             name: "review.json",
@@ -950,7 +950,7 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
     const { path: reviewPath } = write(
       "review",
       "rev_pruned00000001",
-      { changeset_id: "cs_pruned_decline", decision: "remediable", remediation_round: 1 },
+      { attempt_id: DECLINER, changeset_id: "cs_pruned_decline", decision: "remediable", remediation_round: 1 },
       [
         {
           name: "review.json",

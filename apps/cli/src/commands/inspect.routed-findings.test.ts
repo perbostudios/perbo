@@ -96,7 +96,7 @@ function storeWithRoutedReview(name: string): string {
   write(
     "review",
     review.review_id,
-    { changeset_id: CHANGESET_ID, decision: "changes_requested", remediation_round: 0 },
+    { attempt_id: attempt.attempt_id, changeset_id: CHANGESET_ID, decision: "changes_requested", remediation_round: 0 },
     [{ name: "review.json", media_type: "application/json", body: JSON.stringify(review) }],
     "2026-09-06T11:02:00.000Z",
   );

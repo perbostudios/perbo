@@ -20,7 +20,7 @@ import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
 import { EVERY_PROBLEM_RESOLVED, GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
 import { isLive, lane } from "../shared/jobs.js";
-import { DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
+import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import type {
   Change,
   Draft,
@@ -6013,7 +6013,7 @@ readline.createInterface({ input: process.stdin })
     try {
       await made.service.request({ kind: "driftCheck", id: made.id, state: null });
       await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
-        DELETE_WAITS_FOR_COMMANDS,
+        DELETE_WAITS_FOR_TICKET_COMMAND,
       );
       expect((await made.service.request({ kind: "editingRead", id: made.id })).phase).not.toBe("discarded");
       expect(existsSync(made.ticket), "the ticket").toBe(true);
@@ -6281,6 +6281,46 @@ describe("a stopped run's ticket", () => {
     );
     return { ...made, repoId, at, attempts, mine, other };
   }
+
+  it("drafts the plan again while another ticket's run is under way in the same repository", async () => {
+    let repo = "";
+    let release!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const drafts = drafting(() => repo);
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run") {
+        await holding;
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return drafts(binary, args, options);
+    };
+    const made = await stopped(runner);
+    repo = made.repo;
+    // PRB-2, another ticket in the same repository, its run under way.
+    await finished(
+      made.service,
+      (await made.service.request({ kind: "admit", repoId: made.repoId, draft: { ...draft, outcome: "Another piece of work beside it" } })).id,
+    );
+    const other = await made.service.request({
+      kind: "run",
+      repoId: made.repoId,
+      key: "PRB-2",
+      digest: (await made.service.detail(made.repoId, "PRB-2")).digest,
+      approve: false,
+      publish: false,
+      resumeFrom: null,
+    });
+    expect(other.state).toBe("running");
+
+    const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+    expect(opened.key).toBe("PRB-3");
+    expect(existsSync(join(made.repo, ".perbo", "tickets", "PRB-1.json")), "the stopped ticket").toBe(false);
+    expect((await made.service.snapshot()).jobs.find((job) => job.id === other.id)?.state).toBe("running");
+    release();
+    await finished(made.service, other.id);
+  });
 
   it("deletes the stopped ticket and its evidence, keeps the spec, and opens a planning over the plan drafted from it", async () => {
     // The fixture's repository is not there until the fixture has made it, so
@@ -6864,10 +6904,14 @@ describe("what the host lets a person archive", () => {
     expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
   });
 
-  it("records Don't merge only on an open pull request, and files it then", async () => {
-    const { service, repo, options } = fixture();
+  it("records Don't merge only on an open pull request, files it then, and forgets it once a run starts", async () => {
+    const runner: typeof runProcess = async (binary, args, runOptions) =>
+      args[1] === "run"
+        ? { code: 0, stdout: "{}", stderr: "", cancelled: false }
+        : runProcess(binary, args, runOptions);
+    const { service, repo, options } = fixture(runner);
     const registered = await service.registerRepository(repo);
-    const entry = registered.id + ":PRB-1";
+    const entry = registered.id + ":PRB-1:https://github.com/example/repo/pull/1";
     await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
     const callOff = () => service.request({ kind: "callOff", repoId: registered.id, key: "PRB-1" });
     const noPullRequest = "PRB-1 has no open pull request, so there is no merge to call off.";
@@ -6885,7 +6929,31 @@ describe("what the host lets a person archive", () => {
     // Kept with the profile, as every preference is.
     expect(JSON.parse(readFileSync(join(options.dataDirectory, "workspace.json"), "utf8")).calledOff).toEqual([entry]);
     await service.request({ kind: "archive", repoId: registered.id, keys: ["PRB-1"], archived: true });
-    expect((await service.snapshot()).archived).toEqual([entry]);
+    expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
+
+    // Its pull request closed on GitHub and a run of it starts: the call-off
+    // is over, and the pull request that run opens waits on a merge decision
+    // of its own.
+    setTicketState(repo, "PRB-1", "closed");
+    const run = await service.request({
+      kind: "run",
+      repoId: registered.id,
+      key: "PRB-1",
+      digest: (await service.detail(registered.id, "PRB-1")).digest,
+      approve: false,
+      publish: true,
+      resumeFrom: null,
+    });
+    expect((await service.snapshot()).calledOff).toEqual([]);
+    expect(JSON.parse(readFileSync(join(options.dataDirectory, "workspace.json"), "utf8")).calledOff).toEqual([]);
+    await finished(service, run.id);
+    setTicketState(repo, "PRB-1", "pr_open");
+    const reopened = JSON.parse(readFileSync(path, "utf8")) as { delivery: Record<string, unknown> };
+    reopened.delivery = { ...reopened.delivery, pull_request_url: "https://github.com/example/repo/pull/2", pull_request_number: 2, state: "open" };
+    writeFileSync(path, JSON.stringify(reopened, null, 2));
+    await expect(service.request({ kind: "archive", repoId: registered.id, keys: ["PRB-1"], archived: true })).rejects.toThrow(
+      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed, or its merge is called off.",
+    );
   });
 
   it("returns a filed ticket to Home for good once its loop starts again", async () => {

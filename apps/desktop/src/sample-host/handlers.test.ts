@@ -6,6 +6,7 @@ import { applyGraphEdit } from "@perbo/planning/browser";
 import type { EditingSession, Job } from "../shared/protocol.js";
 import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
 import { unseenAttention } from "../renderer/tasks/ticket-workspace.js";
+import { calledOffEntry } from "../shared/archive.js";
 
 /**
  * Deleting a piece of work from the sample host refuses where the host's
@@ -74,7 +75,7 @@ it("keeps the ticket a discarded planning drafted once its pull request is open,
 it("waits for a command running for the ticket itself, in the host's words", async () => {
   held.push(job("run", repoId, "PRB-412", () => undefined, 60_000));
   await expect(sampleBridge.request({ kind: "discard", repoId, key: "PRB-412" })).rejects.toThrow(
-    "Wait for the commands running in this repository to finish before deleting a contract.",
+    "Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.",
   );
   expect(onBoard("PRB-412")).toBe(true);
 });
@@ -83,7 +84,7 @@ it("refuses to discard the planning that drafted its ticket while that ticket's 
   const planning = await drafted("executing");
   held.push(job("run", repoId, "PRB-421", () => undefined, 60_000));
   await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
-    "Wait for the commands running in this repository to finish before deleting a contract.",
+    "Wait for the command running for this ticket — its run, a decision on it or its publication — to finish before deleting it.",
   );
   // Refused before the planning went, as the host refuses it: the person
   // finds the work as it was, planning and ticket both.
@@ -289,12 +290,35 @@ it("moves a ticket as the CLI does, along the lifecycle's own rows with a row of
   expect(unseenAttention(opened, opened.tasks.find((row) => row.ticket.key === key)!)).toBe(false);
 });
 
+it("forgets a merge called off once a run of the ticket starts, as the host does", async () => {
+  const key = "PRB-377";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  const before = structuredClone(row.ticket);
+  try {
+    await sampleBridge.request({ kind: "callOff", repoId, key });
+    expect(snapshot.calledOff).toEqual([calledOffEntry(repoId, key, row.ticket.delivery.pull_request_url!)]);
+    // Its pull request closed on GitHub, and the work run again.
+    row.ticket.state = "closed";
+    row.ticket.delivery.state = "closed";
+    const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+    const run = await sampleBridge.request({ kind: "run", repoId, key, digest, publish: true, approve: false, resumeFrom: null });
+    expect(snapshot.calledOff).toEqual([]);
+    expect((await sampleBridge.request({ kind: "snapshot" })).calledOff).toEqual([]);
+    await sampleBridge.request({ kind: "cancel", jobId: run.id });
+    await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === run.id)!.state).toBe("cancelled"), { timeout: 5000 });
+  } finally {
+    snapshot.calledOff = [];
+    row.ticket = before;
+  }
+});
+
 it("forgets a merge called off with the ticket it was called off on, as the host does", async () => {
   const key = "PRB-377";
   try {
     await sampleBridge.request({ kind: "callOff", repoId, key });
     await sampleBridge.request({ kind: "callOff", repoId, key });
-    expect(snapshot.calledOff).toEqual([repoId + ":" + key]);
+    const url = snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.delivery.pull_request_url!;
+    expect(snapshot.calledOff).toEqual([calledOffEntry(repoId, key, url)]);
     snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.state = "failed";
     await sampleBridge.request({ kind: "discard", repoId, key });
     expect(snapshot.calledOff).toEqual([]);
@@ -633,4 +657,24 @@ it("throws away a planning and the ticket it drafted while another ticket's run 
   await sampleBridge.request({ kind: "editingDiscard", id: opened.id });
   expect(stored().find((each) => each.id === opened.id)?.phase).toBe("discarded");
   expect(onBoard("PRB-299")).toBe(false);
+});
+
+/**
+ * Plan it again deletes the stopped ticket as a delete takes it, so it waits
+ * only on that ticket's own command: another ticket's run in the same
+ * repository holds nothing of it (D-129). Last in this file, because the plan
+ * it drafts stays in the sample's records.
+ */
+it("plans a stopped ticket again while another ticket's run is under way, as the host does", async () => {
+  saveSpec(
+    "retire-the-legacy-csv-importer",
+    "# Retire the legacy CSV importer\n\n## Outcome\n\nEvery import goes through the current parser.\n\n" +
+      "## Requirements\n\n- R1: The legacy importer and its routes are removed.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  held.push(job("run", repoId, "PRB-412", () => undefined, 60_000));
+  expect(onBoard("PRB-415")).toBe(true);
+  const opened = await sampleBridge.request({ kind: "replan", repoId, key: "PRB-415" });
+  expect(onBoard("PRB-415")).toBe(false);
+  expect(opened.key).not.toBe("PRB-415");
+  expect(onBoard(opened.key)).toBe(true);
 });

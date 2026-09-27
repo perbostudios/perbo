@@ -34,7 +34,7 @@ export type LimitedResource = (typeof LIMITED_RESOURCES)[number];
  * where a repository says so (D-096).
  *
  * Runs of different tickets proceed side by side, as many as are started; a
- * person who wants fewer on their machine names the number. One ticket still
+ * person who wants fewer on their machine names the number. One ticket
  * takes one run at a time, which the ticket's run lock holds rather than this.
  *
  * An iteration is one assistant event on the executor's stream — a message,

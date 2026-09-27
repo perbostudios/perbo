@@ -22,7 +22,7 @@ import { REREAD_COULD_NOT_START, untouchedPlanning } from "../../shared/contract
 import { PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
 import { handlers } from "../../sample-host/handlers.js";
 import { isLive } from "../../shared/jobs.js";
-import { DELETE_WAITS_FOR_COMMANDS } from "../../shared/discard.js";
+import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../../shared/discard.js";
 import { job, sampleReadings } from "../../sample-host/records.js";
 import { READING_FAILED } from "./ReadingFailed.js";
 import { confirmRoute } from "./panes.js";
@@ -4645,14 +4645,6 @@ describe("the Graph pane (SCP-316)", () => {
     );
     await screen.findByRole("button", { name: /^Node node_1/ });
     const planning = location.hash;
-    // Runs go one at a time, and the sample keeps one live for a while.
-    const settled = async () =>
-      expect(
-        (await sampleBridge.request({ kind: "snapshot" })).jobs.some(
-          (job) => job.kind === "run" && ["running", "stopping"].includes(job.state),
-        ),
-      ).toBe(false);
-    await waitFor(settled, { timeout: 6000 });
     // Confirm on the graph, approve on the contract: one approval, on the
     // page that says what freezes.
     fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
@@ -4769,7 +4761,7 @@ describe("the Graph pane (SCP-316)", () => {
       fireEvent.click(await within(picker).findByRole("button", { name: "Delete planning: " + title }));
       const asking = await screen.findByRole("dialog", { name: "Delete planning" });
       fireEvent.click(within(asking).getAllByRole("button", { name: "Delete planning" })[0]!);
-      await screen.findByText(DELETE_WAITS_FOR_COMMANDS);
+      await screen.findByText(DELETE_WAITS_FOR_TICKET_COMMAND);
       expect((await editingRead(plan.id)).phase).not.toBe("discarded");
       await waitFor(() => expect(bin()).not.toBeNull());
     } finally {

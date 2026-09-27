@@ -57,6 +57,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     send({id:'ask-cmd',method:'item/commandExecution/requestApproval',params:{itemId:'cmd',turnId:'turn',threadId:'thread',command:'ls',cwd:process.cwd()}});
   }
   if (m.id === 'ask-cmd') {
+    send({method:'item/started',params:{turnId:'turn',threadId:'thread',item:{id:'read',type:'commandExecution',command:'cat src/a.ts'}}});
+    send({method:'item/completed',params:{turnId:'turn',threadId:'thread',item:{id:'read',type:'commandExecution',command:'cat src/a.ts'}}});
     send({method:'thread/tokenUsage/updated',params:{threadId:'thread',tokenUsage:{total:{inputTokens:40,cachedInputTokens:10,outputTokens:6}}}});
     send({method:'item/completed',params:{turnId:'turn',threadId:'thread',item:{id:'final',type:'agentMessage',text:'Finished'}}});
     send({method:'turn/completed',params:{turn:{id:'turn',status:'completed'}}});
@@ -70,7 +72,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
 
 describe("the Codex attempt's tally", () => {
   it(
-    "counts every item its record holds, the file changes the runner admitted, and the usage Codex reported, and no dollars",
+    "counts the items the runner admitted, the file changes among them, and the usage Codex reported, and no dollars",
     async () => {
       const f = fixture();
       const tallies: AttemptTally[] = [];
@@ -88,12 +90,17 @@ describe("the Codex attempt's tally", () => {
       });
       expect(result.termination.reason).toBe("completed");
       expect(result.commands.map((command) => command.decision).slice(0, 2)).toEqual(["allowed", "denied"]);
-      expect(result.commands).toHaveLength(3);
+      expect(result.commands).toHaveLength(4);
       // While it ran: the admitted change, before the command was asked for.
       expect(tallies).toContainEqual(expect.objectContaining({ commands: 1, written: ["src/a.ts"] }));
       expect(tallies.some((tally) => tally.commands === 99)).toBe(false);
+      // The refused change and the command run outside the worktree are not
+      // commands the attempt was let run, at any point: only the admitted change is.
+      expect(result.commands.map((command) => command.decision)).toEqual(["allowed", "denied", "denied", "allowed"]);
+      expect(tallies.slice(0, -1).every((tally) => tally.commands <= 1)).toBe(true);
+      // A command Codex ran without asking counts once the turn is over, as the record holds it.
       expect(tallies.at(-1)).toEqual({
-        commands: result.commands.length,
+        commands: 2,
         input_tokens: result.usage.input_tokens,
         output_tokens: result.usage.output_tokens,
         cost_micros: 0,

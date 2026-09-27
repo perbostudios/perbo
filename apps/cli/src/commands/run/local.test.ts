@@ -25,7 +25,7 @@ import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@p
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "../admit.js";
 import { escapesCommandLine } from "../escapes/index.js";
-import { type ExecuteDeps, executeCommandLine } from "./index.js";
+import { type ExecuteDeps, executeCommandLine, physicalLine } from "./index.js";
 import { buildInspectReport } from "../inspect.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
@@ -576,6 +576,10 @@ describe("the contract a run with nothing admitted mints", () => {
     // and no pull request was named.
     expect(ghInvocations(gh.log)).toEqual([]);
   }, 120_000);
+
+  it("folds a message's line breaks into spaces, and leaves every other character as it is", () => {
+    expect(physicalLine("a\nb\r\nc\u2028d  e\te")).toBe("a b c d  e\te");
+  });
 
   it("is the pull request's own text where one is named, read through gh", async () => {
     const repo = repository("mint-pr");

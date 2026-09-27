@@ -16,6 +16,7 @@ import {
   type TaskRow,
   type TaskSummary,
 } from "../../shared/protocol.js";
+import { calledOffEntry } from "../../shared/archive.js";
 import { typeInto } from "../../test-support/typing.js";
 import { bridge } from "../workspace/index.js";
 
@@ -303,7 +304,7 @@ describe("a Home card", () => {
     const workspace = board([["pr_open", pr], ["executing", null], ["pr_open", pr]]);
     workspace.jobs = [running(workspace, 1)];
     // Don't merge on PRB-900, recorded; PRB-902 still waits on its merge decision.
-    workspace.calledOff = [workspace.tasks[0]!.repoId + ":PRB-900"];
+    workspace.calledOff = [calledOffEntry(workspace.tasks[0]!.repoId, "PRB-900", pr)];
     home(workspace);
     expect(cards()).toEqual(["Ticket 2 pr_open", "Ticket 1 executing", "Ticket 0 pr_open"]);
     const ring = card("Ticket 0 pr_open").querySelector<HTMLElement>(".stage-ring")!;
@@ -316,6 +317,18 @@ describe("a Home card", () => {
         { kind: "archive", repoId: workspace.tasks[0]!.repoId, keys: ["PRB-900"], archived: true },
       ]),
     );
+  });
+
+  it("waits on the merge decision again for a pull request opened after the one its merge was called off on", () => {
+    const workspace = board([["pr_open", "https://github.com/example/webstore/pull/10"]]);
+    // Don't merge on #9; a run since opened #10, which nobody has decided.
+    workspace.calledOff = [calledOffEntry(workspace.tasks[0]!.repoId, "PRB-900", pr)];
+    home(workspace);
+    expect(screen.getByText(/one waiting on your merge decision/)).toBeTruthy();
+    expect(screen.queryByText(/completed/)).toBeNull();
+    const ring = card("Ticket 0 pr_open").querySelector<HTMLElement>(".stage-ring")!;
+    expect(ring.getAttribute("aria-label")).not.toBe("Completed");
+    expect(within(card("Ticket 0 pr_open")).queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
   it("marks a ticket that needs you with a blue circle until it is opened, and never a decided merge", () => {
@@ -475,7 +488,8 @@ describe("deleting from the Archive", () => {
     expect(dialog.querySelector("p")?.textContent).toBe(
       "Delete “Retry the invoice webhook”? It is archived: its ticket, contract and plan, every attempt it " +
         "recorded and the evidence those attempts sealed all go, and nothing of this is kept. This leaves " +
-        "the branch perbo/409-webhook-retry in git and its pull request on GitHub.",
+        "the branch perbo/409-webhook-retry in git and its pull request on GitHub, and any worktree a run " +
+        "left, which is reclaimed later.",
     );
     // Keep it first, and the delete, which is never the primary, beside it.
     const actions = within(dialog).getAllByRole("button").map((button) => button.textContent);
@@ -484,6 +498,20 @@ describe("deleting from the Archive", () => {
     expect(screen.queryByRole("dialog", { name: "Delete ticket" })).toBeNull();
     expect(sent.mock.calls.filter(([request]) => request.kind === "discard")).toEqual([]);
     expect(listed()).toBe(true);
+  });
+
+  it("names the branch the ticket's attempts ran on where its delivery records none", () => {
+    const { filed, workspace } = besideARun();
+    filed.ticket.delivery.branch = null;
+    client.setQueryData<TaskSummary>(["summary", filed.repoId, filed.ticket.key], {
+      ...client.getQueryData<TaskSummary>(["summary", filed.repoId, filed.ticket.key])!,
+      branch: "prb/409/the-attempts-branch",
+    });
+    archiveOf(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Delete ticket: Retry the invoice webhook" }));
+    expect(screen.getByRole("dialog", { name: "Delete ticket" }).querySelector("p")?.textContent).toContain(
+      "This leaves the branch prb/409/the-attempts-branch in git and its pull request on GitHub",
+    );
   });
 
   it("deletes while another ticket's run is under way, off the Archive at the click", async () => {
@@ -518,6 +546,19 @@ describe("deleting from the Archive", () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: "Delete ticket" })).getByRole("button", { name: "Delete ticket" }));
     await screen.findByText("PRB-409 has a pull request open");
     expect(listed()).toBe(true);
+  });
+
+  it("offers no Delete on a filed ticket whose pull request is still open, and offers it again once merged or closed", () => {
+    for (const [state, offered] of [["pr_open", false], ["merged", true], ["closed", true]] as const) {
+      const { filed, workspace } = besideARun();
+      filed.ticket.state = state;
+      // Filed at `pr_open` only with its merge called off, its pull request left open.
+      workspace.calledOff = [calledOffEntry(filed.repoId, filed.ticket.key, filed.ticket.delivery.pull_request_url!)];
+      const view = archiveOf(workspace);
+      expect(listed(), state).toBe(true);
+      expect(screen.queryByRole("button", { name: "Delete ticket: Retry the invoice webhook" }) !== null, state).toBe(offered);
+      view.unmount();
+    }
   });
 
   it("holds the delete while a command runs for this ticket itself", () => {

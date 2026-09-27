@@ -113,18 +113,18 @@ export const TicketRunConfigSchema = z.strictObject({
    */
   paths_prohibited: StandingProhibitedSchema.default([]),
   /**
-   * Where this repository keeps its specs (D-103). Its folder is a standing
-   * prohibited path for the executor, beside the default `specs/`: a spec is
-   * the intent the contract was drafted from, and an attempt that edited one
-   * would be rewriting the statement it is judged against.
-   */
-  /**
    * Hosts this repository adds to the executor's egress allow-list, beside its
    * provider's own, GitHub and the package registries. Exact host names only:
    * a run whose list holds anything else is refused before it starts, naming
    * the entry.
    */
   network_allow_list: NetworkAllowListSchema.default([]),
+  /**
+   * Where this repository keeps its specs (D-103). Its folder is a standing
+   * prohibited path for the executor, beside the default `specs/`: a spec is
+   * the intent the contract was drafted from, and an attempt that edited one
+   * would be rewriting the statement it is judged against.
+   */
   specs: z
     .string()
     .min(1)

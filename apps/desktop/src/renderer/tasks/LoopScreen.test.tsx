@@ -557,7 +557,9 @@ describe("the strip of commands, spend and files", () => {
             {
               ...attempt,
               startedAt: "2026-09-08T09:40:05.000Z",
-              ceilings: [{ resource: "attempt_commands", used: 4, ceiling: null, hit: false }],
+              // Five asked for, one refused: the strip counts the four admitted, as the tally did.
+              ceilings: [{ resource: "attempt_commands", used: 5, ceiling: null, hit: false }],
+              admittedCommands: 4,
               changes: [
                 { path: "src/a.ts", change_kind: "modified", additions: 1, deletions: 0 },
                 { path: "src/b.ts", change_kind: "added", additions: 3, deletions: 0 },

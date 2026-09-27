@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busyMessage, lane } from "../shared/jobs.js";
-import { DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
+import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import { ChangeSchema, INTERVIEW_NEEDS_A_TITLE } from "../shared/protocol.js";
 import { runnerProgress, spokenWords } from "../shared/runner-progress.js";
 import type { Change, DesktopBridge, Job } from "../shared/protocol.js";
@@ -245,7 +245,7 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
       expect(await listed(deletableKey)).toBe(true);
       // The running ticket's own delete waits for its run, in the one sentence.
       await expect(bridge.request({ kind: "discard", repoId, key: runnableKey })).rejects.toThrow(
-        new Error(DELETE_WAITS_FOR_COMMANDS),
+        new Error(DELETE_WAITS_FOR_TICKET_COMMAND),
       );
       expect(await listed(runnableKey)).toBe(true);
       // Another ticket's run holds nothing of this one (D-129).

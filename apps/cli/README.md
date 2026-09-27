@@ -578,8 +578,8 @@ Exit `0` means materializable and the machine is ready; `1` means one of them is
 
 `inspect PRB-1` reads a ticket's attempts back (dogfood limitation 5: every attempt wrote an
 immutable bundle and nothing read one). It joins `.perbo/state/<ticket_id>.attempts.json` to the
-bundle store — the execution bundle by attempt id, the one independent review by the change set it
-judged, each round's closure verification by its `cv_<attempt>` subject — and renders, per attempt:
+bundle store — the execution bundle by attempt id, the one independent review by the attempt id its
+bundle records (a review bundle that records none joins no attempt), each round's closure verification by its `cv_<attempt>` subject — and renders, per attempt:
 its outcome, then the stop reason and where it stopped for an attempt that stopped, then what it
 cost, and only after those the bundle the work is in, when it started and ended, the agent model
 and binary version, how many times the brief was given back after a compaction where any was
