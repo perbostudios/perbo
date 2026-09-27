@@ -14,6 +14,7 @@ import { openDrafts, problemsHoldApproval, titleChanged, turnHoldsApproval, turn
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { heldTicket, isLive, isRun } from "../shared/jobs.js";
+import { questionsOnRecord } from "../shared/decisions.js";
 import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import { ANTHROPIC_API_ABOUT, HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
@@ -505,8 +506,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // reachable way to press this with nothing to draft from.
     if (specFiles()[named] === undefined) throw new Error(`no spec at ${spec}`);
     // And only beside a spent record, in `admit`'s own words: a spec whose
-    // ticket is still live has its plan.
-    if (!["failed", "plan_invalid", "cancelled"].includes(ticket.state))
+    // ticket is still live has its plan. A ticket in `changes_requested` whose
+    // record asks the person nothing is spent too, as the host reads it (D-132).
+    const unanswerable =
+      ticket.state === "changes_requested" && questionsOnRecord(detail(request.key)).length === 0;
+    if (!unanswerable && !["failed", "plan_invalid", "cancelled"].includes(ticket.state))
       throw new Error(
         `${request.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
           `${request.key} is ${ticket.state}, which is past re-drafting, so this spec has its plan`,

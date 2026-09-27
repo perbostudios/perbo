@@ -23,7 +23,7 @@ import {
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
 import { objectsPath, verdictsPath } from "./repository/layout.js";
-import { reviewOnRecord } from "./records.js";
+import { questionsOnFiles, reviewOnRecord } from "./records.js";
 import { forgetCalledOff, recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
@@ -868,9 +868,20 @@ async function replan(
   // Only a spent record, in `admit`'s own words: a spent ticket is not the plan
   // its spec has, it is the plan it did not get, and a run killed outside the
   // executor's window leaves one saying `executing`, which is still the plan
-  // this spec has. Asked here rather than left to `admit`, because the stopped
-  // ticket is deleted before the admission runs.
-  if (!["failed", "plan_invalid", "cancelled"].includes(ticket.state))
+  // this spec has. A ticket in `changes_requested` whose record asks the person
+  // nothing is spent too: its loop ended on a verdict nobody can answer, so
+  // planning again is the way forward (D-132); one that asks is theirs to
+  // answer. Asked here rather than left to `admit`, because the stopped ticket
+  // is deleted before the admission runs.
+  const unanswerable =
+    ticket.state === "changes_requested" &&
+    (questionsOnFiles({
+      bundles: await m.tickets.bundles(repo),
+      ticket,
+      objectsDirectory: objectsPath(repo),
+      verdictsPath: verdictsPath(repo),
+    })?.length ?? 0) === 0;
+  if (!unanswerable && !["failed", "plan_invalid", "cancelled"].includes(ticket.state))
     throw new Error(
       `${request.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
         `${request.key} is ${ticket.state}, which is past re-drafting, so this spec has its plan`,

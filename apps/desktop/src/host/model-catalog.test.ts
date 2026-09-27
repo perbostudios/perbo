@@ -9,7 +9,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, delimiter, join } from "node:path";
 import { createScratch } from "@perbo/test-support";
-import { discoverModels } from "./model-catalog.js";
+import { discoverModels, firstLine } from "./model-catalog.js";
+import { PassThrough } from "node:stream";
 import { RequestSchema } from "../shared/protocol.js";
 
 const scratchDirectory = createScratch("perbo-catalog-test-");
@@ -520,5 +521,28 @@ process.stdin.resume();
       "OpenCode reports no model you can run now — none of its free models is listed and no provider is connected; " +
         "set OPENCODE_API_KEY in the app environment for OpenCode Zen and refresh.",
     );
+  });
+});
+
+describe("the first line OpenCode's server prints", () => {
+  it("is read, and nothing it prints after is kept: the reader lets go and the stream drains", async () => {
+    const stream = new PassThrough();
+    const read = firstLine(stream, 64);
+    stream.write('{"url":"http://127.0.0.1:4096"}\n');
+    await expect(read).resolves.toBe('{"url":"http://127.0.0.1:4096"}');
+    expect(stream.listenerCount("data")).toBe(0);
+    // A server that keeps printing: far past the limit, and nothing refuses or holds it.
+    for (let chunk = 0; chunk < 100; chunk += 1) stream.write("x".repeat(1_000));
+    expect(stream.readableFlowing).toBe(true);
+    await new Promise((settle) => setImmediate(settle));
+    expect(stream.readableLength).toBe(0);
+  });
+
+  it("refuses a first line past the limit, and lets go of the stream", async () => {
+    const stream = new PassThrough();
+    const read = firstLine(stream, 16);
+    stream.write("y".repeat(32));
+    await expect(read).rejects.toThrow("exceeded the output limit");
+    expect(stream.listenerCount("data")).toBe(0);
   });
 });

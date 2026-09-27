@@ -265,6 +265,82 @@ describe("the stopped page", () => {
     expect(reasons()).toEqual(["The run's review could not be read, so nothing on it can be put to you."]);
   });
 
+  /**
+   * The page's rule for its hovers: a hover, or the `i` behind a reason,
+   * names a button only where that button can be pressed. Read off the page
+   * as a person meets it, for every stop it can show.
+   */
+  const NAMED: ReadonlyArray<[RegExp, string]> = [
+    [/Continue the task/, "Continue the task"],
+    [/Plan it again/, "Plan it again"],
+    [/Delete this work|delete the work/i, "Delete this work"],
+  ];
+  const everyHoverNamesALiveButton = (): void => {
+    // A disabled button's own hover says why it is disabled: it names itself,
+    // and what it names besides is what this holds to the rule.
+    const hovers = [
+      ...[...page().querySelectorAll<HTMLElement>("[title]")].map((element) => ({
+        text: element.title,
+        own: element.textContent ?? "",
+      })),
+      ...behind().map((text) => ({ text, own: "" })),
+    ].filter(({ text }) => text.length > 0);
+    for (const { text, own } of hovers)
+      for (const [mention, name] of NAMED)
+        if (mention.test(text) && name !== own) {
+          const button = screen.queryByRole("button", { name }) as HTMLButtonElement | null;
+          expect(button, `"${text}" names ${name}`).not.toBeNull();
+          expect(button!.disabled, `"${text}" names ${name}, which is disabled`).toBe(false);
+        }
+  };
+  it.each([
+    ["the person's stop", () => stopped({ state: "cancelled" })],
+    ["Perbo closing", () => stopped({ state: "interrupted", error: "Perbo closed before the command reported an outcome." })],
+    ["a failure", () => stopped({ state: "failed", error: "the whole run log" }, { termination: "stalled", reviewDecision: null, review: null })],
+    [
+      "a limit refusal",
+      () =>
+        stopped(
+          {
+            state: "failed",
+            error:
+              "the run was refused by a limit: concurrent_local_attempts would reach 2, above the limit of 1. " +
+              "Raise limits.limits.concurrent_local_attempts in .perbo/config.json to allow it.",
+          },
+          { startedAt: "2026-09-08T04:00:00.000Z" },
+        ),
+    ],
+    ["a changes-requested stop with nothing to ask", () => closedGate("remediation_stalled", { decision: "remediable" })],
+    ["an escalation on the executor's declines", () => closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)])],
+    ["an unreadable review", () => closedGate("remediation_stalled", null)],
+    [
+      "a run whose record is gone",
+      () => {
+        const run = stopped({ state: "cancelled" });
+        run.workspace.jobs = [];
+        return run;
+      },
+    ],
+  ] as const)("names in its hovers only buttons that can be pressed, after %s", (_stop, run) => {
+    mount(run());
+    everyHoverNamesALiveButton();
+  });
+
+  it("offers Plan it again where the loop ended on a verdict nobody can answer, and Continue says why not", () => {
+    mount(closedGate("remediation_stalled", { decision: "remediable" }));
+    expect((screen.getByRole("button", { name: "Plan it again" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(carryOn().disabled).toBe(true);
+    expect(carryOn().title).toMatch(/Plan it again to change the spec or the plan and start the loop over\.$/);
+    // Not a pause: the loop it opens is not a paused one.
+    expect(screen.getByRole("button", { name: "View the loop" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "View the paused loop" })).toBeNull();
+  });
+
+  it("says a principle added for the executor's declines is read on the run Plan it again starts", () => {
+    mount(closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]));
+    expect(behind()[0]).toMatch(/Plan it again starts that run from the spec\.$/);
+  });
+
   it("has no way to the contract, and the paused loop beside Continue at the right", () => {
     mount(stopped({ state: "cancelled" }));
     const footer = page().querySelector(".stopped-actions")!;

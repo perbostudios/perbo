@@ -394,7 +394,8 @@ const NOTHING_ASKED = {
     detail:
       "The executor declined the findings left open, saying no practice determines them; its reasons are on the " +
       "round record. A declined finding takes no answer on the decision card: `perbo principle add` records " +
-      "your answer in .perbo/principles.md, which the executor reads on the next run.",
+      "your answer in .perbo/principles.md, which the executor reads on the next run, and Plan it again starts " +
+      "that run from the spec.",
   },
   /** An escalation with nothing declined and nothing on the record for the person, as an incomplete review's can be. */
   escalated: {
