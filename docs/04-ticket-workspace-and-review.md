@@ -322,6 +322,7 @@ With `--publish` (or `"publish": true` in `.perbo/config.json`), an `approved` o
 - the ticket, its source, the plan level and actual risk, the attempt and its rounds, base and head, and the commits inherited from earlier attempts;
 - the outcome, and each criterion's status and verification strength;
 - the review: the verdict and counts, one line counting the findings the executor closed, each verified before the pull request opened, and sections for what the executor declared no practice for ("No determinable practice — for you to decide", with its reasons), what the review stopped on, what a person decided, with their words ("Decided by a person"), and what is advisory, every statement with credential-shaped values redacted;
+- every attempt of the ticket in order over all its runs ("Attempts", [D-NEW-pass-a-limited-loop-on](11-open-decisions.md)): its run and round, the connection and model that ran its executor, how it ended, each review's connection, model and verdict, and, where the executor or the reviewer ran on another connection or model than before, that it did and why — the usage limit on the one before, or the models a run was started on — read from the ticket's attempts record and its review bundles and written whole however long the list, and the same from `--publish-retained`;
 - the rollout, and the cost by component and basis, never totalled as complete while a component is unpriced;
 - a closing line saying who merges.
 

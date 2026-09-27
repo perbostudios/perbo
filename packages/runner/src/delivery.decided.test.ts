@@ -58,6 +58,7 @@ const bodyWith = (findings: Finding[], decided: DecidedFinding): string => {
   );
   const attempt = { attempt_id: "att_1", base_commit: "abc1234", head_commit: "def5678", usage: { cost_micros: 0 } };
   return pullRequestBody({
+    attempt_list: [],
     contract: makeContract() as unknown as PlanContractWithCriteria,
     attempt: attempt as never,
     review,

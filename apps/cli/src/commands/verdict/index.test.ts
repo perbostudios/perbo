@@ -181,6 +181,7 @@ const attempt = makeAttempt({
 /** The pull-request body this review would be published under. */
 function body(): string {
   return pullRequestBody({
+    attempt_list: [],
     contract: CONTRACT,
     attempt: attempt as never,
     review: reviewArtifact(),

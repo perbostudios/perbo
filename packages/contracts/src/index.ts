@@ -36,6 +36,8 @@ export type {
   UsageLimitRole,
   UsageLimitStop,
 } from "./usage-limit.js";
+export { attemptEnding, connectionName, stoppedBy } from "./ending.js";
+export type { EndingAttempt } from "./ending.js";
 export { AuthoredAttemptSchema, issueAuthoredAttempts } from "./authored.js";
 export type { AuthoredAttempt } from "./authored.js";
 export {

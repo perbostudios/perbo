@@ -1,5 +1,4 @@
-import type { UsageLimitStop } from "@perbo/contracts/browser";
-import { providerName } from "../../shared/contract-editing.js";
+import { connectionName, type UsageLimitStop } from "@perbo/contracts/browser";
 
 /**
  * How the desktop says a provider's usage limit that ended a run
@@ -35,7 +34,7 @@ const roleName = (limit: UsageLimitStop): string => (limit.role === "executor" ?
  * connection, the role, the reset and the provider's own sentence.
  */
 export function limitEnding(limit: UsageLimitStop): { sentence: string; detail: string } {
-  const connection = providerName(limit.provider);
+  const connection = connectionName(limit.provider);
   const sentence = limit.waited
     ? `${connection}, the ${roleName(limit)}'s connection, refused the review again after its usage limit reset ${resetLabel(limit)}.`
     : `${connection}, the ${roleName(limit)}'s connection, reached its usage limit, which the provider says resets ${resetLabel(limit)}.`;

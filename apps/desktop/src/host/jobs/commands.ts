@@ -1,10 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
-import { usageLimitHolds, type LimitsTableSchema, type PlanContract } from "@perbo/contracts";
+import { connectionName, usageLimitHolds, type LimitsTableSchema, type PlanContract } from "@perbo/contracts";
 import type { Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
 import { decisionQuestions, type SettledFindings } from "../../shared/decisions.js";
-import { providerName } from "../../shared/contract-editing.js";
 import type { FindingsOnRecord } from "../records.js";
 
 /**
@@ -277,7 +276,7 @@ export function assertPassesOn(
   const chosen = limit.role === "executor" ? models.executorProvider : models.reviewerProvider;
   if (chosen === limit.provider && usageLimitHolds(limit, now))
     throw new Error(
-      `The usage limit on ${providerName(limit.provider)} holds until ${limit.until} (${limit.zone}), and it ` +
+      `The usage limit on ${connectionName(limit.provider)} holds until ${limit.until} (${limit.zone}), and it ` +
         "covers every model it runs: " +
         `the ${limit.role} carries on on another connection, or on this one once the limit has reset.`,
     );

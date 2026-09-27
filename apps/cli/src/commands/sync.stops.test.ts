@@ -337,6 +337,7 @@ describe("perbo sync records who answered each stop", () => {
   it("labels the stand-in's answer dogfood and the person's not, from one body", async () => {
     const { repo, dir, ticket_id } = delivered("stops-dogfood");
     const body = pullRequestBody({
+      attempt_list: [],
       contract: DOGFOOD_CONTRACT,
       attempt: dogfoodAttempt as never,
       review: dogfoodReview(),
@@ -372,6 +373,7 @@ describe("perbo sync records who answered each stop", () => {
   it("keeps the stand-in's label when a later sync reads a body the marker was edited out of", async () => {
     const { repo, dir, ticket_id } = delivered("stops-dogfood-erased");
     const body = pullRequestBody({
+      attempt_list: [],
       contract: DOGFOOD_CONTRACT,
       attempt: dogfoodAttempt as never,
       review: dogfoodReview(),
@@ -403,6 +405,7 @@ describe("perbo sync records who answered each stop", () => {
     // stop is a person's again without the answer itself changing.
     const { repo, dir, ticket_id } = delivered("stops-dogfood-reclaimed");
     const body = pullRequestBody({
+      attempt_list: [],
       contract: DOGFOOD_CONTRACT,
       attempt: dogfoodAttempt as never,
       review: dogfoodReview(),
@@ -449,6 +452,7 @@ describe("perbo sync records who answered each stop", () => {
     // record for the reading to print.
     const { repo, dir, ticket_id } = delivered("stops-dogfood-whole-body");
     const body = pullRequestBody({
+      attempt_list: [],
       contract: DOGFOOD_CONTRACT,
       attempt: dogfoodAttempt as never,
       review: dogfoodReview(),

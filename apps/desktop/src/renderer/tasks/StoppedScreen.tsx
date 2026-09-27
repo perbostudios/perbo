@@ -12,7 +12,7 @@ import { draftedLanding } from "../planning/panes.js";
 import { ModelPicker, connectionsFor, useProviders } from "../settings/ConnectionScreens.js";
 import { providerName } from "../../shared/contract-editing.js";
 import { TaskModelsSchema, type ModelProvider, type Provider, type TaskModels } from "../../shared/protocol.js";
-import type { UsageLimitStop } from "@perbo/contracts/browser";
+import { connectionName, type UsageLimitStop } from "@perbo/contracts/browser";
 import { resetLabel } from "./usage-limit.js";
 
 /**
@@ -172,7 +172,7 @@ export function StoppedScreen(context: TaskContext) {
   };
   // After a usage limit, the same connection carries on once the reset the
   // provider stated has passed.
-  const connection = limit === null ? "" : providerName(limit.provider);
+  const connection = limit === null ? "" : connectionName(limit.provider);
   const carryOnTitle = holds
     ? `The usage limit on ${connection} holds until ${resetLabel(limit!)}, as the provider stated, and it covers ` +
       `every model ${connection} runs. Continue the task carries on on ${connection} once it has passed; ` +
@@ -357,7 +357,7 @@ function PassOn({
   start: (models: TaskModels) => void;
 }) {
   const [chosen, setChosen] = useState<TaskModels | null>(null);
-  const connection = providerName(limit.provider);
+  const connection = connectionName(limit.provider);
   const provider =
     chosen === null ? null : limit.role === "executor" ? chosen.executorProvider : chosen.reviewerProvider;
   return (

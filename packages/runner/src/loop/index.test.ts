@@ -2941,14 +2941,42 @@ describe("a run a provider's session limit cut", () => {
     expect(execution.artifacts.map((artifact) => artifact.name)).toContain("change.diff");
 
     // The person carries it on to another model, from the stopped attempt's work.
+    // Published, so the pull request's body can be read: the runner's own
+    // push, open and merge steps replaced by ones that record it.
+    const opened: string[] = [];
     const carried = await runTicket({
-      config: { ...config, model: CARRYING_MODEL, resume_from: execution.bundle_id },
+      config: { ...config, model: CARRYING_MODEL, resume_from: execution.bundle_id, publish: true },
       contract,
       now: () => NOW,
       sleep: async () => {},
-      hooks: { review: approve },
+      hooks: {
+        review: (async () => ({
+          artifact: makeReview({
+            review_id: "rev_0000000000000194",
+            decision: "approve",
+            model: { provider: "codex-cli", model_id: "gpt-5.5" },
+          }),
+          bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+        })) as never,
+        push: (async () => ({ pushed: true, detail: "recorded" })) as never,
+        open: (async (request: { body: string }) => {
+          opened.push(request.body);
+          return { url: "https://example.invalid/pull/194", number: 194 };
+        }) as never,
+        merge: (async () => ({ merged: false, stop: null, head_sha: null, detail: "a person merges" })) as never,
+      },
     });
     expect(carried.outcome).toBe("approved");
+    // The pull request lists both attempts, both runs, in order: the limited
+    // one, and the one another model ran after the limit, with its review.
+    const listed = (opened[0] ?? "").split("## Attempts")[1]?.split("## Rollout")[0] ?? "";
+    expect(listed.split("\n").filter((line) => line.startsWith("| "))).toEqual([
+      "| # | run | round | executor | ended | review |",
+      `| 1 | 1 | 0 | Claude Code · \`${LIMITED_MODEL}\` | stopped by the usage limit on Claude Code until ` +
+        `${RESETS_AT} (Europe/London) | none |`,
+      `| 2 | 2 | 0 | Claude Code · \`${CARRYING_MODEL}\` — another connection or model than Claude Code · ` +
+        `\`${LIMITED_MODEL}\`, after the usage limit on Claude Code | completed | Codex · \`gpt-5.5\`: approve |`,
+    ]);
     const [, second] = agent.invocations();
     // The work the limited attempt wrote is carried on the branch the new
     // model's work is sealed on.

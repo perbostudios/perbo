@@ -2,6 +2,7 @@ import {
   EXECUTOR_ACCOUNT_MAX_CHARS,
   admittedWriteGlobs,
   redactCredentials,
+  stoppedBy,
   type AcceptanceCriterion,
   type Finding,
   type PlanContractWithCriteria,
@@ -151,15 +152,8 @@ function howItEnded(resumed: ResumedWork): string {
     );
   }
   if (termination === null) return "was stopped part-way, not by a judgement";
-  const by =
-    limit === "executor"
-      ? " by its provider's usage limit"
-      : termination === "cancelled"
-        ? " by a person"
-        : termination.endsWith("_exceeded")
-          ? " by a ceiling"
-          : "";
-  return `was stopped part-way${by} (it ended \`${termination}\`), not by a judgement`;
+  const by = stoppedBy(termination, limit);
+  return `was stopped part-way${by === null ? "" : ` by ${by}`} (it ended \`${termination}\`), not by a judgement`;
 }
 
 /**

@@ -34,6 +34,7 @@ export { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "./executor-skills.js";
 export type { ExecutorSkillId } from "./executor-skills.js";
 export { GraphEditSchema } from "./graph-edit.js";
 export { usageLimitHolds, usageLimitStop, UsageLimitSchema } from "./usage-limit.js";
+export { attemptEnding, connectionName, stoppedBy } from "./ending.js";
 export type { UsageLimit, UsageLimitRole, UsageLimitStop } from "./usage-limit.js";
 export type { GraphEdit } from "./graph-edit.js";
 export { CriterionIdSchema } from "./ids.js";
