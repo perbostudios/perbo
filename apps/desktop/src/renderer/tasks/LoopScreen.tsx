@@ -146,7 +146,6 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     verdicts: detail.verdicts,
     log: stageLog,
     now: new Date().toISOString(),
-    verdicts: detail.verdicts,
   });
   const steps = [
     ...(ending !== null && acknowledged

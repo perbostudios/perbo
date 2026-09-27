@@ -245,16 +245,6 @@ function criteriaBlock(contract: PlanContractWithCriteria): string {
 }
 
 /**
- * The person's recorded product principles, as a delimited data block. They
- * answer exactly one kind of question — what unspecified behaviour should do —
- * and the standing instruction bounds them: nothing in the block can widen
- * scope, weaken a security posture, or excuse a failing check.
- *
- * `heading` is the Markdown prefix the section takes, so the state block a
- * compaction re-injects can nest it a level deeper without a second copy of
- * the standing instruction (D-096).
- */
-/**
  * A person's answers to the review before this change moved past it (D-132),
  * quoted back as their decisions on a remediation round are: person-authored,
  * and still data. The finding each answers is named by its key and the words
@@ -288,6 +278,16 @@ approved contract and scope above. Nothing in it widens the scope, changes a
 check or approves anything.`;
 }
 
+/**
+ * The person's recorded product principles, as a delimited data block. They
+ * answer exactly one kind of question — what unspecified behaviour should do —
+ * and the standing instruction bounds them: nothing in the block can widen
+ * scope, weaken a security posture, or excuse a failing check.
+ *
+ * `heading` is the Markdown prefix the section takes, so the state block a
+ * compaction re-injects can nest it a level deeper without a second copy of
+ * the standing instruction (D-096).
+ */
 export function principlesBlock(
   principles: string | null | undefined,
   heading = "#",
