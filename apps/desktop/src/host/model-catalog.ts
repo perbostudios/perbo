@@ -8,6 +8,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import type { Readable } from "node:stream";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -542,6 +543,39 @@ export function runnableOpenCodeModels(reported: {
  * only to the loopback address the server names, and the server ends with
  * this process's hold on its stdin.
  */
+/**
+ * The first line a stream prints, read up to `limit` characters. Once it is
+ * read — or the limit refused — nothing more is kept: the listener comes off
+ * and the stream is left flowing, so a server that keeps printing is drained
+ * rather than held in memory or blocked on a full pipe.
+ */
+export function firstLine(stream: Readable, limit: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    const done = (): void => {
+      buffer = "";
+      stream.off("data", onData);
+      stream.resume();
+    };
+    const onData = (chunk: string | Buffer): void => {
+      buffer += chunk.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline !== -1) {
+        const line = buffer.slice(0, newline);
+        done();
+        resolve(line);
+        return;
+      }
+      if (buffer.length > limit) {
+        done();
+        reject(new Error("OpenCode's answer exceeded the output limit."));
+      }
+    };
+    stream.setEncoding("utf8");
+    stream.on("data", onData);
+  });
+}
+
 async function openCodeModels(options: {
   binary: string;
   scratch: string;
@@ -598,7 +632,6 @@ async function openCodeModels(options: {
   };
   try {
     const address = await new Promise<string>((resolve, reject) => {
-      let buffer = "";
       const timer = setTimeout(
         () => reject(new Error("OpenCode did not start in time. Check it is installed and refresh.")),
         options.timeoutMs,
@@ -611,21 +644,20 @@ async function openCodeModels(options: {
         clearTimeout(timer);
         reject(new Error("OpenCode stopped before it reported its models. Update it and refresh."));
       });
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newline = buffer.indexOf("\n");
-        if (newline === -1) {
-          if (buffer.length > limit) reject(new Error("OpenCode's answer exceeded the output limit."));
-          return;
-        }
-        clearTimeout(timer);
-        try {
-          resolve(z.object({ url: z.string() }).parse(JSON.parse(buffer.slice(0, newline))).url);
-        } catch {
-          reject(new Error("OpenCode did not name its server. Update it and refresh."));
-        }
-      });
+      firstLine(child.stdout, limit).then(
+        (line) => {
+          clearTimeout(timer);
+          try {
+            resolve(z.object({ url: z.string() }).parse(JSON.parse(line)).url);
+          } catch {
+            reject(new Error("OpenCode did not name its server. Update it and refresh."));
+          }
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
     });
     const url = new URL(address);
     // The password goes to the loopback address this process's server named, and nowhere else.

@@ -81,10 +81,16 @@ export function StoppedScreen(context: TaskContext) {
   // A plan is drafted again only in place of a spent record: a stop inside
   // the executor's window seals the ticket at `failed`, a stop outside it
   // leaves the ticket saying the stage it reached, and a spec whose ticket is
-  // still live has its plan. A pull request open is not offered it at all,
-  // because a ticket with one is not deleted.
-  const spent = ticket.state === "failed" || ticket.state === "cancelled";
+  // still live has its plan. A ticket in `changes_requested` that this page
+  // shows asks the person nothing (`ticketRun`): its loop ended on a verdict
+  // nobody can answer, so it is spent, and planning again is the way forward
+  // (D-132). A pull request open is not offered it at all, because a ticket
+  // with one is not deleted.
+  const spent =
+    ticket.state === "failed" || ticket.state === "cancelled" || (ticket.state === "changes_requested" && projection.recoverable);
   const replannable = spec !== null && ticket.state !== "pr_open";
+  // Whether Plan it again can be pressed now, which is what a hover may point to.
+  const planAgainLive = replannable && spent;
   // Why the run stopped: the reasons of its last run, read as the loop page's
   // ended card reads them, or — a run that closed the gate with nothing left
   // to ask the person — the outcome its row records.
@@ -101,7 +107,7 @@ export function StoppedScreen(context: TaskContext) {
   // Continue carries on only from the person's own stop or Perbo closing:
   // every other reason is one another attempt at the same plan meets again,
   // and where the record is gone nothing says which it was.
-  const onward = replannable
+  const onward = planAgainLive
     ? "Plan it again to change the spec or the plan and start the loop over."
     : "Delete this work to start it over from a new plan.";
   const why = projection.continuable
@@ -194,14 +200,22 @@ export function StoppedScreen(context: TaskContext) {
         {replannable && (
           <Button
             disabled={!spent || busy || drafting}
-            title={spent ? undefined : `Not yet: the record still says this run is at ${ticket.state.replace("_", " ")}, and one spec is one piece of work while its ticket is live. Continue the task, or delete the work.`}
+            title={
+              spent
+                ? undefined
+                : `Not yet: the record still says this run is at ${ticket.state.replace("_", " ")}, and one spec is one piece of work while its ticket is live. ${projection.continuable ? "Continue the task, or delete the work." : "Delete the work to start it over."}`
+            }
             onClick={() => setConfirming(true)}
           >
             {drafting ? "Drafting the plan…" : "Plan it again"}
           </Button>
         )}
         <span className="spacer" />
-        <Button onClick={() => show("loop")}>View the paused loop</Button>
+        {/* The loop is paused only where the person stopped it or Perbo closed:
+            there Continue carries on from it. Every other stop ended it. */}
+        <Button onClick={() => show("loop")}>
+          {projection.continuable ? "View the paused loop" : "View the loop"}
+        </Button>
         {/* The highlighted action at the far right. */}
         <Button
           variant="primary"

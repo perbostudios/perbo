@@ -7001,6 +7001,62 @@ describe("a stopped run's ticket", () => {
     expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
   });
 
+  describe("Plan it again where the loop ended on a verdict (D-132)", () => {
+    /** PRB-1 as a run that closed the gate left it, its review asking the person `asks`. */
+    async function closedGate(runner: typeof runProcess, asks: boolean) {
+      const made = await stopped(runner);
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; ticket_id: string };
+      writeFileSync(made.at, JSON.stringify({ ...held, state: "changes_requested" }));
+      const body = Buffer.from(
+        JSON.stringify({
+          review_id: "rev_one",
+          decision: asks ? "escalate" : "remediable",
+          findings: [
+            {
+              key: "a".repeat(64),
+              rule_id: "product.retry",
+              status: asks ? "open" : "resolved",
+              routing: asks ? "escalates" : "remediable",
+              statement: "Keep the retry button?",
+            },
+          ],
+        }),
+      );
+      const sha256 = createHash("sha256").update(body).digest("hex");
+      mkdirSync(join(made.repo, ".perbo", "bundles", "objects"), { recursive: true });
+      writeFileSync(join(made.repo, ".perbo", "bundles", "objects", sha256), body);
+      writeFileSync(
+        join(made.repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ab.json"),
+        JSON.stringify({
+          bundle_id: "bundle_00000000000000ab",
+          kind: "review",
+          created_at: "2026-09-10T10:00:00.000Z",
+          subject_id: "rev_one",
+          ticket_id: held.ticket_id,
+          artifacts: [{ name: "review.json", sha256, bytes: body.length, retained: true }],
+        }),
+      );
+      return made;
+    }
+
+    it("drafts the plan again where the record asks the person nothing", async () => {
+      let repo = "";
+      const made = await closedGate(drafting(() => repo), false);
+      repo = made.repo;
+      const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+      expect(opened.key).toBe("PRB-2");
+      expect(existsSync(made.at), "the stopped ticket").toBe(false);
+    });
+
+    it("is refused where the record still asks the person, before anything is deleted", async () => {
+      const made = await closedGate(async (binary, args, options) => runProcess(binary, args, options), true);
+      await expect(
+        made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+      ).rejects.toThrow(/PRB-1 is changes_requested, which is past re-drafting/);
+      expect(existsSync(made.at), "the ticket").toBe(true);
+    });
+  });
+
   describe("Plan it again where the pull request is open", () => {
     it("is refused before anything is deleted or drafted, because that ticket is not deleted", async () => {
       const seen: string[][] = [];
