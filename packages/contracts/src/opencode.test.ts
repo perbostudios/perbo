@@ -25,7 +25,7 @@ describe("how every role starts OpenCode (D-134)", () => {
   });
 
   it("gives the reviewer nothing it can use", () => {
-    expect(opencodePermissions("reviewer")).toEqual({ "*": "deny", read: "allow", bash: "ask", external_directory: "deny" });
+    expect(opencodePermissions("reviewer")).toEqual({ "*": "deny", read: "ask", bash: "ask", external_directory: "deny" });
   });
 
   it("switches off every tool server, plugin, formatter, language server, share and update, and names the chat's tool server alone", () => {
