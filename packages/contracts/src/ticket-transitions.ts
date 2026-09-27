@@ -119,8 +119,9 @@ export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
   // A `failed` ticket's branch carries a pull request. Two things put one
   // there — SCP-157's person finishing what the loop could not, and the loop's
   // own pull request from an earlier round outliving a re-run that failed —
-  // and this row is both. `handOff` and `resumeAtPullRequest` below are the
-  // only paths that take it; each refuses without pull-request evidence, which
-  // this table has no way to check, and each records which of the two it was.
+  // and this row is both. `handOff` and `resumeAtPullRequest` in `ticket.ts`
+  // are the only paths that take it; each refuses without pull-request
+  // evidence, which this table has no way to check, and each records which of
+  // the two it was.
   { from: "failed", to: "pr_open" },
 ];

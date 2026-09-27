@@ -482,10 +482,10 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
             >
               Browse the files this scope reaches
             </button>
-            {/* Where the plan and the spec disagree, read before the contract is
-                frozen: this is the last moment either can still move. Beside the
-                impact count and in its manner — advice, never a gate, because a
-                warning that held the button is one people learn to click past
+            {/* Where the plan and the spec disagree by id — a requirement nothing
+                answers, a citation pointing at nothing — read before the contract
+                is frozen: this is the last moment either can still move. Beside
+                the impact count and in its manner, advice and never a gate
                 (D-128). */}
             {ticket.approved_at === null && detail.specFindings.length > 0 && (
               <div className="spec-findings">

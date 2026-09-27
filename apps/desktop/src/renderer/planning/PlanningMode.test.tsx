@@ -6674,7 +6674,7 @@ describe("the Impact pane (SCP-320)", () => {
 
   it("checks a basic plan whose impact was never checked as its planning opens, where it opened, and not again", async () => {
     // A plan this planning did not watch land — drafted again from a stopped
-    // run, or from before impact was kept — has its check made on opening, so
+    // run, or with no impact on its record — has its check made on opening, so
     // its Impact tab is there where the check finds paths outside the scope.
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
     const opened = await session();

@@ -9,12 +9,12 @@ import { SettingsSchema } from "../../shared/protocol.js";
 
 /**
  * `scripts/migrate-workspace-round8.mjs` against the two profiles it changes
- * — one as `main` writes it, and one that has `lastOpened`, `named` and a
- * `specCut` the desktop does not read, but none of `confirmed`, `read` or
- * `impact` — run as
- * it is run, a process started with argv, and then read by the
- * profile's own loader: what the migrated file has to pass is the schema
- * Perbo starts on, and a field the script leaves out stops Perbo starting.
+ * — one with `archivedSeeded` and neither `lastOpened`, `named` nor `specCut`,
+ * and one that has `lastOpened`, `named` and a `specCut` the desktop does not
+ * read, both with none of `confirmed`, `read` or `impact` — run as it is run,
+ * a process started with argv, and then read by the profile's own loader:
+ * what the migrated file has to pass is the schema Perbo starts on, and a
+ * field the script leaves out stops Perbo starting.
  */
 const SCRIPT = fileURLToPath(new URL("../../../../../scripts/migrate-workspace-round8.mjs", import.meta.url));
 
@@ -120,10 +120,10 @@ function unmigrated(id: string) {
 }
 
 /**
- * The same planning as `main` writes it: no `specCut` or `named`, and a note
- * in its conversation that offers the way on to the contract.
+ * The same planning with no `specCut` or `named`, and a note in its
+ * conversation that offers the way on to the contract.
  */
-function fromMain(id: string) {
+function unnamed(id: string) {
   const before = unmigrated(id);
   const session: Partial<typeof before> = { ...before };
   delete session.specCut;
@@ -184,7 +184,7 @@ describe("a profile without these fields, migrated, is one Perbo starts on", () 
 
   it.each([
     ["a profile with `named` and `specCut`", { ...base, lastOpened: {}, editingSessions: [unmigrated("3e1b7c3b-2d84-4b1c-9c4d-9f0a5b6c7d8e")] }],
-    ["main", { ...base, archivedSeeded: true, editingSessions: [fromMain("3e1b7c3b-2d84-4b1c-9c4d-9f0a5b6c7d8e")] }],
+    ["a profile with neither `named` nor `specCut`", { ...base, archivedSeeded: true, editingSessions: [unnamed("3e1b7c3b-2d84-4b1c-9c4d-9f0a5b6c7d8e")] }],
   ])("from %s", (_, state) => {
     const dir = profile(state);
     // Not as it was: the schema refuses it, naming the file.

@@ -421,6 +421,9 @@ answers read off pull requests — the local record fills in a stop nobody ticke
 exist the later answer stands — and `inspect` prints it beside its finding. A key that already
 carries a decision is refused without `--replace`; with it, the earlier decision is superseded on
 the record rather than overwritten, because "we changed our mind" is part of what the file is for.
+Decisions recorded at the same time, on different tickets, all land: each is written holding
+`<store>/verdicts.json.lock` and reads the file again under it, and one that cannot take the lock
+within five seconds writes nothing and names the process that holds it.
 
 `perbo verdict --list <change>` reads that record back: every decision recorded for one change —
 the finding key, the decision, who decided and when — newest first, a superseded row kept and

@@ -154,8 +154,9 @@ describe("RunTally", () => {
     const tally = new RunTally({ bundles: store, ticketId: TICKET, before: [], progress: (line) => lines.push(line) });
     const only = attempt("att_0000000000000021", 1);
     write(store, "execution", only.attempt_id, { input_tokens: 10, output_tokens: 1, cost_micros: 100, cost_basis: "transport_reported" });
-    // A bundle written before reviews recorded the attempt they judged: its
-    // change set is this attempt's, and nothing else is there to prefer.
+    // A review bundle that names this attempt's change set and records no
+    // attempt, with no other review there to prefer: the change set alone
+    // joins it to nothing.
     write(store, "review", "rev_0000000000000021", { input_tokens: 700, output_tokens: 100, cost_micros: 100_000, cost_basis: "transport_reported" }, { changeset_id: only.changeset_id! });
 
     tally.recount([only]);

@@ -6,6 +6,7 @@ import {
   RunRefusedError,
 } from "@perbo/runner";
 import { CommandFailedError, WorkspaceError } from "@perbo/workspace";
+import { RecordLockedError } from "./store/record-lock.js";
 
 /**
  * What a refused run says: what was found, and what to run about it.
@@ -49,6 +50,7 @@ export function describeFailure(command: string, error: unknown): { message: str
       code,
     };
   }
+  if (error instanceof RecordLockedError) return { message: `${noun} did not complete: ${error.message}.`, code };
   if (error instanceof DeliveryError) {
     return { message: `${noun} could not publish: ${error.message} — ${error.detail}.`, code };
   }
