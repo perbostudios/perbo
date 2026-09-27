@@ -3467,6 +3467,11 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(async () => expect((await editingRead(plan.id)).drift?.open).toHaveLength(1));
       const before = await readings();
       location.hash = `planning/${plan.id}/drift`;
+      // The dock's card carries the same name until the Problems page is up,
+      // so the pane's card is looked for once the dock has gone with the Graph.
+      await waitFor(() => expect(screen.queryByRole("complementary", { name: /^(Interview|Chat)$/ })).toBeNull(), {
+        timeout: 5000,
+      });
       await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 });
       expect(screen.queryByRole("complementary", { name: /^(Interview|Chat)$/ })).toBeNull();
       expect(cards()).toHaveLength(1);
