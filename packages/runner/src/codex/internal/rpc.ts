@@ -148,7 +148,7 @@ export class CodexExecutorSession {
   private readonly onUsage: (threadId: string, usage: Usage) => void;
   private readonly timeout: ReturnType<typeof setTimeout> | null;
   private readonly onEvent: (method: string, params: unknown) => void;
-  private readonly approve: (method: string, params: unknown) => boolean;
+  private readonly approve: (method: string, params: unknown) => boolean | Promise<boolean>;
   private readonly worktree: string;
   private readonly ended: Promise<void>;
   private activeTurnId: string | null = null;
@@ -167,7 +167,13 @@ export class CodexExecutorSession {
     onUsage: (threadId: string, usage: Usage) => void;
     worktree: string;
     onEvent: (method: string, params: unknown) => void;
-    approve: (method: string, params: unknown) => boolean;
+    /**
+     * The runner's answer to an approval request. A promise holds the request
+     * until it settles — the command waits, and the rest of the session goes
+     * on — which is how a call naming an unlisted host waits for a person
+     * (D-137).
+     */
+    approve: (method: string, params: unknown) => boolean | Promise<boolean>;
     codexHome?: string;
   }) {
     this.home = mkdtempSync(join(tmpdir(), "perbo-codex-home-"));
@@ -286,28 +292,34 @@ export class CodexExecutorSession {
         })
         .parse(JSON.parse(line));
       if (message.method && message.id !== undefined) {
+        const id = message.id;
         const supported =
           message.method === "item/commandExecution/requestApproval" ||
           message.method === "item/fileChange/requestApproval";
-        const accepted =
-          supported && this.approve(message.method, message.params);
-        this.child.stdin.write(
-          `${JSON.stringify(
-            supported
-              ? {
-                  id: message.id,
-                  result: { decision: accepted ? "accept" : "decline" },
-                }
-              : {
-                  id: message.id,
-                  error: {
-                    code: -32601,
-                    message:
-                      "Capability not available in this execution session",
-                  },
-                },
-          )}\n`,
-        );
+        if (!supported) {
+          this.child.stdin.write(
+            `${JSON.stringify({
+              id,
+              error: {
+                code: -32601,
+                message: "Capability not available in this execution session",
+              },
+            })}\n`,
+          );
+          return;
+        }
+        const reply = (accepted: boolean): void => {
+          // A session closed while the answer was awaited has nobody to tell.
+          if (this.closed) return;
+          this.child.stdin.write(
+            `${JSON.stringify({ id, result: { decision: accepted ? "accept" : "decline" } })}\n`,
+          );
+        };
+        const answer = this.approve(message.method, message.params);
+        if (typeof answer === "boolean") reply(answer);
+        // Refused where the answer itself failed: a decline is the only safe
+        // reply to a request nobody could judge.
+        else void answer.then(reply, () => reply(false));
         return;
       }
       if (typeof message.id === "number") {

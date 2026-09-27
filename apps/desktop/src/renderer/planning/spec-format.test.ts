@@ -116,6 +116,15 @@ describe("a spec section read as blocks", () => {
     everyRunPointsAtItself(text);
   });
 
+  it("reads _word_ as emphasis, and an underscore inside a name as part of it", () => {
+    const text = "Keep _only_ the `run_id`, not run_state_ or _private_name.";
+    const [block] = specBlocks(text) as [SpecBlock];
+    if (block.kind !== "paragraph") throw new Error("prose is a paragraph");
+    expect(block.runs.filter((run) => run.mark === "emphasis").map((run) => run.text)).toEqual(["only"]);
+    expect(block.runs.map((run) => run.text).join("")).toBe("Keep only the run_id, not run_state_ or _private_name.");
+    everyRunPointsAtItself(text);
+  });
+
   it("reads ** as one mark rather than two of the shorter one", () => {
     const [block] = specBlocks("**Day Total**") as [SpecBlock];
     if (block.kind !== "paragraph") throw new Error("prose is a paragraph");

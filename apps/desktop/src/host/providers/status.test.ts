@@ -40,7 +40,37 @@ describe("probeProviders", () => {
     expect(w.calls).toEqual([
       { binary: "claude", args: ["auth", "status", "--json"] },
       { binary: "codex", args: ["login", "status"] },
+      { binary: "opencode", args: ["--version"] },
     ]);
+  });
+
+  it("connects an OpenCode 2 with no sign-in to offer, and says which models it runs on", async () => {
+    const opencode = ok("opencode v2.0.14");
+    const free = await probeProviders(probe({ ...signedIn, opencode }).execute, "/profile", {});
+    expect(provider(free, "opencode")).toEqual({
+      id: "opencode",
+      name: "OpenCode",
+      installed: true,
+      authenticated: true,
+      detail: "No OPENCODE_API_KEY · OpenCode's free models only",
+      loginCommand: "",
+      roles: ["Execution", "Independent review", "Planning"],
+    });
+    const metered = await probeProviders(probe({ ...signedIn, opencode }).execute, "/profile", {
+      OPENCODE_API_KEY: "zen-key",
+    });
+    expect(provider(metered, "opencode").detail).toBe("OPENCODE_API_KEY in the app environment · metered OpenCode Zen");
+  });
+
+  it("refuses an OpenCode older than 2.0.14, and says so, as not connected", async () => {
+    const rows = await probeProviders(probe({ ...signedIn, opencode: ok("1.18.32") }).execute, "/profile", {});
+    expect(provider(rows, "opencode")).toMatchObject({
+      installed: true,
+      authenticated: false,
+      detail: "OpenCode 1.18.32 is installed; Perbo needs 2.0.14 or later",
+    });
+    const missing = await probeProviders(probe(signedIn).execute, "/profile", {});
+    expect(provider(missing, "opencode")).toMatchObject({ installed: false, authenticated: false });
   });
 
   it("reads a Claude subscription from its own account of how it signed in", async () => {

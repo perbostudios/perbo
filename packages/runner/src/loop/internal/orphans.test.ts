@@ -7,7 +7,7 @@ const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The progress line names each process it ended by its whole command line
- * (D-NEW-nothing-shown-is-cut): what the machine was running is tool output a
+ * (D-133): what the machine was running is tool output a
  * person reads to know what was stopped.
  */
 describe("the processes a sweep ended", () => {

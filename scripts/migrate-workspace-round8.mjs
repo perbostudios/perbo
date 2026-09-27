@@ -1,5 +1,5 @@
 // Brings a desktop profile's `workspace.json` up to the records the desktop
-// reads (D-130, D-NEW-basic-and-epic-flows, D-128, D-097): a profile written without
+// reads (D-130, D-138, D-128, D-097): a profile written without
 // these fields gains them. A profile that fails the schema stops Perbo from
 // starting, so this runs before the first start of a build that reads them.
 // It:

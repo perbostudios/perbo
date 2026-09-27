@@ -189,7 +189,7 @@ describe("the review and merge screens' primary action", () => {
   });
 });
 
-describe("a note sent back with a finding (D-NEW-nothing-shown-is-cut)", () => {
+describe("a note sent back with a finding (D-133)", () => {
   it("is held to what a note holds where it is typed, and sent whole without a refusal", async () => {
     // jsdom has no modal dialog; the dialog is only opened here.
     if (!HTMLDialogElement.prototype.showModal) {

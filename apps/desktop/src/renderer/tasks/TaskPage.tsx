@@ -66,7 +66,7 @@ export function TaskPage({
   //
   // For `auto`, and for the contract asked for by name: a plan waiting for
   // approval in the planning curating it has its contract inside that
-  // planning, as one of its tabs (D-NEW-basic-and-epic-flows), where approving
+  // planning, as one of its tabs (D-138), where approving
   // is held while a problem is open.
   const planning = (workspace.drafts ?? []).find(
     (draft) => draft.repoId === repoId && draft.key === taskKey && draft.phase !== "discarded",

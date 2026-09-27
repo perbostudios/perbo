@@ -111,7 +111,7 @@ describe("relayed", () => {
     expect(read.line.target).toBe(target);
   });
 
-  it("carries what the session said, and what a tool reported, whole (D-NEW-nothing-shown-is-cut)", () => {
+  it("carries what the session said, and what a tool reported, whole (D-133)", () => {
     const long = "A sentence the session wrote at length. ".repeat(400);
     const read = relayed(said(long));
     if (read.kind !== "said") throw new Error("expected what the session said");

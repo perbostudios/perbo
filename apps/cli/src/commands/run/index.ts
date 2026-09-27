@@ -20,6 +20,7 @@ import {
   costPhrase,
   failedChecks,
   formatUsd,
+  isRunVerdict,
   limitFor,
   principlesPath,
   rollCosts,
@@ -35,6 +36,7 @@ import {
   type MaterializationManifest,
   type PerTokenCostLimit,
   type PlanContract,
+  type RunVerdict,
   type TerminationReason,
 } from "@perbo/contracts";
 import {
@@ -53,6 +55,7 @@ import {
   type RunResult,
 } from "@perbo/workspace";
 import {
+  AGENT_PROVIDERS,
   DEFAULT_DELIVERED_CHECKS_BOUND_MS,
   ResumeRefusedError,
   RunRefusedError,
@@ -67,6 +70,7 @@ import {
   resumeNote,
   runTicket,
   runsTurboWithoutForce,
+  type AgentProvider,
   type BaseSource,
   type DeliveredChecksReading,
   type PreflightRequest,
@@ -135,6 +139,8 @@ import {
   reviewerDependency,
 } from "./internal/probe.js";
 import { mergedTicketContext } from "./internal/relevel.js";
+import { DEFAULT_CLAUDE_MODEL } from "@perbo/model/defaults";
+import { proposedModel, readClaudeModels } from "./internal/catalog.js";
 import { judgingPaths, standingProhibited, storeDir, type JudgingPath } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
 import { derivedBranch, recordDelivery } from "../sync.js";
@@ -230,7 +236,7 @@ export interface TicketRuns {
   /** Record what the run did to the ticket, and answer the state it left it in. */
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean): string;
   /**
-   * D-NEW-publish-a-retained-branch-later: the branch the ticket's last run
+   * D-136: the branch the ticket's last run
    * retained without publishing, and the outcome the ticket records for it.
    * Throws a {@link UsageError} where there is none to publish. Moves nothing.
    */
@@ -301,7 +307,7 @@ export interface ExecuteArgs {
    */
   relevel: boolean;
   /**
-   * D-NEW-publish-a-retained-branch-later: push the branch an approved or
+   * D-136: push the branch an approved or
    * escalated run retained without publishing, and open its pull request,
    * rather than run the ticket. Takes `--ticket`.
    */
@@ -373,8 +379,19 @@ function readJson(path: string, label: string): unknown {
   }
 }
 
+/**
+ * Whether a run's outcome closes the gate: a verdict on the change for the
+ * person (`RUN_VERDICTS`). Typed against a run's outcomes, so a verdict the
+ * loop cannot end on fails to compile here.
+ */
+const closesTheGate = (outcome: TicketRunResult["outcome"]): outcome is RunVerdict => isRunVerdict(outcome);
+
 /** Exit codes match the review contract's meaning, one layer out. */
 export function exitCodeForRun(outcome: TicketRunResult["outcome"]): number {
+  // SCP-194: a stalled remediation is a verdict on the change — findings the
+  // executor could not close — so it sits with the other verdicts for the
+  // person (`RUN_VERDICTS`) rather than with the run-did-not-complete threes.
+  if (closesTheGate(outcome)) return EXIT_CODES.gate_closed;
   switch (outcome) {
     // `level` and `relevelled` are a re-level that left the branch level, or
     // found it so (SCP-227): the same answer as an approval, one layer out.
@@ -382,14 +399,6 @@ export function exitCodeForRun(outcome: TicketRunResult["outcome"]): number {
     case "level":
     case "relevelled":
       return 0;
-    // SCP-194: a stalled remediation is a verdict on the change — findings the
-    // executor could not close — so it sits with the other twos rather than
-    // with the run-did-not-complete threes.
-    case "changes_requested":
-    case "escalated":
-    case "remediation_exhausted":
-    case "remediation_stalled":
-      return 2;
     // `3` is "the run did not complete", not a verdict on the change.
     // `base_conflict` is here rather than at `2` for that reason: the branch
     // could not reach its base, so nothing judged it (SCP-192).
@@ -948,7 +957,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
           store: args.store,
           key: args.ticket,
         });
-  // D-NEW-publish-a-retained-branch-later: which branch, or why there is none,
+  // D-136: which branch, or why there is none,
   // read from the ticket before the machine is asked anything, so a ticket
   // with nothing to publish is told so rather than what the machine lacks.
   // Refused before anything is pushed, and moving nothing: the ticket is not
@@ -1023,7 +1032,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   const config = {
     ...parsedConfig.data,
     // Publishing a retained branch is publishing, whatever the configuration
-    // says a run does (D-NEW-publish-a-retained-branch-later).
+    // says a run does (D-136).
     publish: args.publish || args.publishRetained || parsedConfig.data.publish,
     resume_from: args.resumeFrom ?? parsedConfig.data.resume_from,
   };
@@ -1425,7 +1434,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
 
 /**
  * `perbo run --ticket <KEY> --publish-retained`
- * (D-NEW-publish-a-retained-branch-later): the branch the ticket's last run
+ * (D-136): the branch the ticket's last run
  * retained, pushed and its pull request opened by the runner's own delivery,
  * without executing or reviewing again, and the pull request recorded on the
  * ticket, which stays where it is. A refusal is the runner's, said before
@@ -1660,6 +1669,12 @@ export interface DoctorDeps {
    * its own is testing the report rather than the reading.
    */
   pullRequestChecks: PullRequestChecksReader;
+  /**
+   * The model ids Claude Code's catalog offers, asked of the agent binary
+   * only where a proposed configuration names a model on Claude Code. The
+   * real reader is the default; a test names its own.
+   */
+  claudeModels: (binary: string) => Promise<readonly string[]>;
 }
 
 /** What a diagnostic is given: where it looks, what it says as it goes, and its reads. */
@@ -1729,9 +1744,9 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
   const installStep = proposedInstallStep(checkout, membership);
   const inWorkspace = membership.workspace_root !== membership.package_root;
 
-  // The machine first: the agent binary and reviewer transport this repository
-  // has agreed on, or the defaults it will get, and `gh` only when a pull
-  // request is going to be opened.
+  // The agent binary this repository has agreed on, or the default it will
+  // get; the machine is checked for it, the reviewer's transport and `gh` once
+  // the proposal below says what a run here would use.
   const configuredBinary = repoConfig?.["agent_binary"];
   const agentBinary =
     typeof configuredBinary === "string" ? configuredBinary : RUN_CONFIG_DEFAULTS.agent_binary;
@@ -1740,49 +1755,10 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
   // any path.
   const configuredProvider = repoConfig?.["agent_provider"];
   const agentProvider =
-    configuredProvider === "claude-cli" || configuredProvider === "codex-cli"
-      ? configuredProvider
+    typeof configuredProvider === "string" && (AGENT_PROVIDERS as readonly string[]).includes(configuredProvider)
+      ? (configuredProvider as AgentProvider)
       : RUN_CONFIG_DEFAULTS.agent_provider;
-  // The reviewer this repository has agreed on, transport and model both, and
-  // the keys each was read from. The model is `reviewer_model` where one is
-  // pinned and the run's own `model` otherwise, which is the fallback the loop
-  // itself applies.
-  const reviewer = configuredReviewer(repoConfig, {
-    provider: RUN_CONFIG_DEFAULTS.reviewer_provider,
-    model: RUN_CONFIG_DEFAULTS.model,
-  });
-  const reviewerProvider = reviewer.provider;
-  const reviewerModel = reviewer.model;
   const publishes = options.args.publish || repoConfig?.["publish"] === true;
-  // The manifest's install where this repository pins one, and what the
-  // checkout implies otherwise — the same order a run resolves it in, so the
-  // diagnostic checks the binary the run will actually spawn, and none for an
-  // install of kind `none`, which is never spawned.
-  const pinnedInstall = InstallStrategySchema.safeParse(
-    (repoConfig?.["materialization_manifest"] as Record<string, unknown> | undefined)?.["install"],
-  );
-  const install = pinnedInstall.success
-    ? pinnedInstall.data
-    : proposedInstall(checkout, detectPackageManager(checkout, membership));
-  const machine = checkMachine({
-    agentBinary,
-    agentProvider,
-    reviewerProvider,
-    needsGh: publishes,
-    installBinary: install.kind === "none" ? null : (install.command[0] ?? null),
-    // SCP-200: a diagnostic asks whether GitHub answers whether or not this
-    // repository publishes. Which credential path it answers on is the thing
-    // a person is here to find out.
-    probeGithub: true,
-  });
-
-  // One call, at that model, and only when asked. Everything else `doctor`
-  // checks is local and free; this is the one question that can only be
-  // answered by the provider, and it is the one whose answer is otherwise
-  // found halfway through a paid attempt.
-  const probe = options.args.probe
-    ? await probeReviewer({ provider: reviewerProvider, model: reviewerModel })
-    : null;
 
   const result = await materialise({
     checkout,
@@ -1837,10 +1813,62 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
 
   // A partner's first hour: no config yet means a proposed one, written only
   // on request and never over a file that exists.
+  // The model it names is Claude Opus 5.5 where the agent binary's catalog
+  // offers it, and the run's own default where it does not or cannot say
+  // (D-093). Asked only for a proposal on Claude Code whose explicit
+  // configuration names no model of its own.
+  const offered =
+    storedConfig === null && agentProvider === "claude-cli" && override?.["model"] === undefined
+      ? await (options.claudeModels ?? readClaudeModels)(agentBinary).catch(() => null)
+      : null;
   const proposal =
     storedConfig === null
-      ? { ...proposeRepoConfig(checkout, result.proposed, derivedBase), ...override }
+      ? {
+          ...proposeRepoConfig(checkout, result.proposed, derivedBase, proposedModel(offered, RUN_CONFIG_DEFAULTS.model)),
+          ...override,
+        }
       : null;
+
+  // The reviewer this repository has agreed on, or the one the configuration
+  // proposed here would run, transport and model both, and the keys each was
+  // read from. The model is `reviewer_model` where one is pinned and the run's
+  // own `model` otherwise, which is the fallback the loop itself applies — so a
+  // new repository is checked and probed on the model its proposal names.
+  const reviewer = configuredReviewer(proposal ?? repoConfig, {
+    provider: RUN_CONFIG_DEFAULTS.reviewer_provider,
+    model: RUN_CONFIG_DEFAULTS.model,
+  });
+  const reviewerProvider = reviewer.provider;
+  const reviewerModel = reviewer.model;
+  // The manifest's install where this repository pins one, and what the
+  // checkout implies otherwise — the same order a run resolves it in, so the
+  // diagnostic checks the binary the run will actually spawn, and none for an
+  // install of kind `none`, which is never spawned.
+  const pinnedInstall = InstallStrategySchema.safeParse(
+    (repoConfig?.["materialization_manifest"] as Record<string, unknown> | undefined)?.["install"],
+  );
+  const install = pinnedInstall.success
+    ? pinnedInstall.data
+    : proposedInstall(checkout, detectPackageManager(checkout, membership));
+  const machine = checkMachine({
+    agentBinary,
+    agentProvider,
+    reviewerProvider,
+    needsGh: publishes,
+    installBinary: install.kind === "none" ? null : (install.command[0] ?? null),
+    // SCP-200: a diagnostic asks whether GitHub answers whether or not this
+    // repository publishes. Which credential path it answers on is the thing
+    // a person is here to find out.
+    probeGithub: true,
+  });
+
+  // One call, at that model, and only when asked. Everything else `doctor`
+  // checks is local and free; this is the one question that can only be
+  // answered by the provider, and it is the one whose answer is otherwise
+  // found halfway through a paid attempt.
+  const probe = options.args.probe
+    ? await probeReviewer({ provider: reviewerProvider, model: reviewerModel })
+    : null;
 
   // Read from whichever set would judge a run here — the configuration on disk,
   // or the one this command is proposing — so the diagnostic cannot advise
@@ -3115,24 +3143,36 @@ export function requireBase(
 
 /**
  * The `.perbo/config.json` a checkout with none would get: the checks its
- * own scripts declare, the base its checkout names, the manifest the diagnostic
- * proposed with a portable `source_checkout`, and every default limit spelled
- * out so each ceiling has a key to raise when an attempt hits it.
+ * own scripts declare, the base its checkout names, the model the agent's
+ * catalog offers, the manifest the diagnostic proposed with a portable
+ * `source_checkout`, and every default limit spelled out so each ceiling has a
+ * key to raise when an attempt hits it.
  *
- * `base` is passed in rather than derived here so that `doctor` reads the
- * checkout once and reports and writes the same answer.
+ * `base` and `model` are passed in rather than derived here so that `doctor`
+ * reads the checkout and the catalog once and reports and writes the same
+ * answer. Where `model` is not the reviewer's own default, `reviewer_model`
+ * pins the reviewer to that default: the reviewer keeps `DEFAULT_CLAUDE_MODEL`
+ * until a regression-suite run makes another model its default (D-010).
  */
 export function proposeRepoConfig(
   checkout: string,
   manifest: MaterializationManifest | null,
   base: ProposedBase | null,
+  model: string,
 ): Record<string, unknown> {
+  const pinsReviewer = model !== DEFAULT_CLAUDE_MODEL;
   return {
     _comment: [
       "Proposed by `perbo doctor`. The checks come from package.json scripts, the base branch",
-      "from the checkout, the materialisation manifest from what the checkout needs that Git",
-      "does not carry, and the limits are the laptop defaults written out so each ceiling has",
-      "a key to raise. Keys beginning with `_` are ignored.",
+      "from the checkout, the model from the agent's catalog, the materialisation manifest from",
+      "what the checkout needs that Git does not carry, and the limits are the laptop defaults",
+      "written out so each ceiling has a key to raise. Keys beginning with `_` are ignored.",
+      ...(pinsReviewer
+        ? [
+            `\`reviewer_model\` keeps the reviewer on ${DEFAULT_CLAUDE_MODEL}, its default until a regression-suite`,
+            "run makes another model the default; the executor runs on `model`.",
+          ]
+        : []),
     ],
     checks: proposedChecks(checkout),
     // Omitted rather than guessed where the checkout names no branch: a run
@@ -3140,7 +3180,8 @@ export function proposeRepoConfig(
     ...(base ? { base_ref: base.base_ref } : {}),
     protected_tests: [],
     agent_binary: RUN_CONFIG_DEFAULTS.agent_binary,
-    model: RUN_CONFIG_DEFAULTS.model,
+    model,
+    ...(pinsReviewer ? { reviewer_model: DEFAULT_CLAUDE_MODEL } : {}),
     reviewer_provider: RUN_CONFIG_DEFAULTS.reviewer_provider,
     max_remediation_rounds: RUN_CONFIG_DEFAULTS.max_remediation_rounds,
     publish: false,
@@ -3404,6 +3445,7 @@ export const doctorCommandLine: NarratedCommand<DoctorArgs, Record<string, never
       ...(context.baseRef ? { baseRef: context.baseRef } : {}),
       ...(context.keyFor ? { keyFor: context.keyFor } : {}),
       ...(context.pullRequestChecks ? { pullRequestChecks: context.pullRequestChecks } : {}),
+      ...(context.claudeModels ? { claudeModels: context.claudeModels } : {}),
     });
   },
 };

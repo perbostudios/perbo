@@ -3,7 +3,7 @@ import { READING_RETRY_PAUSES_MS, untilItRuns } from "./reading-retry.js";
 
 /**
  * A reading of the plan against its spec that does not run is tried again
- * before the page is told (D-NEW-basic-and-epic-flows): three retries, after
+ * before the page is told (D-138): three retries, after
  * 2, 4 and 8 seconds.
  */
 describe("a reading tried until it runs", () => {

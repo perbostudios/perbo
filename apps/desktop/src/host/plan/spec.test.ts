@@ -458,7 +458,7 @@ describe("draftedReading", () => {
   it("is the planning's reading state where the verdict its drafting wrote holds for the spec as it is", () => {
     // A plan just drafted agrees with its spec by construction (D-128), so the
     // plan the planning holds has been read, and its first confirm reads
-    // nothing again (D-NEW-basic-and-epic-flows).
+    // nothing again (D-138).
     const { repo, record } = drafted({});
     expect(draftedReading(() => repo, record)).toBe(readingStateOf(record, specTexts(() => repo)));
   });

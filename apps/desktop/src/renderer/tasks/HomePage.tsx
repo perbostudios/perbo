@@ -20,7 +20,7 @@ import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
 import { ARCHIVE_SEARCH_MAX_CHARS, type Snapshot, type TaskRow, type TaskSummary } from "../../shared/protocol.js";
 import { archiveRows, isArchivable, isFiled, isMergeDecided } from "../../shared/archive.js";
-import { HOME_TONES, HOME_TONE_LABELS, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
+import { HOME_TONES, HOME_TONE_LABELS, JOURNEY_END, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
 const lower = (word: string): string => word.toLowerCase();
@@ -93,11 +93,12 @@ function StageRing({
         </span>
       </span>
     );
-  const share = (stage / 6) * 100;
+  // A journey that ended fills the ring: every step is done.
+  const share = (Math.min(stage, JOURNEY_END - 1) / (JOURNEY_END - 1)) * 100;
   return (
     <span
       className={cx("stage-ring", tone && "stage-ring--" + tone)}
-      aria-label={`Stage ${stage} of 6`}
+      aria-label={stage === JOURNEY_END ? "Every step done" : `Stage ${stage} of ${JOURNEY_END - 1}`}
       style={{
         background: `conic-gradient(var(--ink) 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
       }}

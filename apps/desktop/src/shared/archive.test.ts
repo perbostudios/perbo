@@ -10,7 +10,7 @@ const row = (state: string, pullRequest: string | null = PR): Pick<TaskRow, "rep
     "repoId" | "ticket"
   >;
 const job = (state: Job["state"], kind: Job["kind"] = "run"): Job =>
-  ({ id: "job", repoId: "repo", key: "PRB-1", resultKey: null, kind, state }) as Job;
+  ({ id: "job", repoId: "repo", key: "PRB-1", resultKey: null, kind, state, log: "" }) as Job;
 
 describe("what may be archived", () => {
   it("files what finished and what stopped, and nothing the loop still carries", () => {

@@ -612,7 +612,7 @@ function Picker({
    * planning is about until they are resolved (D-128);
    * else the Graph for work the drafter divided, the contract for work it did
    * not, whose plan is its contract, and the spec where there is no plan yet
-   * (D-NEW-basic-and-epic-flows). A ticket row
+   * (D-138). A ticket row
    * carries none of this, and opening a flat plan on a Graph the rail does not
    * offer is a page with nothing on it.
    */

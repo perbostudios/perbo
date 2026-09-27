@@ -215,10 +215,10 @@ describe("the desktop host", () => {
       "--repo",
       REPO,
     ]);
-    expect(args.list).toBe(false);
+    expect(args).toMatchObject({ list: false });
     expect(output.json).toBe(true);
     expect(args).toMatchObject({ reference: KEY, target: { repo: REPO, store: null } });
-    if (args.list) throw new Error("unreachable");
+    if (!("list" in args) || args.list) throw new Error("unreachable");
     expect(args).toMatchObject({
       decision: "endorse",
       key: "src/search/page.ts#paginate",

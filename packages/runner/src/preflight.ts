@@ -1,7 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { GH_NOT_LOGGED_IN } from "@perbo/contracts";
+import {
+  GH_NOT_LOGGED_IN,
+  OPENCODE_API_KEY_ENV,
+  OPENCODE_MIN_VERSION,
+  opencodeVersionFits,
+} from "@perbo/contracts";
 import type { ModelProvider } from "@perbo/model";
 import { createGh, createGit } from "@perbo/workspace";
 import {
@@ -31,7 +36,9 @@ export interface PreflightFinding {
     | "gh_not_authenticated"
     | "reviewer_credential_missing"
     | "reviewer_binary_missing"
-    | "codex_too_old";
+    | "codex_too_old"
+    | "opencode_too_old"
+    | "opencode_key_missing";
   detail: string;
   /** The one command or action that clears it. */
   fix: string;
@@ -68,7 +75,7 @@ export interface PreflightRequest {
    * guessed from `agentBinary`'s own spelling. `null` where the caller has
    * an `agentBinary` but does not know which transport it is, or has none.
    */
-  agentProvider: "claude-cli" | "codex-cli" | null;
+  agentProvider: "claude-cli" | "codex-cli" | "opencode-cli" | null;
   /** Which reviewer transport the run will use; null where nothing is reviewed. */
   reviewerProvider: ModelProvider | null;
   /** Whether the run will push and open a pull request through `gh`. */
@@ -236,12 +243,49 @@ function checkCodexVersion(
   }
 }
 
+/**
+ * An OpenCode below {@link OPENCODE_MIN_VERSION}, or one whose version cannot
+ * be read, is refused: the guarantees an OpenCode role keeps were measured on
+ * that build's ACP server (D-134). And where no
+ * `OPENCODE_API_KEY` is set, a person is told once that OpenCode runs only its
+ * free models, which is a choice and not a fault.
+ */
+function checkOpenCode(
+  identity: string,
+  tool: PreflightTool,
+  findings: PreflightFinding[],
+  checked: Set<string>,
+  env: NodeJS.ProcessEnv,
+): void {
+  if (checked.has("key") === false && !env[OPENCODE_API_KEY_ENV]) {
+    checked.add("key");
+    findings.push({
+      severity: "warning",
+      reason: "opencode_key_missing",
+      detail: `${OPENCODE_API_KEY_ENV} is not set, so OpenCode runs only its free models`,
+      fix: `export ${OPENCODE_API_KEY_ENV}=… with an OpenCode Zen key to run its other models`,
+    });
+  }
+  const resolved = resolvedBinaryIdentity(identity, env);
+  if (checked.has(resolved)) return;
+  checked.add(resolved);
+  if (!tool.present || opencodeVersionFits(tool.version)) return;
+  findings.push({
+    severity: "blocking",
+    reason: "opencode_too_old",
+    detail: `opencode ${JSON.stringify(tool.version ?? "")} is not ${OPENCODE_MIN_VERSION} or later`,
+    fix: `install OpenCode ${OPENCODE_MIN_VERSION} or later (brew install anomalyco/tap/opencode-v2)`,
+  });
+}
+
 export function preflight(request: PreflightRequest): PreflightResult {
   const env = request.env ?? process.env;
   const findings: PreflightFinding[] = [];
   const tools: Record<string, PreflightTool> = {};
   /** Every binary identity {@link checkCodexVersion} has already reported on, once. */
   const codexVersionChecked = new Set<string>();
+  /** The same for {@link checkOpenCode}, and whether the key has been reported on. */
+  const openCodeChecked = new Set<string>();
 
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   const minNode = request.minNodeMajor ?? 22;
@@ -303,7 +347,9 @@ export function preflight(request: PreflightRequest): PreflightResult {
         fix:
           request.agentBinary === "claude"
             ? "install Claude Code (npm install -g @anthropic-ai/claude-code) and sign in with `claude`"
-            : `install \`${request.agentBinary}\` and make sure it is on PATH`,
+            : request.agentProvider === "opencode-cli"
+              ? "install OpenCode 2 (brew install anomalyco/tap/opencode-v2) and make sure `opencode` is on PATH"
+              : `install \`${request.agentBinary}\` and make sure it is on PATH`,
       });
     }
     // Keyed on the provider, not the binary's spelling: `agentBinary` is a
@@ -315,6 +361,8 @@ export function preflight(request: PreflightRequest): PreflightResult {
     const looksLikeCodex = tools[request.agentBinary]!.version?.startsWith("codex-cli ") === true;
     if (request.agentProvider === "codex-cli" || (request.agentProvider === null && looksLikeCodex))
       checkCodexVersion(request.agentBinary, tools[request.agentBinary]!, findings, codexVersionChecked, env);
+    if (request.agentProvider === "opencode-cli")
+      checkOpenCode(request.agentBinary, tools[request.agentBinary]!, findings, openCodeChecked, env);
   }
 
   if (request.reviewerProvider === "anthropic") {
@@ -357,6 +405,18 @@ export function preflight(request: PreflightRequest): PreflightResult {
       });
     }
     checkCodexVersion(codex, tools.codex, findings, codexVersionChecked, env);
+  } else if (request.reviewerProvider === "opencode-cli") {
+    const opencode = env.PERBO_OPENCODE_BINARY ?? "opencode";
+    tools.opencode = tools[opencode] ?? version(opencode, env);
+    if (!tools.opencode.present) {
+      findings.push({
+        severity: "blocking",
+        reason: "reviewer_binary_missing",
+        detail: `the reviewer provider is \`opencode-cli\` and \`${opencode}\` cannot be run`,
+        fix: "install OpenCode 2 (brew install anomalyco/tap/opencode-v2), or set PERBO_OPENCODE_BINARY to it",
+      });
+    }
+    checkOpenCode(opencode, tools.opencode, findings, openCodeChecked, env);
   }
 
   // `gh` is checked whether or not this run publishes: `sync`, `stops` and

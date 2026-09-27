@@ -17,10 +17,13 @@ import { z } from "zod";
 /**
  * One writer at a time for a record the store keeps whole.
  *
- * Commands over different tickets run at the same time (D-049), and a record
- * the whole store shares — `verdicts.json` — is changed by reading it, adding
- * to it and writing it back. Two of those at once each read the file before
- * the other wrote, and the second write drops the first one's row. So the
+ * Two records are changed by reading them, adding to them and writing them
+ * back, by more than one process at once: `verdicts.json`, which `perbo
+ * verdict` commands over different tickets write side by side (D-049), and a
+ * ticket's egress questions (D-137), which the run
+ * appends to and closes and `perbo verdict --egress` answers — from a
+ * terminal and from the desktop's press. Two such changes at once would each
+ * start from the file before the other wrote, and one would be lost. So the
  * change is made under a lock beside the record, and the record is read again
  * under it: the writes are serialised, and each one starts from the last.
  *

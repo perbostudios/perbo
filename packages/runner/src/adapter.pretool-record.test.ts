@@ -199,7 +199,7 @@ describe("the sentence a record keeps of the other reading", () => {
 
 /**
  * The command a refusal is about is tool output, and the record keeps it whole
- * (D-NEW-nothing-shown-is-cut): its detail and its target are what a person
+ * (D-133): its detail and its target are what a person
  * reads to know what was refused, however long the command ran.
  */
 describe("a refused command, whole", () => {

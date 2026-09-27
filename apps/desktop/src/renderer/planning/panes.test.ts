@@ -38,7 +38,7 @@ function reached(workspace: Pick<Snapshot, "drafts" | "tasks">): Pick<Snapshot, 
   return { ...workspace, drafts: [{ ...draft, lastPane: "contract", confirmed: contractState(workspace, draft) }] };
 }
 
-describe("the tabs a planning offers (D-NEW-basic-and-epic-flows)", () => {
+describe("the tabs a planning offers (D-138)", () => {
   it("offers the Spec and the Explorer and nothing else while the spec is written", () => {
     expect(tabs(planning({ key: null }))).toEqual(["Spec", "Explorer"]);
     // Not even a contract asked for by address: there is none yet.
@@ -125,7 +125,7 @@ describe("where a plan lands", () => {
   });
 });
 
-describe("what a basic ticket's Confirm contract reads (D-NEW-basic-and-epic-flows)", () => {
+describe("what a basic ticket's Confirm contract reads (D-138)", () => {
   it("goes to a basic ticket's contract, where it is read, and through the reading for an epic", () => {
     const way = { repoId: "repo-1", key: "PRB-1", sessionId: "s-1", approved: false };
     expect(confirmRoute({ ...way, basic: true })).toEqual({ page: "planning", sessionId: "s-1", pane: "contract" });

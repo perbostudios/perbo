@@ -30,7 +30,7 @@ describe("the layered layout", () => {
   });
 });
 
-describe("what a node's card says under its title (D-NEW-basic-and-epic-flows)", () => {
+describe("what a node's card says under its title (D-138)", () => {
   it("counts its criteria and names its paths", () => {
     expect(nodeSummary({ criteria: [1, 2], paths: ["src/a/**", "src/b.ts"] })).toBe("2 criteria · src/a/** · src/b.ts");
     expect(nodeSummary({ criteria: [1], paths: [] })).toBe("1 criterion");

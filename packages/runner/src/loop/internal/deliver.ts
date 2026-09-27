@@ -73,7 +73,7 @@ interface PublishArgs {
   /**
    * Where the branch is and the base its change set is measured against: a
    * run's round state, or the checkout a retained branch is published from
-   * (D-NEW-publish-a-retained-branch-later).
+   * (D-136).
    */
   state: Pick<RoundState, "baseCommit"> & {
     workspace: Pick<RoundState["workspace"], "path" | "branch" | "base_commit">;

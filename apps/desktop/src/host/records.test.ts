@@ -321,7 +321,7 @@ describe("the edit the chat cards", () => {
     ],
   });
 
-  it("carries a summary whole, however many globs it names (D-NEW-nothing-shown-is-cut)", () => {
+  it("carries a summary whole, however many globs it names (D-133)", () => {
     // `perbo edit` caps no summary: `set_node_paths` writes every glob it was
     // given, and a plan scoped to a few long ones runs past 300 characters.
     const root = scratchDirectory("perbo-draft-record-");

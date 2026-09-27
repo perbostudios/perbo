@@ -26,8 +26,12 @@ export function oneLine(text: string): string {
 const ESCAPES: Record<string, string> = { "\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t" };
 const UNESCAPES: Record<string, string> = { "\\": "\\", n: "\n", r: "\r", t: "\t" };
 
-/** `text` with its backslashes, control characters and line and paragraph separators escaped: one physical line. */
-function escaped(text: string): string {
+/**
+ * `text` with its backslashes, control characters and line and paragraph
+ * separators escaped: one physical line, which {@link unescaped} restores
+ * exactly. An egress question's command travels the same way.
+ */
+export function escaped(text: string): string {
   return text.replace(
     /[\\\p{Cc}\u2028\u2029]/gu,
     (character) => ESCAPES[character] ?? "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"),
@@ -35,7 +39,7 @@ function escaped(text: string): string {
 }
 
 /** What {@link escaped} escaped, restored. */
-function unescaped(text: string): string {
+export function unescaped(text: string): string {
   return text.replace(/\\(?:([\\nrt])|u([0-9a-f]{4}))/g, (_, named: string | undefined, code: string | undefined) =>
     named !== undefined ? UNESCAPES[named]! : String.fromCharCode(Number.parseInt(code!, 16)),
   );

@@ -14,7 +14,7 @@ export const SIMPLE_TASK = "The task is simple, so there is no graph.";
 
 /**
  * Where a plan lands once it is drafted, first or again, seen from planning
- * mode (D-NEW-basic-and-epic-flows).
+ * mode (D-138).
  *
  * Only a draft this planning watched settle: a planning opened over a plan
  * that already exists is a person who came to read it, and is left where it

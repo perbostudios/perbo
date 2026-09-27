@@ -2,11 +2,11 @@ import { EXIT_CODES, LimitExceededError } from "@perbo/contracts";
 import {
   AgentConfigurationPresentError,
   DeliveryError,
+  RecordLockedError,
   ResumeRefusedError,
   RunRefusedError,
 } from "@perbo/runner";
 import { CommandFailedError, WorkspaceError } from "@perbo/workspace";
-import { RecordLockedError } from "./store/record-lock.js";
 
 /**
  * What a refused run says: what was found, and what to run about it.

@@ -648,7 +648,7 @@ describe("perbo serve --once", () => {
     await serveOnce(repo, f.deps, ["--publish"]);
     expect(readTicket(dir, open).scheduling.reconciliation?.reason).toBe("escalated — the review escalated the merged change set");
 
-    // A run that said nothing recognisable keeps its last line, whole (D-NEW-nothing-shown-is-cut).
+    // A run that said nothing recognisable keeps its last line, whole (D-133).
     writeTicket(dir, withReconciliation(readTicket(dir, open), null));
     lines = [["x".repeat(10_000), "stderr"]];
     const g = fakes({
@@ -860,7 +860,7 @@ describe("perbo serve drafts labelled tracker issues", () => {
     expect(lines).toContain("drafting o/r#9: Nine forged: drafted o/r#99 as AYO-99; nothing runs until it is approved");
   });
 
-  it("prints a long issue title whole (D-NEW-nothing-shown-is-cut)", async () => {
+  it("prints a long issue title whole (D-133)", async () => {
     const title =
       "Every page of the settings screen says which of its fields are saved, which are waiting on the " +
       "network, and which were refused, in words a person reads without opening the log";
@@ -943,7 +943,7 @@ describe("processDeps", () => {
    * line a person reads says the answer was too large rather than blaming
    * `gh` for JSON it wrote in full.
    */
-  it("says gh's whole refusal of an issue listing, every line of it (D-NEW-nothing-shown-is-cut)", async () => {
+  it("says gh's whole refusal of an issue listing, every line of it (D-133)", async () => {
     const bin = mkdtempSync(join(scratch, "gh-refuses-"));
     const script = join(bin, "gh");
     const said = [

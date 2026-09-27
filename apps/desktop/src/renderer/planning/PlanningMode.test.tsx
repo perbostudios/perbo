@@ -18,7 +18,7 @@ import {
 } from "../shell/dock-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../../shared/shortcuts.js";
 import { withDraft } from "../shell/create.js";
-import { REREAD_COULD_NOT_START, untouchedPlanning } from "../../shared/contract-editing.js";
+import { readingState, REREAD_COULD_NOT_START, untouchedPlanning } from "../../shared/contract-editing.js";
 import { PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
 import { handlers } from "../../sample-host/handlers.js";
 import { isLive } from "../../shared/jobs.js";
@@ -219,7 +219,7 @@ describe("Create in the rail (SCP-334)", () => {
     const panes = screen.getByRole("group", { name: "Planning panes" });
     expect(within(panes).getByRole("button", { name: "Spec" }).getAttribute("aria-current")).toBe("page");
     // No plan yet, so nothing measured against one: the Spec and the files
-    // it is written against (D-NEW-basic-and-epic-flows).
+    // it is written against (D-138).
     expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await screen.findByRole("heading", { name: /Hi, / });
@@ -492,7 +492,7 @@ describe("clicking away from a planning nothing was put into (D-129)", () => {
     location.hash = `planning/${opened.id}/graph`;
     mount();
     await screen.findByLabelText("Message the chat");
-    // Held to what a turn carries where it is typed (D-NEW-nothing-shown-is-cut).
+    // Held to what a turn carries where it is typed (D-133).
     const box = screen.getByLabelText("Message the chat") as HTMLTextAreaElement;
     typeInto(box, "m".repeat(TYPED_TEXT_MAX_CHARS + 50));
     expect(box.value).toHaveLength(TYPED_TEXT_MAX_CHARS);
@@ -1978,7 +1978,7 @@ describe("the Spec pane (SCP-336)", () => {
     // drafter divides this spec into two nodes, so the plan has a graph and
     // the graph is where the person goes. Work it does not divide lands where
     // its checks say, with a pop-up saying the task is simple; a divided plan
-    // has its graph, and no pop-up (D-NEW-basic-and-epic-flows).
+    // has its graph, and no pop-up (D-138).
     await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/), {
       timeout: 5000,
     });
@@ -2363,7 +2363,7 @@ describe("the Graph pane (SCP-316)", () => {
       const inspector = await screen.findByRole("region", { name: "Node node_1" });
       const node = (await graphOf(plan)).nodes.find((each) => each.id === "node_1")!;
       // The card reads out the title, under it how many criteria it covers
-      // and its paths (D-NEW-basic-and-epic-flows),
+      // and its paths (D-138),
       // and each criterion and how it is proven; the inspector changes them.
       expect(card.textContent).toContain(node.title);
       for (const criterion of node.criteria) {
@@ -3047,35 +3047,261 @@ describe("the Graph pane (SCP-316)", () => {
     expect(pane("Graph").getAttribute("aria-current")).toBe("page");
   });
 
-  it("holds the way onward while the interview is still taking a turn", async () => {
-    // What approving freezes is what the contract holds when it is read
-    // (ADR-0016), and a turn in flight may still be moving the plan — a
-    // criterion, a node, the outcome. Settling it now settles the half of it
-    // that has landed, so the way onward waits, and says it is waiting rather
-    // than going quiet.
-    const plan = await planned();
-    location.hash = `planning/${plan.id}/graph`;
-    mount();
-    const onward = await screen.findByRole("button", { name: "Confirm the plan" });
-    expect(onward.hasAttribute("disabled"), "nothing in flight, nothing to wait for").toBe(false);
+  it("holds Confirm the plan and its shortcut while the chat is talking, from the moment a turn is sent until it is over (D-102)", async () => {
+    // Confirm the plan waits for the Architect to finish, as Generate plan
+    // does: a turn in flight may still be moving the plan — a criterion, a
+    // node, the outcome — and the confirm reads the plan the turn leaves. The
+    // button is held from the moment the turn is sent, before the host has
+    // said it is under way, the sentence under it says why, and the shortcut
+    // does nothing meanwhile.
+    const plan = await openGraph();
+    const onward = (): HTMLButtonElement =>
+      screen.getByRole("button", { name: "Confirm the plan" }) as HTMLButtonElement;
+    const talking = "The chat is still talking. Confirm the plan is yours once it has finished this turn.";
+    const shortcut = (): void => {
+      fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
+    };
+    const working = async (): Promise<boolean> =>
+      ((await sampleBridge.request({ kind: "snapshot" })).working ?? []).includes(plan.id);
+    expect(onward().disabled, "nothing in flight, nothing to wait for").toBe(false);
+    expect(screen.queryByText(talking)).toBeNull();
 
-    await sampleBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
-    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "what is this for?" });
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled"),
-      ).toBe(true),
+    const real = bridge.request.bind(bridge);
+    let release!: () => void;
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    const spy = vi.spyOn(bridge, "request").mockImplementation((async (request: Parameters<typeof real>[0]) => {
+      if (request.kind === "interviewTurn") await held;
+      return real(request);
+    }) as typeof bridge.request);
+    try {
+      const composer = screen.getByLabelText("Message the chat");
+      fireEvent.change(composer, { target: { value: "take your time" } });
+      fireEvent.keyDown(composer, { key: "Enter" });
+      // Sent, and still on its way to the host: held all the same.
+      await waitFor(() => expect(onward().disabled).toBe(true));
+      expect(await working()).toBe(false);
+      expect(screen.getByText(talking)).toBeTruthy();
+      shortcut();
+      await settle();
+      expect(location.hash).toBe(`#planning/${plan.id}/graph`);
+      // With the host, which says the turn is under way: still held.
+      release();
+      await waitFor(async () => expect(await working()).toBe(true));
+      expect(onward().disabled).toBe(true);
+      expect(screen.getByText(talking)).toBeTruthy();
+      shortcut();
+      await settle();
+      expect(location.hash).toBe(`#planning/${plan.id}/graph`);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // The turn over, the confirm is theirs, and the shortcut takes it.
+    await waitFor(() => expect(onward().disabled).toBe(false), { timeout: 5000 });
+    expect(screen.queryByText(talking)).toBeNull();
+    shortcut();
+    await waitFor(() => expect(location.hash).toMatch(/\/(drift|contract)$/), { timeout: 5000 });
+  });
+
+  /** Changes from the host that move the plan withheld from this window until let go, as a slow round trip withholds them. */
+  function withholdPlanChanges() {
+    let withholding = false;
+    const withheld: (() => void)[] = [];
+    const subscribe = bridge.subscribe.bind(bridge);
+    const spy = vi.spyOn(bridge, "subscribe").mockImplementation((listener) =>
+      subscribe((change) => {
+        if (withholding && (change.kind === "editing" || (change.kind === "records" && !change.job))) {
+          withheld.push(() => listener(change));
+          return;
+        }
+        listener(change);
+      }),
     );
-    expect(screen.getByText("Waiting for the chat to finish this turn…")).toBeTruthy();
+    return {
+      start: () => {
+        withholding = true;
+      },
+      release: () => {
+        withholding = false;
+        for (const deliver of withheld.splice(0)) deliver();
+        spy.mockRestore();
+      },
+    };
+  }
 
-    // And it comes back once the turn is over, rather than staying shut.
+  it("reads the plan the turn left when Confirm the plan is pressed the instant the turn ends (D-102, D-128)", async () => {
+    // The turn's edit reaches the host before it says the turn is over, and
+    // reaches this window a round trip later. A confirm pressed in that gap
+    // compares the state the turn left, asked of the host, and never this
+    // window's copy from before the edit landed, which the reading at
+    // drafting was of and would pass the plan unread.
+    const plan = await planned();
+    // A first turn, so the next is the one the sample answers by editing the plan.
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
     await waitFor(
-      () =>
-        expect(
-          screen.getByRole("button", { name: "Confirm the plan" }).hasAttribute("disabled"),
-        ).toBe(false),
+      async () => expect(((await sampleBridge.request({ kind: "snapshot" })).working ?? []).includes(plan.id)).toBe(false),
       { timeout: 5000 },
     );
+    const late = withholdPlanChanges();
+    const real = bridge.request.bind(bridge);
+    const asked: (string | null)[] = [];
+    const requests = vi.spyOn(bridge, "request").mockImplementation((async (request: Parameters<typeof real>[0]) => {
+      if (request.kind === "driftCheck") asked.push(request.state);
+      return real(request);
+    }) as typeof bridge.request);
+    try {
+      location.hash = `planning/${plan.id}/graph`;
+      mount();
+      await screen.findByRole("button", { name: /^Node node_1/ });
+      const onward = (): HTMLButtonElement =>
+        screen.getByRole("button", { name: "Confirm the plan" }) as HTMLButtonElement;
+      await waitFor(() => expect(onward().disabled).toBe(false));
+      const drifts = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key);
+      const before = (await drifts()).length;
+      late.start();
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "tighten the first criterion" });
+      await waitFor(() => expect(onward().disabled).toBe(true));
+      // The edit is on the host, and this window has not been told.
+      await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toMatch(/within 60 seconds/));
+      await waitFor(() => expect(onward().disabled).toBe(false), { timeout: 5000 });
+      fireEvent.click(onward());
+      await waitFor(() => expect(asked).toHaveLength(1), { timeout: 5000 });
+      const listed = (await sampleBridge.request({ kind: "drafts" })).find((draft) => draft.id === plan.id)!;
+      const now = await editingRead(plan.id);
+      expect(now.form.draft.criteria.map((criterion) => criterion.text).join("\n")).toMatch(/within 60 seconds/);
+      expect(asked[0]).toBe(readingState(listed.spec, now.form.draft));
+      expect(asked[0]).not.toBe(listed.read);
+      late.release();
+      await waitFor(async () => expect((await drifts()).length).toBe(before + 1), { timeout: 5000 });
+    } finally {
+      late.release();
+      requests.mockRestore();
+    }
+  });
+
+  it("holds Open the plan on the Spec pane while the chat is talking, naming it (D-102)", async () => {
+    const plan = await planned();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    const open = (await screen.findByRole("button", { name: "Open the plan" })) as HTMLButtonElement;
+    await waitFor(() => expect(open.disabled).toBe(false));
+    const talking = "The chat is still talking. Open the plan is yours once it has finished this turn.";
+    expect(screen.queryByText(talking)).toBeNull();
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "take your time" });
+    await waitFor(() => expect(open.disabled).toBe(true));
+    expect(screen.getByText(talking)).toBeTruthy();
+    await waitFor(() => expect(open.disabled).toBe(false), { timeout: 5000 });
+    expect(screen.queryByText(talking)).toBeNull();
+  });
+
+  it("holds a confirm that reaches the Problems pane while the chat is talking until the turn is over, then reads the plan it left (D-102)", async () => {
+    const plan = await planned();
+    const working = async (): Promise<boolean> =>
+      ((await sampleBridge.request({ kind: "snapshot" })).working ?? []).includes(plan.id);
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
+    await waitFor(async () => expect(await working()).toBe(false), { timeout: 5000 });
+    const real = bridge.request.bind(bridge);
+    const asked: (string | null)[] = [];
+    const requests = vi.spyOn(bridge, "request").mockImplementation((async (request: Parameters<typeof real>[0]) => {
+      if (request.kind === "driftCheck") asked.push(request.state);
+      return real(request);
+    }) as typeof bridge.request);
+    try {
+      location.hash = `planning/${plan.id}/graph`;
+      mount();
+      await screen.findByRole("button", { name: /^Node node_1/ });
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "take your time" });
+      await waitFor(() =>
+        expect((screen.getByRole("button", { name: "Confirm the plan" }) as HTMLButtonElement).disabled).toBe(true),
+      );
+      // A confirm that slipped past the held button, as one from another window would.
+      confirmRoute({ repoId: plan.repoId, key: plan.key, sessionId: plan.id, approved: false, basic: false });
+      location.hash = `planning/${plan.id}/drift`;
+      await screen.findByText(
+        "The chat is still talking. The plan is read against the spec once it has finished this turn.",
+      );
+      expect(await working()).toBe(true);
+      expect(asked).toEqual([]);
+      // The turn over, the reading is of the plan the turn left.
+      await waitFor(() => expect(asked).toHaveLength(1), { timeout: 5000 });
+      expect(await working()).toBe(false);
+      const listed = (await sampleBridge.request({ kind: "drafts" })).find((draft) => draft.id === plan.id)!;
+      const now = await editingRead(plan.id);
+      expect(now.form.draft.criteria.map((criterion) => criterion.text).join("\n")).toMatch(/within 60 seconds/);
+      expect(asked[0]).toBe(readingState(listed.spec, now.form.draft));
+    } finally {
+      requests.mockRestore();
+    }
+  });
+
+  it("holds Confirm contract, and the approve on the contract and its shortcut, while the chat is talking, and reads the plan the turn left the instant it ends (D-102)", async () => {
+    const plan = await planned();
+    const edit = async (edit: GraphEdit) =>
+      sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
+    await edit({ op: "delete_node", id: "node_2", move_criteria_to: "node_1", delete_criteria: [] });
+    await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
+    await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
+    const working = async (): Promise<boolean> =>
+      ((await sampleBridge.request({ kind: "snapshot" })).working ?? []).includes(plan.id);
+    // A first turn, so each after it is one the sample answers by editing the plan.
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "why one list?" });
+    await waitFor(async () => expect(await working()).toBe(false), { timeout: 5000 });
+    const talking = "The chat is still talking. Confirm contract is yours once it has finished this turn.";
+    // On the contract, the button shown is the approve, and the sentence names it.
+    const approving = "The chat is still talking. Approve · start the loop is yours once it has finished this turn.";
+    // Installed before the window subscribes, and started only on the contract.
+    const late = withholdPlanChanges();
+    location.hash = `planning/${plan.id}/explorer`;
+    mount();
+    const next = (await screen.findByRole("button", { name: "Confirm contract" })) as HTMLButtonElement;
+    await waitFor(() => expect(next.disabled).toBe(false));
+    expect(screen.queryByText(talking)).toBeNull();
+    // A turn in flight holds the way on to the contract, and says why.
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "take your time" });
+    await waitFor(() => expect(next.disabled).toBe(true));
+    expect(screen.getByText(talking)).toBeTruthy();
+    await waitFor(() => expect(next.disabled).toBe(false), { timeout: 5000 });
+    expect(screen.queryByText(talking)).toBeNull();
+    fireEvent.click(next);
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
+    const approve = (await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 })) as HTMLButtonElement;
+    await waitFor(() => expect(approve.disabled).toBe(false));
+
+    // On the contract, a turn in flight holds the approve and its shortcut, and
+    // its edit reaches this window only a round trip after the host has it.
+    const real = bridge.request.bind(bridge);
+    const asked: (string | null)[] = [];
+    const requests = vi.spyOn(bridge, "request").mockImplementation((async (request: Parameters<typeof real>[0]) => {
+      if (request.kind === "driftCheck") asked.push(request.state);
+      return real(request);
+    }) as typeof bridge.request);
+    try {
+      late.start();
+      const edited = (await graphOf(plan)).criteria[0]!.text;
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "take your time" });
+      await waitFor(() => expect(approve.disabled).toBe(true));
+      expect(screen.getByText(approving)).toBeTruthy();
+      fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
+      await settle();
+      expect(requests.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
+      expect(asked).toEqual([]);
+      await waitFor(async () => expect((await graphOf(plan)).criteria[0]!.text).not.toBe(edited));
+      // Pressed the instant the turn ends: the reading is of the plan the turn left.
+      await waitFor(() => expect(approve.disabled).toBe(false), { timeout: 5000 });
+      fireEvent.click(approve);
+      await waitFor(() => expect(asked).toHaveLength(1), { timeout: 5000 });
+      const listed = (await sampleBridge.request({ kind: "drafts" })).find((draft) => draft.id === plan.id)!;
+      const now = await editingRead(plan.id);
+      expect(now.form.draft.criteria.map((criterion) => criterion.text)).toContain((await graphOf(plan)).criteria[0]!.text);
+      expect(asked[0]).toBe(readingState(listed.spec, now.form.draft));
+      expect(asked[0]).not.toBe(listed.read);
+    } finally {
+      late.release();
+      requests.mockRestore();
+    }
   });
 
   it("calls a drafted sample ticket by its spec's title, and an edit to its graph does not rename it", async () => {
@@ -3109,7 +3335,7 @@ describe("the Graph pane (SCP-316)", () => {
     mount();
     // Work with nothing to divide has no graph to curate, and its plan is the
     // criteria its contract shows: the rail offers no Graph and no pane of
-    // the criteria's own (D-NEW-basic-and-epic-flows).
+    // the criteria's own (D-138).
     await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
     const panes = screen.getByRole("group", { name: "Planning panes" });
     await waitFor(() => expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull());
@@ -3131,7 +3357,7 @@ describe("the Graph pane (SCP-316)", () => {
     fireEvent.click(next);
     // Straight to the contract: a basic ticket's plan is read against its
     // spec at the contract's own confirm, not on the way there
-    // (D-NEW-basic-and-epic-flows).
+    // (D-138).
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
     expect(await readings()).toBe(before);
     expect((await detail()).ticket.approved_at).toBeNull();
@@ -3233,7 +3459,7 @@ describe("the Graph pane (SCP-316)", () => {
       return plan;
     }
 
-    it("reads nothing on a later arrival at Problems where a confirm's route ended elsewhere (D-NEW-basic-and-epic-flows)", async () => {
+    it("reads nothing on a later arrival at Problems where a confirm's route ended elsewhere (D-138)", async () => {
       const plan = await parted();
       const readings = async () =>
         (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
@@ -3595,7 +3821,7 @@ describe("the Graph pane (SCP-316)", () => {
       return approve;
     }
 
-    it("refuses to approve an epic while a problem is open, reached by its contract's own address, starting nothing (D-NEW-basic-and-epic-flows)", async () => {
+    it("refuses to approve an epic while a problem is open, reached by its contract's own address, starting nothing (D-138)", async () => {
       const plan = await problems();
       const approve = await contractByAddress(plan);
       const sent = vi.spyOn(bridge, "request");
@@ -3610,7 +3836,7 @@ describe("the Graph pane (SCP-316)", () => {
       }
     });
 
-    it("refuses the approve binding on an epic's contract while a problem is open, starting nothing (D-NEW-basic-and-epic-flows)", async () => {
+    it("refuses the approve binding on an epic's contract while a problem is open, starting nothing (D-138)", async () => {
       const plan = await problems();
       await contractByAddress(plan);
       const sent = vi.spyOn(bridge, "request");
@@ -3626,7 +3852,7 @@ describe("the Graph pane (SCP-316)", () => {
       }
     });
 
-    it("reads an epic's plan that moved since the last reading before approving it, by way of the Problems pane (D-NEW-basic-and-epic-flows)", async () => {
+    it("reads an epic's plan that moved since the last reading before approving it, by way of the Problems pane (D-138)", async () => {
       const plan = await planned();
       // Drafted, and recorded as read at the state it was drafted at.
       await waitFor(async () => expect((await editingRead(plan.id)).read).not.toBeNull());
@@ -4492,6 +4718,36 @@ describe("the Graph pane (SCP-316)", () => {
             (entry) => entry.line.kind === "asked" && entry.line.groups[0]?.title === "Criterion 1 and R1",
           ),
         ).toHaveLength(1);
+      });
+
+      it("keeps the answered card down on the Problems page while the answer is still on its way to the host (D-102)", async () => {
+        // The chat is talking from the moment the answer is sent, before the
+        // host has said the turn is under way: the page says the problem is
+        // being resolved rather than putting the answered card up again.
+        const plan = await problems();
+        location.hash = `planning/${plan.id}/graph`;
+        await screen.findByRole("heading", { name: "Execution graph" });
+        const dock = () => screen.getByRole("complementary", { name: "Chat" });
+        const real = bridge.request.bind(bridge);
+        let release!: () => void;
+        const held = new Promise<void>((done) => {
+          release = done;
+        });
+        const spy = vi.spyOn(bridge, "request").mockImplementation((async (request: Parameters<typeof real>[0]) => {
+          if (request.kind === "interviewTurn") await held;
+          return real(request);
+        }) as typeof bridge.request);
+        try {
+          answerFirst(await within(dock()).findByRole("group", { name: "Criterion 1 and R1" }));
+          location.hash = `planning/${plan.id}/drift`;
+          await screen.findByRole("heading", { name: "Resolving the problem" });
+          expect((await sampleBridge.request({ kind: "snapshot" })).working ?? []).not.toContain(plan.id);
+          expect(screen.queryByRole("group", { name: "Criterion 1 and R1" })).toBeNull();
+        } finally {
+          release();
+          spy.mockRestore();
+        }
+        await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 });
       });
     });
   });
@@ -6535,7 +6791,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
 describe("the Impact pane (SCP-320)", () => {
   /**
    * A pane by its address. Impact is in the rail only once there is a plan
-   * (D-NEW-basic-and-epic-flows), and what
+   * (D-138), and what
    * the pane does is the same either way, so these cases reach it directly.
    */
   const openPane = async (name: string): Promise<void> => {
@@ -6742,7 +6998,7 @@ describe("the Impact pane (SCP-320)", () => {
   it("is not in the rail before there is a plan, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
     // No plan has been drafted here, so there is nothing to measure impact
-    // against, and the rail does not offer it (D-NEW-basic-and-epic-flows).
+    // against, and the rail does not offer it (D-138).
     expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     // Opening the pane reads nothing: the answer is a parse of the whole tree.
     expect(document.querySelector(".pane-head .sub")!.textContent).toContain("not checked yet");
@@ -7878,7 +8134,7 @@ describe("the one piece of work a page is about: its name, its row in the picker
     expect(document.querySelector(".titlebar-name")).toBeNull();
   });
 
-  it("opens a plan's contract as the planning's contract tab until it is approved, its other tabs going back into the planning (D-130, D-NEW-basic-and-epic-flows)", async () => {
+  it("opens a plan's contract as the planning's contract tab until it is approved, its other tabs going back into the planning (D-130, D-138)", async () => {
     const plan = await ticketPlanning("A billing page in tabs");
     location.hash = `task/${plan.repoId}/${plan.key}/contract`;
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
@@ -7915,7 +8171,7 @@ describe("the one piece of work a page is about: its name, its row in the picker
   });
 });
 
-describe("what a person types while planning is held where they type it (D-NEW-nothing-shown-is-cut)", () => {
+describe("what a person types while planning is held where they type it (D-133)", () => {
   it("holds the question's answer to what a turn carries, and sends it without a refusal", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -7951,5 +8207,19 @@ describe("what a person types while planning is held where they type it (D-NEW-n
       const spec = await sampleBridge.request({ kind: "specRead", id });
       expect(spec.sections.outcome).toBe("o".repeat(TYPED_TEXT_MAX_CHARS));
     }, { timeout: 5000 });
+  });
+});
+
+describe("the chat's header (D-134)", () => {
+  it("names the provider the planning drafts with, OpenCode included", async () => {
+    const before = (await sampleBridge.request({ kind: "snapshot" })).settings;
+    try {
+      await sampleBridge.request({ kind: "saveSettings", settings: { ...before, draftingProvider: "opencode-cli" } });
+      await startPlanning();
+      const dock = screen.getByRole("complementary", { name: "Chat" });
+      expect(dock.querySelector(".dock-session strong")?.textContent).toBe("OpenCode");
+    } finally {
+      await sampleBridge.request({ kind: "saveSettings", settings: before });
+    }
   });
 });

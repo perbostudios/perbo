@@ -1,0 +1,91 @@
+[
+  {
+    "argv": [
+      "acp"
+    ],
+    "config": {
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "bash": "ask",
+        "external_directory": "deny"
+      },
+      "mcp": {},
+      "plugin": [],
+      "instructions": [],
+      "formatter": false,
+      "lsp": false,
+      "share": "disabled",
+      "autoupdate": false,
+      "snapshot": false
+    },
+    "project_config_off": "1",
+    "instructions": "system prompt\n\nYou are a stateless semantic reviewer. Do not call tools: none are available. Answer every turn with one JSON object and nothing else, matching the JSON Schema below. Choose read_files to ask the orchestrator for repository files, or submit_review to return the verdict.\n\n{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"next\",\n    \"read_paths\",\n    \"review\"\n  ],\n  \"properties\": {\n    \"next\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"read_files\",\n        \"submit_review\"\n      ],\n      \"description\": \"read_files to open more of the repository before deciding; submit_review when done.\"\n    },\n    \"read_paths\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      },\n      \"description\": \"Repository-relative paths to open, exactly as they appear in the listing. Empty when submitting.\"\n    },\n    \"review\": {\n      \"anyOf\": [\n        {\n          \"type\": \"object\",\n          \"properties\": {\n            \"ok\": {\n              \"type\": \"boolean\"\n            }\n          },\n          \"required\": [\n            \"ok\"\n          ],\n          \"additionalProperties\": false\n        },\n        {\n          \"type\": \"null\"\n        }\n      ],\n      \"description\": \"The completed review when next is submit_review, otherwise null.\"\n    }\n  }\n}\n"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": 1,
+      "clientCapabilities": {
+        "fs": {
+          "readTextFile": false,
+          "writeTextFile": false
+        },
+        "terminal": false
+      },
+      "clientInfo": {
+        "name": "perbo_reviewer",
+        "version": "0.1.0"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "session/new",
+    "params": {
+      "cwd": "<root>/scratch",
+      "mcpServers": []
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "session/set_config_option",
+    "params": {
+      "sessionId": "ses_review",
+      "configId": "model",
+      "value": "opencode/claude-opus-5"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "session/prompt",
+    "params": {
+      "sessionId": "ses_review",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "the context"
+        }
+      ]
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "session/prompt",
+    "params": {
+      "sessionId": "ses_review",
+      "prompt": [
+        {
+          "type": "text",
+          "text": "the file\n\nSubmit now: set next to submit_review and fill review with one coverage entry per criterion. No further reads."
+        }
+      ]
+    }
+  }
+]

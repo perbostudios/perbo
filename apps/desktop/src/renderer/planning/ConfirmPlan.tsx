@@ -1,7 +1,8 @@
 import { Button } from "../ui/index.js";
 import type { PageProps } from "../shell/route.js";
 import type { useContractEditing } from "../contract-editor.js";
-import { confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
+import { chatStillTalking, confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
+import { useChatTalking } from "./turn-hold.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -23,7 +24,7 @@ type Editor = ReturnType<typeof useContractEditing>;
  * It goes where {@link confirmRoute} says every way from the plan to the
  * contract goes, and says what it confirms: an epic's plan, through the
  * reading of it against the spec, or a basic ticket's contract, whose plan is
- * its contract and whose confirm there reads it (D-NEW-basic-and-epic-flows).
+ * its contract and whose confirm there reads it (D-138).
  *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are
@@ -40,22 +41,24 @@ export function ConfirmPlan({
   busy?: boolean;
 }) {
   const key = editor.session?.key ?? null;
+  const talking = useChatTalking(workspace, editor.session?.id);
   // No plan, nothing to confirm: during the spec these panes are read while the
   // work is still being described, and there is no contract to go to yet.
   if (key === null) return null;
   const approved = planApproved(workspace, editor.repoId, key);
   const shape = flowFor(workspace, editor.session?.id ?? "").shape;
-  // A turn in flight may still move this plan, and what approving freezes is
-  // what the contract holds when it is read (ADR-0016). The way onward waits
-  // for the turn, and says so rather than going quiet.
-  const thinking = !approved && (workspace.working ?? []).includes(editor.session?.id ?? "");
+  // The confirm waits for the Architect to finish, from the moment a turn is
+  // sent until it is over (D-102): a turn in flight may still move this plan,
+  // and the confirm reads the plan the turn leaves. It says so rather than
+  // going quiet.
+  const thinking = !approved && talking;
   return (
     <div className="approve-actions pane-confirm">
       <span className="small muted">
         {approved
           ? "This contract is approved; what it froze is on its own page."
           : thinking
-            ? "Waiting for the chat to finish this turn…"
+            ? chatStillTalking(confirmLabel(shape))
             : "The contract is where approving freezes this."}
       </span>
       <Button

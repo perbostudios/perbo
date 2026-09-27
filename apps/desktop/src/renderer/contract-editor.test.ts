@@ -808,7 +808,7 @@ describe("the pane a planning was left at (D-130)", () => {
     expect(f.persist.mock.calls.length).toBe(discarded);
   });
 
-  it("keeps what the impact check found and the state last read until a fresh draft replaces the plan they were of, and not through a compile (D-NEW-basic-and-epic-flows)", async () => {
+  it("keeps what the impact check found and the state last read until a fresh draft replaces the plan they were of, and not through a compile (D-138)", async () => {
     const f = await fixture();
     const opened = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     f.editing.recordSpec(opened.id, "a-spec");

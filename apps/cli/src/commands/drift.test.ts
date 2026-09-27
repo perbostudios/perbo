@@ -288,7 +288,7 @@ describe("perbo drift", () => {
     expect((await drift(repo, unreachable())).verdict.cached).toBe(true);
   });
 
-  it("redacts the reading before it measures it, so a field redaction lengthens is asked for again and recorded whole (D-NEW-nothing-shown-is-cut)", async () => {
+  it("redacts the reading before it measures it, so a field redaction lengthens is asked for again and recorded whole (D-133)", async () => {
     const { repo, dir } = await drafted1();
     await reword(repo, "A signup POST queues exactly two activation emails.");
     // A credential in this process's own environment, eight characters long,

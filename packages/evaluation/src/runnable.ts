@@ -36,7 +36,7 @@ const strip = (text: string) => text.replace(new RegExp(`${String.fromCharCode(2
 
 /**
  * The reason, not the last line — pnpm's tail is often a Node deprecation
- * warning — and the two lines that say it whole (D-NEW-nothing-shown-is-cut).
+ * warning — and the two lines that say it whole (D-133).
  */
 export function installFailure(stderr: string, stdout: string): string {
   const lines = strip(`${stderr}\n${stdout}`)

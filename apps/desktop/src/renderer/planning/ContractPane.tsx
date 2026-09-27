@@ -8,7 +8,7 @@ import type { useContractEditing } from "../contract-editor.js";
 type Editor = ReturnType<typeof useContractEditing>;
 
 /**
- * The planning's contract tab (D-NEW-basic-and-epic-flows):
+ * The planning's contract tab (D-138):
  * the contract page, and the one approval there is, reached inside planning
  * with its tabs beside it rather than as a page of its own.
  */

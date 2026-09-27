@@ -32,6 +32,7 @@
   "devDependencies": {
     "@perbo/cli": "workspace:*",
     "@perbo/contracts": "workspace:*",
+    "@perbo/model": "workspace:*",
     "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@testing-library/react": "16.3.3",

@@ -4,6 +4,7 @@ import { AgentConfigurationPresentError, type AgentResult } from "../../adapter.
 import { AttemptCeilings } from "../../ceilings.js";
 import { buildAgentEnvironment } from "../../profile.js";
 import { quarantine, release } from "../../quarantine.js";
+import type { EgressGate } from "../../egress.js";
 import type { AttemptTally } from "../../tally.js";
 import type { Brief } from "./brief.js";
 import type { TicketRunConfig } from "./config.js";
@@ -44,6 +45,8 @@ export async function execute(args: {
   progress: (message: string) => void;
   /** What the attempt has done so far, as the adapter counts it, for the run's tally. */
   tally?: (tally: AttemptTally) => void;
+  /** Whether an unlisted host may be reached, asked of a person (D-137). */
+  egress?: EgressGate;
 }): Promise<{ executed: Executed } | Stop> {
   const { config, state, brief, secrets, progress } = args;
   // ADR-0030 requirement 2, around every handover including remediation.
@@ -88,6 +91,7 @@ export async function execute(args: {
       spec_folder: config.specs,
       onProgress: progress,
       ...(args.tally ? { onTally: args.tally } : {}),
+      ...(args.egress ? { egress: args.egress } : {}),
       redact: (text) => secrets.redact(text).text,
     });
   } catch (error) {

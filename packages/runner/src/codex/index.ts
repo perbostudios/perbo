@@ -22,8 +22,8 @@ import type { AttemptCeilings } from "../ceilings.js";
 import { worktreePath } from "../tally.js";
 import { reinjectedBrief } from "../brief.js";
 import { CodexExecutorSession, CODEX_EXECUTOR_ARGV, type Usage } from "./internal/rpc.js";
-import { EgressLog } from "../egress.js";
-import { judgeCommand, matchesListEntry } from "../admission.js";
+import { EgressLog, type EgressVerdict } from "../egress.js";
+import { ADMISSION_RULES, judgeCommand, matchesListEntry } from "../admission.js";
 import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "../pretool.js";
 import type { ProhibitedHit } from "../prohibited.js";
 import { prepareScratchDirectory } from "../scratch.js";
@@ -176,8 +176,9 @@ export function codexFileDecision(path: string, state: PreToolGuardState) {
  * What one app-server notification does to the attempt, over the attempt's
  * own state: a tool item resets the stall window and is recorded (D-096), a
  * completed compaction asks for the brief again on the thread it happened on
- * (D-096), a command naming a host outside the allow-list stops the attempt,
- * and a capability the isolated session should not have stops it too. Built
+ * (D-096), a command naming a host outside the allow-list stops the attempt
+ * where nothing asks a person about it (D-137), and a
+ * capability the isolated session should not have stops it too. Built
  * apart from the session that delivers the notifications, so the wiring can be
  * driven without an app server.
  */
@@ -188,6 +189,13 @@ export function codexNotificationHandler(attempt: {
   redact: (text: string) => string;
   record: (item: CodexItem, threadId: string | null) => void;
   egress: Pick<EgressLog, "observe">;
+  /**
+   * D-137: whether the approval path asks a person about
+   * an unlisted host. Where it does, the host is recorded here and the
+   * approval holds the command; a command Codex ran without asking ran in the
+   * read-only sandbox, whose network is off.
+   */
+  holdsEgress: boolean;
   stop: (reason: TerminationReason, detail: string) => void;
   progress: (line: string) => void;
   /**
@@ -213,7 +221,7 @@ export function codexNotificationHandler(attempt: {
   /** D-106: the attempt's own thread, once `thread/start` has replied; every other thread is a subagent's. */
   rootThread: () => string | null;
 }): (method: string, payload: unknown) => void {
-  const { ceilings, items, transcript, redact, record, egress, stop, progress, rebrief, onSubagentStarted, spoke, rootThread } =
+  const { ceilings, items, transcript, redact, record, egress, holdsEgress, stop, progress, rebrief, onSubagentStarted, spoke, rootThread } =
     attempt;
   return (method, payload) => {
     const parsed = EventSchema.safeParse(payload);
@@ -246,11 +254,11 @@ export function codexNotificationHandler(attempt: {
       // executor being alive, and either resets the stall window.
       ceilings.noteToolActivity();
       record(item, parsed.data.threadId ?? null);
-      if (item.command && egress.observe(item.command, "command", new Date()).length > 0)
+      if (item.command && egress.observe(item.command, "command", new Date()).length > 0 && !holdsEgress)
         stop("unlisted_egress_host", "Command requested a host outside the network allow-list");
       // On one line: a command's own newline would otherwise print a line
       // that reads as one of the run's stages. Whole, as the attempt's record
-      // keeps it (D-NEW-nothing-shown-is-cut); the Watch page lists no command.
+      // keeps it (D-133); the Watch page lists no command.
       if (method === "item/started")
         progress(
           `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type))}`,
@@ -405,11 +413,16 @@ export async function runCodexAgent(
   };
   let session: CodexExecutorSession | null = null;
   let stopped = false;
+  /** D-137: the gate that answers for an unlisted host, where the loop handed one. */
+  const gate = request.egress ?? null;
+  /** Aborts every question still waiting on a person once the attempt stops. */
+  const waiting = new AbortController();
   /** Set once the turn's outcome is known: a ceiling reached while a last re-briefing is still out closes the session, it does not rewrite the outcome. */
   let decided = false;
   const stop = (reason: TerminationReason, detail: string): void => {
     if (stopped) return;
     stopped = true;
+    waiting.abort();
     if (!decided) termination = { reason, detail: redact(detail) };
     session?.close(new Error(detail));
   };
@@ -497,6 +510,70 @@ export async function runCodexAgent(
     }
     return entry;
   };
+  /**
+   * D-137: an approved command naming hosts off the
+   * list, held while each is settled through the gate with the stall window
+   * held. An allow joins the attempt's list; a refusal declines the command
+   * and tells the executor, on the thread that asked, what the gate said to;
+   * no answer within the window ends the attempt `unlisted_egress_host`.
+   */
+  const settleEgress = async (
+    entry: CommandRecord,
+    hosts: readonly string[],
+    command: string,
+    threadId: string | null,
+    held: EgressLog,
+    asking: NonNullable<typeof gate>,
+  ): Promise<boolean> => {
+    const decide = (refusal: { reason: string; target: string } | null): boolean => {
+      entry.decided_by = "runner_admission";
+      entry.decision = refusal === null ? "allowed" : "denied";
+      entry.denial_reason = refusal === null ? null : redact(refusal.reason);
+      entry.denial_rule = refusal === null ? null : ADMISSION_RULES.egress;
+      entry.denial_target = refusal === null ? null : redact(refusal.target);
+      tell();
+      return refusal === null;
+    };
+    for (const host of hosts) {
+      if (held.isAllowed(host)) continue;
+      const release = request.ceilings.holdForPerson();
+      let verdict: EgressVerdict;
+      try {
+        verdict = await asking.ask({ host, command: redact(command), wait_ms: request.ceilings.stallLimitMs, signal: waiting.signal });
+      } catch (error) {
+        verdict = {
+          answer: "refuse",
+          tell:
+            `${host} is not on this run's network allow-list, and whether to allow it could not be asked ` +
+            `(${error instanceof Error ? error.message : String(error)}). Finish the work without it.`,
+        };
+      } finally {
+        release();
+      }
+      if (stopped) return decide({ reason: "the attempt stopped while the host was asked about", target: host });
+      if (verdict.answer === "allow") {
+        held.allow(host);
+        continue;
+      }
+      if (verdict.answer === "refuse") {
+        // Told in the same breath as the decline, on the thread that asked.
+        const told = threadId ?? rootThreadId;
+        if (told !== null && session !== null)
+          injections.push(
+            session.injectItems(told, verdict.tell).catch((error: unknown) => {
+              progress(
+                `The egress refusal was not delivered to ${told}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }),
+          );
+        return decide({ reason: verdict.tell, target: host });
+      }
+      decide({ reason: verdict.detail, target: host });
+      stop("unlisted_egress_host", verdict.detail);
+      return false;
+    }
+    return decide(null);
+  };
   try {
     session = new CodexExecutorSession({
       binary: request.binary,
@@ -520,6 +597,7 @@ export async function runCodexAgent(
         redact,
         record,
         egress,
+        holdsEgress: gate !== null,
         stop,
         progress,
         /**
@@ -666,6 +744,16 @@ export async function runCodexAgent(
           !denial &&
           !requestApproval.additionalPermissions &&
           !requestApproval.networkApprovalContext;
+        // D-137: a command the guard would admit that
+        // names a host off the list waits here for the gate.
+        const unlisted =
+          accepted && gate !== null && method === "item/commandExecution/requestApproval"
+            ? egress.unlisted(requestApproval.command ?? "")
+            : [];
+        if (unlisted.length > 0 && gate !== null) {
+          egress.observe(requestApproval.command ?? "", "command", new Date());
+          return settleEgress(entry, unlisted, requestApproval.command ?? "", threadId, egress, gate);
+        }
         entry.decided_by = "runner_admission";
         entry.decision = accepted ? "allowed" : "denied";
         entry.denial_reason = accepted

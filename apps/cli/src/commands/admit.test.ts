@@ -1466,13 +1466,13 @@ describe("perbo list --json", () => {
 }, SPAWN_TEST_TIMEOUT_MS);
 
 describe("the states a run is recorded as having passed through", () => {
-  const round = { checks: [{}, {}], review: {} };
+  const round = { checks: [{}, {}], review: {}, verification: null };
 
   it("claims a stage only where the result proves it happened", () => {
-    // A remediation round carries a verification, not a review (D-061): the
-    // review stage is still claimed, or an approved ticket cannot reach pr_open.
+    // A remediation round carries a closure verification, which is that round's
+    // review (D-061): the review stage is claimed once for the run.
     const remediated = statesObserved({
-      rounds: [round, { checks: round.checks, review: null }],
+      rounds: [round, { checks: round.checks, review: null, verification: {} }],
       outcome: "approved",
     }).map((step) => step.to);
     expect(remediated).toEqual(["provisioning", "executing", "verifying", "independent_review", "pr_open"]);
@@ -1496,6 +1496,7 @@ describe("the states a run is recorded as having passed through", () => {
     const graphed = {
       checks: [{}, { node: { node_id: "node_1", scope: "task", paths: [], note: "no test file" } }, {}],
       review: {},
+      verification: null,
     };
     const verifying = statesObserved({ rounds: [graphed], outcome: "approved" }).find(
       (step) => step.to === "verifying",

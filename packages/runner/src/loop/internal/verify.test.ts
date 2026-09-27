@@ -75,7 +75,7 @@ describe("a scope round that widened instead of narrowing", () => {
     expect(step?.end.detail).toContain("src/feature/**");
   });
 
-  it("names five paths whole and says how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names five paths whole and says how many more (D-133)", () => {
     const step = refuseWidening({
       widened: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"],
       scopeGiven: [],
@@ -335,10 +335,8 @@ describe("the bundle a closure verification leaves", () => {
       ledger,
       bundles,
       attemptId: "att_0000000000000001",
-      attempt: recorded,
       sealed,
       gating: [],
-      checks: [],
       declines: [],
       toClose: [open, closedOne],
       widened: [],

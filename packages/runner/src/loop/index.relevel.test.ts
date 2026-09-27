@@ -268,7 +268,7 @@ describe("a re-level run", () => {
     expect(gh.pushes).toHaveLength(1);
   }, RUN_TIMEOUT_MS);
 
-  it("names five of the paths the base brought in, then how many more (D-NEW-nothing-shown-is-cut)", async () => {
+  it("names five of the paths the base brought in, then how many more (D-133)", async () => {
     const repo = runnerRepository(scratch);
     const { contract, config } = await firstRun(repo);
     for (const n of [1, 2, 3, 4, 5, 6, 7]) {

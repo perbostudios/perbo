@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Dialog, InkIcon, Notice } from "../ui/index.js";
+import { Button, Dialog, InfoHint, InkIcon, Notice } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { isRun } from "../../shared/jobs.js";
 import { displayKey } from "./ticket-workspace.js";
-import { taskRecords } from "./task-context.js";
-import type { TaskContext } from "./task-context.js";
-import { TaskHeader } from "./LoopScreen.js";
+import { runEnding, taskRecords } from "./task-context.js";
+import type { StopReason, TaskContext } from "./task-context.js";
+import { LoopStages, TaskHeader } from "./LoopScreen.js";
 import { deletes, useCreate, useDiscardTicket, useSettle } from "../shell/create.js";
 import { draftedLanding } from "../planning/panes.js";
 
@@ -15,23 +15,26 @@ import { draftedLanding } from "../planning/panes.js";
  * A stop is a job-level abort with two endings: inside the executor's window
  * the attempt seals and the ticket goes to `failed`, and outside it the CLI is
  * killed where it stood and the ticket is stranded at `provisioning`,
- * `executing`, `verifying` or `independent_review`. Both are the same thing to
- * a person — the run was stopped and the work is still there — so this page
- * reads for both.
+ * `executing`, `verifying` or `independent_review`. A run that ended short of
+ * a result for any other reason — Perbo closing, a limit, a refusal, an error
+ * — is stopped too, so this page reads for all of them. A run that ended on a
+ * verdict for the person is paused for them, and never lands here.
  *
- * It holds the ticket's name, that the run was stopped, and the three ways the
- * records allow, named and nothing more. The contract is approved and frozen
+ * It holds the ticket's name, that the run was stopped, the progress wheel
+ * where the run had taken it, and the reasons it stopped, one line each, read
+ * from the records as the loop page's ended card is (`runEnding`), with the
+ * whole of each behind an `i`. The contract is approved and frozen
  * (ADR-0016), so there is no editing this plan back into shape: the work
- * deleted, the work planned again from the spec it came from, or another
- * attempt against it. Nothing here changes the lifecycle — the ticket stays
- * where the stop left it until one of the three is taken. At the other end of
- * the same row are the ways to the contract and to the agents' recorded
- * output, because this is the ticket's page for as long as it is stopped, and
- * the highlighted Continue the task at the far right.
+ * deleted, the work planned again from the spec it came from, or — only after
+ * the person's own stop or Perbo closing — another attempt against it. Nothing here changes the
+ * lifecycle — the ticket stays where the stop left it until one of the three
+ * is taken. At the other end of the same row is the way to the paused loop,
+ * where the agents' recorded output is and the way back here, and the
+ * highlighted Continue the task at the far right.
  */
 export function StoppedScreen(context: TaskContext) {
   const { detail, repoId, navigate, show } = context;
-  const { ticket, jobs, latest, busy, held } = taskRecords(context);
+  const { ticket, jobs, latest, busy, held, projection } = taskRecords(context);
   const action = useAction();
   const [deleting, setDeleting] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -69,6 +72,32 @@ export function StoppedScreen(context: TaskContext) {
   // still live has its plan. A pull request open is not offered it at all,
   // because a ticket with one is not deleted.
   const spent = ticket.state === "failed" || ticket.state === "cancelled";
+  const replannable = spec !== null && ticket.state !== "pr_open";
+  // Why the run stopped: the reasons of its last run, read as the loop page's
+  // ended card reads them.
+  const ending = runEnding(jobs.filter(isRun), latest);
+  const reasons: StopReason[] = ending?.reasons ?? [
+    {
+      text: "Perbo holds no record of how this run ended.",
+      detail:
+        "The command that ran this ticket's loop is not on record here, so what stopped it cannot be read. " +
+        "The attempts it recorded and the evidence they sealed are still kept.",
+    },
+  ];
+  // Continue carries on only from the person's own stop or Perbo closing:
+  // every other reason is one another attempt at the same plan meets again,
+  // and where the record is gone nothing says which it was.
+  const onward = replannable
+    ? "Plan it again to change the spec or the plan and start the loop over."
+    : "Delete this work to start it over from a new plan.";
+  const why = projection.continuable
+    ? undefined
+    : ending === null
+      ? "Continue the task carries on only from a stop you made or from Perbo closing, and Perbo holds no record of " +
+        `how this run ended, so it cannot tell which this was. ${onward}`
+      : "Continue the task carries on only from a stop you made or from Perbo closing, and this run stopped for " +
+        `${reasons.length === 1 ? "the reason" : "the reasons"} listed, which another attempt at the same plan would ` +
+        `meet again. ${onward}`;
   const carryOn = (): void => {
     setError(null);
     void action
@@ -100,7 +129,7 @@ export function StoppedScreen(context: TaskContext) {
       .then((opened) => {
         // Into the planning over the new plan, on the page that holds it: an
         // epic's Graph, a basic ticket's contract
-        // (D-NEW-basic-and-epic-flows).
+        // (D-138).
         navigate(draftedLanding(opened));
         settle(release);
       })
@@ -119,6 +148,17 @@ export function StoppedScreen(context: TaskContext) {
           <InkIcon name="locked" size={32} />
           <h1>The run was stopped</h1>
         </div>
+        <LoopStages stage={projection.stage} />
+        <ul className="stopped-reasons" aria-label="Why the run stopped">
+          {reasons.map((reason, index) => (
+            <li key={index}>
+              <InkIcon name="alert" size={16} />
+              <span>
+                {reason.text} <InfoHint text={reason.detail} label="Why the run stopped" />
+              </span>
+            </li>
+          ))}
+        </ul>
         {error !== null && <Notice tone="danger">{error}</Notice>}
         {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
       </div>
@@ -126,7 +166,7 @@ export function StoppedScreen(context: TaskContext) {
         <Button disabled={held} onClick={() => setDeleting(true)}>
           Delete this work
         </Button>
-        {spec !== null && ticket.state !== "pr_open" && (
+        {replannable && (
           <Button
             disabled={!spent || busy || drafting}
             title={spent ? undefined : `Not yet: the record still says this run is at ${ticket.state.replace("_", " ")}, and one spec is one piece of work while its ticket is live. Continue the task, or delete the work.`}
@@ -136,10 +176,14 @@ export function StoppedScreen(context: TaskContext) {
           </Button>
         )}
         <span className="spacer" />
-        <Button onClick={() => show("contract")}>Open the contract</Button>
-        <Button onClick={() => show("output")}>Watch what the agents did</Button>
+        <Button onClick={() => show("loop")}>View the paused loop</Button>
         {/* The highlighted action at the far right. */}
-        <Button variant="primary" disabled={busy || action.isPending} onClick={carryOn}>
+        <Button
+          variant="primary"
+          disabled={!projection.continuable || busy || action.isPending}
+          title={why}
+          onClick={carryOn}
+        >
           Continue the task
         </Button>
       </div>

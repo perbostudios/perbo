@@ -187,7 +187,7 @@ describe("which agent a command record names (D-106 criterion 3)", () => {
   );
 
   it(
-    "keeps the whole path of a call the stream never carried (D-NEW-nothing-shown-is-cut)",
+    "keeps the whole path of a call the stream never carried (D-133)",
     async () => {
       const path = `/etc/${"a-directory-with-a-long-name/".repeat(80)}passwd`;
       const result = await run([

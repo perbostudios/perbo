@@ -106,7 +106,7 @@ describe("the materialization measurement", () => {
     ).rejects.toThrow(/workspace packages/);
   }, 120_000);
 
-  it("says git's whole refusal of a clone (D-NEW-nothing-shown-is-cut)", async () => {
+  it("says git's whole refusal of a clone (D-133)", async () => {
     const missing = join(scratchRoot, ...Array.from({ length: 12 }, (_, n) => `a-directory-that-is-not-there-${n}`));
     await expect(
       runExperiment(

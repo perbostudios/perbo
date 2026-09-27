@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 /**
  * There is no way past a reading of the plan against its spec
- * (D-NEW-basic-and-epic-flows): a confirm with a problem open is refused, and
+ * (D-138): a confirm with a problem open is refused, and
  * one whose reading did not run says so in a pop-up and confirms nothing. The
  * ways past it are gone by name, from the desktop's code and from the
  * documents alike, so neither can come back unnoticed. Tests are left out:

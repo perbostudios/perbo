@@ -28,12 +28,12 @@ export interface DiscardDeps {
  * reason it stays where it does.
  *
  * A piece of work is deleted whole at every stage, the loop included, and the
- * evidence goes with it (D-129): the ticket, its
- * contract, its draft, its approach, the reading of its plan against its spec,
- * the attempts it recorded and the bundles those attempts sealed. Keeping the
- * record of a run nobody wants any more is keeping a row on the board that the
- * person has already said is over. A path that is a link is left alone rather
- * than followed.
+ * evidence goes with it (D-129): the ticket, its contract, its draft, its
+ * approach, the reading of its plan against its spec, the answers offered to
+ * its review's findings, the attempts it recorded and the bundles those
+ * attempts sealed. Keeping the record of a run nobody wants any more is
+ * keeping a row on the board that the person has already said is over. A path
+ * that is a link is left alone rather than followed.
  *
  * A command running for this ticket holds it, because that command writes
  * what the delete removes; a command running for another ticket in the same
@@ -69,10 +69,11 @@ export async function discardTicket(
   const remove = (path: string): void => {
     if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
   };
-  // The verdict the plan was last read against its spec with goes too: it is
-  // about this plan, and a key is never handed out again, so once the ticket is
-  // gone it names nothing.
-  for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json", ".drift.json"] as const)
+  // The verdict the plan was last read against its spec with goes too, and the
+  // answers the Architect offered to its review's findings: each is about this
+  // ticket, and a key is never handed out again, so once the ticket is gone it
+  // names nothing.
+  for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json", ".drift.json", ".options.json"] as const)
     remove(ticketPath(repo, key, suffix));
   // The attempts this ticket recorded, and the bundles they sealed. The objects
   // under `bundles/objects` stay: they are content-addressed and one of them

@@ -516,7 +516,7 @@ describe("a ceiling with no price yet holds the second review rather than guessi
 });
 
 describe("a ceiling that cannot be enforced names what it could not price", () => {
-  it("names three whole, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names three whole, then how many more (D-133)", () => {
     const ledger = new SpendLedger(50 * DOLLAR);
     for (const label of ["#0", "#1", "#2", "#3", "#4"]) {
       ledger.launch();

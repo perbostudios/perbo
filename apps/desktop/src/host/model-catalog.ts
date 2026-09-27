@@ -9,7 +9,20 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { DEFAULT_ENV_ALLOW_LIST, EFFORT_LEVELS, scrubEnvironment, type EffortLevel, type EffortProvider } from "@perbo/contracts";
+import {
+  DEFAULT_ENV_ALLOW_LIST,
+  EFFORT_LEVELS,
+  OPENCODE_ACP_ARGV,
+  OPENCODE_API_KEY_ENV,
+  OPENCODE_SESSION_ATTEMPTS,
+  OPENCODE_SESSION_RETRY_MS,
+  opencodeConfig,
+  opencodeEnvironment,
+  scrubEnvironment,
+  type EffortLevel,
+  type EffortProvider,
+} from "@perbo/contracts";
+import { CLAUDE_METADATA_ARGS } from "@perbo/model/defaults";
 import { ModelCatalogSchema, ProviderModelSchema } from "../shared/protocol.js";
 import type {
   ModelCatalog,
@@ -53,6 +66,16 @@ const CodexPage = z.object({
     .max(1000),
   nextCursor: z.string().nullable().optional(),
 });
+/** What `session/new` answers on OpenCode's ACP server: the session's options, the model among them. */
+const OpenCodeSession = z.object({
+  configOptions: z.array(
+    z.object({
+      id: z.string(),
+      currentValue: z.unknown().optional(),
+      options: z.array(z.object({ value: z.string(), name: z.string() })).max(1000).optional(),
+    }),
+  ),
+});
 const ApiPage = z.object({
   data: z
     .array(z.object({ id: z.string(), display_name: z.string() }))
@@ -60,33 +83,6 @@ const ApiPage = z.object({
   has_more: z.boolean(),
   last_id: z.string().nullable(),
 });
-
-/**
- * Claude Code in stream-json mode with repository instructions, hooks, tools,
- * plugins and MCP servers off. The model catalog and the usage probe both speak
- * control requests to it and never write a user message, so no turn starts.
- */
-export const CLAUDE_METADATA_ARGS: readonly string[] = [
-  "-p",
-  "--input-format",
-  "stream-json",
-  "--output-format",
-  "stream-json",
-  "--verbose",
-  "--no-session-persistence",
-  "--setting-sources",
-  "user",
-  "--settings",
-  '{"disableAllHooks":true,"enabledPlugins":{}}',
-  "--strict-mcp-config",
-  "--mcp-config",
-  '{"mcpServers":{}}',
-  "--tools",
-  "",
-  "--disable-slash-commands",
-  "--no-chrome",
-  "--safe-mode",
-];
 
 /** Only metadata requests are sent. No prompt, thread, tool approval or inference turn. */
 export function metadataProcess<T = ProviderModel[]>(options: {
@@ -245,7 +241,7 @@ export async function discoverModels(
   options: {
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
-    binaries?: { claude: string; codex: string };
+    binaries?: { claude: string; codex: string; opencode?: string };
     fetch?: typeof fetch;
   } = {},
 ): Promise<ModelCatalog> {
@@ -362,6 +358,13 @@ export async function discoverModels(
               }));
           },
         });
+      } else if (provider === "opencode-cli") {
+        models = await openCodeModels({
+          binary: options.binaries?.opencode ?? "opencode",
+          scratch,
+          base,
+          timeoutMs,
+        });
       } else {
         const auth = join(
           base.CODEX_HOME ?? join(homedir(), ".codex"),
@@ -459,6 +462,80 @@ export async function discoverModels(
         ? "codex-app-server"
         : provider === "claude-cli"
           ? "claude-code"
-          : "anthropic-api",
+          : provider === "opencode-cli"
+            ? "opencode"
+            : "anthropic-api",
+  });
+}
+
+/**
+ * The models an OpenCode role can call, as OpenCode's ACP server offers them
+ * to a session opened in a scratch directory, under the same home every role
+ * runs in (D-134): fresh directories, no project
+ * configuration, OpenCode Zen's key where the app environment has one. Only
+ * `initialize` and `session/new` are sent, so no turn starts. OpenCode reads
+ * its catalogue as it starts and refuses a session asked for before it has, so
+ * `session/new` is asked again, `OPENCODE_SESSION_ATTEMPTS` times at most.
+ */
+async function openCodeModels(options: {
+  binary: string;
+  scratch: string;
+  base: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<ProviderModel[]> {
+  const home = join(options.scratch, "opencode");
+  for (const directory of ["config", "data", "state", "cache"])
+    mkdirSync(join(home, directory), { recursive: true, mode: 0o700 });
+  const { env } = scrubEnvironment({
+    base: options.base,
+    allow: [...DEFAULT_ENV_ALLOW_LIST, OPENCODE_API_KEY_ENV],
+    extra: { ...opencodeEnvironment(home, opencodeConfig("reviewer")), NO_COLOR: "1" },
+  });
+  const ask = (id: number) => ({
+    jsonrpc: "2.0",
+    id,
+    method: "session/new",
+    params: { cwd: options.scratch, mcpServers: [] },
+  });
+  let id = 1;
+  return metadataProcess({
+    binary: options.binary,
+    cwd: options.scratch,
+    env,
+    timeoutMs: options.timeoutMs,
+    args: OPENCODE_ACP_ARGV,
+    initial: {
+      jsonrpc: "2.0",
+      id,
+      method: "initialize",
+      params: {
+        protocolVersion: 1,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+        clientInfo: { name: "perbo_models", version: "0.1.0" },
+      },
+    },
+    receive: (message, send) => {
+      if (message.id !== id) return;
+      if (id === 1) {
+        if (message.error) throw new Error("OpenCode refused the catalog request");
+        send(ask(++id));
+        return;
+      }
+      if (message.error) {
+        if (id > OPENCODE_SESSION_ATTEMPTS) throw new Error("OpenCode catalog request failed");
+        const next = ++id;
+        setTimeout(() => send(ask(next)), OPENCODE_SESSION_RETRY_MS);
+        return;
+      }
+      const model = OpenCodeSession.parse(message.result).configOptions.find((option) => option.id === "model");
+      return (model?.options ?? []).map((choice) => ({
+        id: choice.value,
+        // OpenCode names a choice `provider/Model name`; the provider is in the id.
+        label: choice.name.includes("/") ? choice.name.slice(choice.name.indexOf("/") + 1) : choice.name,
+        description: choice.value,
+        isDefault: choice.value === model?.currentValue,
+        efforts: [],
+      }));
+    },
   });
 }

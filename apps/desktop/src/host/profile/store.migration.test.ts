@@ -197,7 +197,12 @@ describe("a profile without these fields, migrated, is one Perbo starts on", () 
     expect(session).not.toHaveProperty("specCut");
     // What was already there is kept as it was.
     expect(session!.drift).toEqual(unmigrated("x").drift);
-    expect(session!.form).toEqual(unmigrated("x").form);
+    // A planning's models written before the Architect's own choice existed
+    // read as taking the Architect's rule (D-102).
+    expect(session!.form).toEqual({
+      ...unmigrated("x").form,
+      models: { ...unmigrated("x").form.models, architectProvider: null, architectModel: null },
+    });
     expect(opened.state.jobs).toEqual([job]);
     // And a second run finds nothing to change.
     const again = readFileSync(join(dir, "workspace.json"), "utf8");

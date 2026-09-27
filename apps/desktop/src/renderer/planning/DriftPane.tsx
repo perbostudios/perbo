@@ -7,10 +7,11 @@ import {
 } from "@perbo/planning/browser";
 import { bridge, errorMessage } from "../workspace/index.js";
 import { isLive, newestReading } from "../../shared/jobs.js";
-import { REREAD_COULD_NOT_START, readingState } from "../../shared/contract-editing.js";
+import { REREAD_COULD_NOT_START } from "../../shared/contract-editing.js";
 import { WaitScreen } from "../tasks/wizard.js";
 import { confirmArrives, flowFor, leftAt, planPaneFor } from "./panes.js";
 import { owedReading } from "./owed-reading.js";
+import { readingNow, useChatTalking } from "./turn-hold.js";
 import { QuestionCard, problemHead } from "./InterviewDock.js";
 import { ReadingFailedNotice } from "./ReadingFailed.js";
 import type { InterviewEntry, Job } from "../../shared/protocol.js";
@@ -38,7 +39,7 @@ const problemKey = (open: readonly DriftFinding[]): string =>
  * Arriving any other way — the rail, a planning reopened on its problems —
  * reads nothing: the pane puts the last reading's problems, since the plan is
  * read against the spec only when the person confirms it
- * (D-NEW-basic-and-epic-flows). The verdict is the CLI's, kept beside
+ * (D-138). The verdict is the CLI's, kept beside
  * the ticket and keyed by the spec and the plan's promise texts, so the model
  * runs only where one of them moved.
  *
@@ -57,7 +58,7 @@ const problemKey = (open: readonly DriftFinding[]): string =>
  * page offers no way past one, and each is resolved — answered here, or by
  * changing the plan and confirming again, which reads it again. Once none is
  * open the tab goes, and the person is moved back to where they confirm: a
- * basic ticket's contract, an epic's Graph (D-NEW-basic-and-epic-flows).
+ * basic ticket's contract, an epic's Graph (D-138).
  * "Back to the plan" is on every state.
  *
  * **A reading that does not run holds the way on too.** The host tries it
@@ -90,23 +91,35 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // the plan could not be read again are read as this answer's.
   const [sent, setSent] = useState<{ problem: string; after: number } | null>(null);
   const asked = useRef<string | null>(null);
-  // The state the reading is asked of, which the host records once it lands
-  // of it, so a basic ticket's Confirm contract at the same state reads nothing
-  // again (D-NEW-basic-and-epic-flows).
-  const listed = (workspace.drafts ?? []).find((draft) => draft.id === id);
-  const state = session == null || listed === undefined ? null : readingState(listed.spec, session.form.draft);
-  const check = useCallback(async (): Promise<void> => {
-    if (id === null) return;
-    setFailure(null);
-    setChecking(true);
-    try {
-      setAskedFor(await bridge.request({ kind: "driftCheck", id, state }));
-    } catch (error) {
-      setFailure(errorMessage(error));
-    } finally {
-      setChecking(false);
-    }
-  }, [id, state]);
+  // The reading asked of a state, which the host records once it lands of it,
+  // so a basic ticket's Confirm contract at the same state reads nothing again
+  // (D-138).
+  const check = useCallback(
+    async (state: string | null): Promise<void> => {
+      if (id === null) return;
+      setFailure(null);
+      setChecking(true);
+      try {
+        setAskedFor(await bridge.request({ kind: "driftCheck", id, state }));
+      } catch (error) {
+        setFailure(errorMessage(error));
+      } finally {
+        setChecking(false);
+      }
+    },
+    [id],
+  );
+  // The planning whose arrival is asking the host what state the plan is at:
+  // a round trip that reads nothing, and is not a wait worth saying.
+  const [settling, setSettling] = useState<string | null>(null);
+  // The chat still talking, from the moment a turn is sent until it is over
+  // (D-102): a confirm that arrives meanwhile decides nothing until the turn
+  // has left the plan where it leaves it, and any other arrival reads nothing
+  // and is taken as it comes. The one signal the pane waits on a turn by —
+  // the way through to the contract, an answer sent from here, and what the
+  // wait says — so an answer still on its way to the host is waited on too.
+  const talking = useChatTalking(workspace, id);
+  const confirmWaits = id !== null && asked.current !== id && talking && confirmArrives(id);
   // A planning with no spec has nothing to read the plan against — a ticket
   // the CLI admitted, or one opened from the board — and goes on to the
   // contract without asking: the host would refuse, and a refusal is not a
@@ -134,45 +147,56 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // Whether a reading is under way for this planning, whoever asked for it —
   // counting the one about to be asked for on arrival, so the record is not
   // shown for a frame before the wait that precedes it.
-  const reading = asked.current !== id || checking || (newest !== null && isLive(newest));
+  const reading = asked.current !== id || settling === id || checking || (newest !== null && isLive(newest));
   // When this pane arrived, and the reading under way then that it adopted:
   // a reading that landed before it is not what this arrival decides by.
   const arrival = useRef<{ id: string; at: number; adopted: string | null } | null>(null);
   if (id !== null && arrival.current?.id !== id)
     arrival.current = { id, at: Date.now(), adopted: newest !== null && isLive(newest) ? newest.id : null };
-  // Whether nothing the last reading judged has moved since it — the spec's
-  // sections and the plan's promise — so arriving reads nothing again
-  // (D-128): the problems it found are what stands, or the way on where none
-  // is open.
-  const current = listed !== undefined && state !== null && listed.read === state;
-  // Whether this arrival is a Confirm the plan's, the one arrival that may
-  // read: asked of the confirm on its way until the arrival takes it, then
-  // kept for this planning.
-  const confirmed = useRef<{ id: string; confirming: boolean } | null>(null);
-  const confirming =
-    id === null ? false : confirmed.current?.id === id ? confirmed.current.confirming : confirmArrives(id);
-  // On arrival, once: a reading already under way for this planning is
+  // On arrival, once, and for a confirm's arrival once the chat has finished
+  // any turn in flight: a reading already under way for this planning is
   // adopted rather than doubled — the model would be asked the same question
-  // twice, and the second answer would land on top of the first — a state the
-  // last reading was of is not read again, an arrival that is not a confirm's
-  // reads nothing, and otherwise one is asked for. The host records what it
-  // finds, and a record is what this pane shows.
+  // twice, and the second answer would land on top of the first — an arrival
+  // that is not a confirm's reads nothing, and a confirm's asks the host for
+  // the state the plan is at now and the state the last reading was of. Where
+  // nothing the last reading judged has moved since — the spec's sections and
+  // the plan's promise — it reads nothing again (D-128), and otherwise one is
+  // asked for of the state the host gave. Compared at the host rather than off
+  // this window's copies, which land a round trip after it: a copy from before
+  // a turn's edits landed would pass a plan nobody read. The host records what
+  // it finds, and a record is what this pane shows.
   const [unread, setUnread] = useState<string | null>(null);
   useEffect(() => {
-    if (id === null || key === null || asked.current === id) return;
+    if (id === null || key === null || asked.current === id || confirmWaits) return;
     asked.current = id;
-    confirmed.current = { id, confirming: confirmArrives(id, true) };
+    // Whether this arrival is a Confirm the plan's, the one arrival that may
+    // read: asked of the confirm on its way, which the arrival uses up.
+    const confirming = confirmArrives(id, true);
     if (specless) {
       navigate({ page: "planning", sessionId: id, pane: "contract" });
       return;
     }
     if (newest !== null && isLive(newest)) return;
-    if (current || !confirmed.current.confirming) {
+    if (!confirming) {
       setUnread(id);
       return;
     }
-    void check();
-  }, [id, key, repoId, specless, newest, current, navigate, check]);
+    const arrival = id;
+    setSettling(arrival);
+    void readingNow(arrival).then(
+      (now) => {
+        if (asked.current !== arrival) return;
+        setSettling(null);
+        if (now !== null && now.read === now.state) setUnread(arrival);
+        else void check(now?.state ?? null);
+      },
+      (error: unknown) => {
+        if (asked.current !== arrival) return;
+        setSettling(null);
+        setFailure(errorMessage(error));
+      },
+    );
+  }, [id, key, repoId, specless, newest, confirmWaits, navigate, check]);
 
   // What the reading said, once it has landed and parses as a verdict. Read
   // off the job the workspace holds rather than trusted as typed: it crossed
@@ -199,7 +223,6 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         : (landed.error ?? "The reading did not finish.");
 
   const approved = ticket !== undefined && ticket.approved_at !== null;
-  const thinking = (workspace.working ?? []).includes(id ?? "");
   // Nothing to say: straight on to the contract, which is where the person
   // was going — a plan the reading found agreeing with its spec, or a state
   // the last reading was of with no problem open. On arrival that holds
@@ -221,10 +244,10 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     !reading &&
     ((verdict !== null &&
       (verdict.findings.length === 0 || verdict.dismissed || approved) &&
-      (drift === null || (!arrived && sent === null && !thinking && session?.asking == null))) ||
+      (drift === null || (!arrived && sent === null && !talking && session?.asking == null))) ||
       // Arrived at a state the last reading was of, or not by a confirm,
       // with nothing open.
-      (unread === id && !arrived && open.length === 0 && sent === null && !thinking && session?.asking == null));
+      (unread === id && !arrived && open.length === 0 && sent === null && !talking && session?.asking == null));
   useEffect(() => {
     if ((landed === null && unread !== id) || key === null || reading) return;
     if (passing && id !== null) navigate({ page: "planning", sessionId: id, pane: "contract" });
@@ -280,7 +303,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     owing.turn !== null &&
     owing.turn > sent.after &&
     !owing.owed &&
-    !thinking &&
+    !talking &&
     (newest === null || !isLive(newest));
   const decided =
     reread && (sent.problem === "" || problemKey(open) !== sent.problem || putAgain);
@@ -293,7 +316,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   }, [decided]);
   // Every problem resolved here: the tab goes, and the person is back where
   // they confirm — a basic ticket's contract, an epic's Graph — to confirm
-  // again (D-NEW-basic-and-epic-flows).
+  // again (D-138).
   const basic = flowFor(workspace, id ?? "").shape === "basic";
   const resolved =
     drift !== null &&
@@ -302,7 +325,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     !reading &&
     !passing &&
     !awaiting &&
-    !thinking &&
+    !talking &&
     (failure ?? couldNotReread ?? jobError) === null;
   useEffect(() => {
     if (resolved && id !== null)
@@ -310,7 +333,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   }, [basic, resolved, id, navigate, workspace.drafts]);
 
   const send = async (text: string): Promise<void> => {
-    if (id === null || busy || thinking) return;
+    if (id === null || busy || talking) return;
     setBusy(true);
     setFailure(null);
     setSent({ problem: problemKey(open), after: conversation.at(-1)?.n ?? 0 });
@@ -335,7 +358,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // Back to the pane the person confirmed from, once they have read that
   // the reading did not run: the pane the planning was left at, since this
   // one is never recorded as that, else where the shape confirms — a basic
-  // ticket's contract, an epic's Graph (D-NEW-basic-and-epic-flows).
+  // ticket's contract, an epic's Graph (D-138).
   const confirmedFrom = (): void => {
     if (id === null) {
       navigate({ page: "home" });
@@ -367,7 +390,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // way on to the contract, for an epic as for a basic ticket, so there is
   // no way past one: each is resolved, here or by changing the plan, and the
   // person is moved back to confirm once none is open
-  // (D-NEW-basic-and-epic-flows).
+  // (D-138).
   const footer = (): ReactNode => (
     <div className="approve-actions pane-confirm">
       <Button onClick={back}>Back to the plan</Button>
@@ -394,16 +417,30 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // to the contract, which is being taken: nothing is shown over that either.
   // Arrived at a state the last reading was of, with none under way: nothing
   // is read, so the wait is not said while the pane passes through or puts
-  // the problems that reading found (D-NEW-basic-and-epic-flows).
+  // the problems that reading found (D-138).
   const unreadArrival =
-    (current || !confirming) &&
+    (asked.current !== id || settling === id || unread === id) &&
     !checking &&
     askedFor === null &&
     sent === null &&
-    !thinking &&
+    !talking &&
     (newest === null || !isLive(newest));
+  // A confirm arrived while the chat is still talking: nothing is decided
+  // until the turn is over, and the wait says what it is waiting for.
+  if (confirmWaits)
+    return (
+      <section className="screen drift" data-screen="drift">
+        <WaitScreen
+          bare
+          title="Checking for drift"
+          description="The chat is still talking. The plan is read against the spec once it has finished this turn."
+          status="Waiting for the chat to finish this turn…"
+        />
+        {footer()}
+      </section>
+    );
   if (reading || passing)
-    return unreadArrival ? <section className="screen drift" data-screen="drift" /> : waiting(awaiting || thinking);
+    return unreadArrival ? <section className="screen drift" data-screen="drift" /> : waiting(awaiting || talking);
   // A reading that did not run, every try of it: said over the pane, and
   // nothing goes on to the contract without it.
   const error = failure ?? couldNotReread ?? jobError;
@@ -457,16 +494,16 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // to see whether it closed the problem: the next one appears when that
   // reading records it, and until then the pane says which of the two is
   // happening rather than leaving the answered card up to be answered again.
-  if (awaiting || (thinking && problem !== undefined))
+  if (awaiting || (talking && problem !== undefined))
     return waiting(
       true,
-      thinking ? "The Architect is applying your answer…" : "Reading the plan against the spec again…",
+      talking ? "The Architect is applying your answer…" : "Reading the plan against the spec again…",
     );
   // No record yet, and no reading: the way through is being taken (the
   // effect above), or the record the reading wrote is on its way. And none
   // open: the person is being moved back to confirm, or the Architect is
   // applying an answer given elsewhere.
-  if (drift === null || problem === undefined) return waiting(thinking);
+  if (drift === null || problem === undefined) return waiting(talking);
   return (
     <section className="screen drift" data-screen="drift">
       <div className="pane-head">

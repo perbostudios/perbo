@@ -8,7 +8,7 @@ const scratch = mkdtempSync(join(tmpdir(), "perbo-attempts-file-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe("an attempts record that does not parse", () => {
-  it("names five of what it could not read, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names five of what it could not read, then how many more (D-133)", () => {
     const path = join(scratch, "ticket.attempts.json");
     writeFileSync(path, JSON.stringify({ ticket_id: "ticket_x", attempts: [1, 2, 3, 4, 5, 6, 7] }));
     let said = "";

@@ -9,6 +9,8 @@ import {
 import {
   CLAUDE_CLI_ENV_ALLOW_LIST,
   codexCliModel,
+  MODEL_PROVIDERS,
+  openCodeCliModel,
   providerFailureText,
   type ModelProvider,
 } from "@perbo/model";
@@ -65,7 +67,7 @@ export interface ProbeRequest {
   model: string;
   /** Defaults to the process environment, which is where both credentials live. */
   env?: NodeJS.ProcessEnv;
-  /** `claude-cli` only: the binary the reviewer transport spawns. */
+  /** `claude-cli`, `codex-cli` and `opencode-cli`: the binary the reviewer transport spawns. */
   binary?: string;
   timeoutMs?: number;
 }
@@ -175,6 +177,14 @@ function fixFor(
   request: { provider: ProbeProvider; model: string; binary: string },
 ): string {
   if (request.provider === "codex-cli") return failure === "authentication" ? "run `codex login`, then probe again" : failure === "transport_missing" ? "install the Codex CLI, then run `codex login`" : failure === "unknown_model" ? `choose a Codex model this account can call instead of ${request.model}` : "check the Codex CLI connection and subscription allowance, then probe again";
+  if (request.provider === "opencode-cli")
+    return failure === "authentication"
+      ? "export OPENCODE_API_KEY with an OpenCode Zen key, or choose one of OpenCode's free models, then probe again"
+      : failure === "transport_missing"
+        ? "install OpenCode 2 (brew install anomalyco/tap/opencode-v2), then probe again"
+        : failure === "unknown_model"
+          ? `choose a model \`opencode models\` lists instead of ${request.model}`
+          : "check the OpenCode connection and its Zen balance, then probe again";
   const cli = request.provider === "claude-cli";
   switch (failure) {
     case "authentication":
@@ -427,14 +437,20 @@ async function probeAnthropic(
 export async function probeReviewer(request: ProbeRequest): Promise<ProbeResult> {
   const env = request.env ?? process.env;
   const timeoutMs = request.timeoutMs ?? PROBE_TIMEOUT_MS;
-  const binary = request.binary ?? (request.provider === "codex-cli" ? "codex" : "claude");
+  const binary =
+    request.binary ??
+    (request.provider === "codex-cli" ? "codex" : request.provider === "opencode-cli" ? (env.PERBO_OPENCODE_BINARY ?? "opencode") : "claude");
   try {
-    if (request.provider === "codex-cli") {
-      const model = codexCliModel({ modelId: request.model, binary, timeoutMs, submitSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } });
+    if (request.provider === "codex-cli" || request.provider === "opencode-cli") {
+      const submitSchema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
+      const model =
+        request.provider === "codex-cli"
+          ? codexCliModel({ modelId: request.model, binary, timeoutMs, submitSchema })
+          : openCodeCliModel({ modelId: request.model, binary, timeoutMs, submitSchema, env });
       const started = performance.now();
       try {
         await model.turn({ system: "Connectivity check. Submit the review with ok true. No repository files are needed.", messages: [{ role: "user", content: "ping" }], forceSubmit: true });
-        return { ok: true, provider: "codex-cli", model: request.model, elapsed_ms: Math.round(performance.now() - started) };
+        return { ok: true, provider: request.provider, model: request.model, elapsed_ms: Math.round(performance.now() - started) };
       } finally { await model.dispose?.(); }
     }
     return request.provider === "claude-cli"
@@ -478,13 +494,13 @@ export function configuredReviewer(
   const provider = config?.["reviewer_provider"];
   const reviewerModel = config?.["reviewer_model"];
   const runModel = config?.["model"];
-  const pinned = provider === "anthropic" || provider === "claude-cli" || provider === "codex-cli";
+  const pinned = typeof provider === "string" && (MODEL_PROVIDERS as readonly string[]).includes(provider);
   const keys: string[] = [];
   if (pinned) keys.push("reviewer_provider");
   if (typeof reviewerModel === "string" && reviewerModel !== "") keys.push("reviewer_model");
   else if (typeof runModel === "string" && runModel !== "") keys.push("model");
   return {
-    provider: pinned ? provider : defaults.provider,
+    provider: pinned ? (provider as ProbeProvider) : defaults.provider,
     model:
       typeof reviewerModel === "string" && reviewerModel !== ""
         ? reviewerModel

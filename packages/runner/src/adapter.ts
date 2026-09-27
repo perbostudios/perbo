@@ -33,9 +33,10 @@ import {
 } from "./agents.js";
 import { readReinjections, type BriefRecords } from "./brief.js";
 import type { AttemptCeilings, CeilingBreach } from "./ceilings.js";
-import { EgressLog } from "./egress.js";
+import { answerAsk, describeTool, EgressLog, extractHosts, pendingAsks, type EgressAsk, type EgressGate, type EgressVerdict } from "./egress.js";
 import {
   discardPreToolGuard,
+  PRE_TOOL_HOOKED_TOOLS,
   preparePreToolGuard,
   prepareUnguardedSettings,
   readPreToolDecisions,
@@ -204,7 +205,21 @@ export interface AgentRequest {
    * judges the arm's work rather than its budget.
    */
   supervision?: "runner_guard" | "agent_permissions";
+  /**
+   * Whether an unlisted host may be reached, asked of a person while the call
+   * that named it is held (D-137). The loop hands one to
+   * every attempt. Omitted, nothing is held and an unlisted host ends the
+   * attempt `unlisted_egress_host` as the stream reading finds it.
+   */
+  egress?: EgressGate;
 }
+
+/**
+ * How much longer than the attempt waits for a person the hook holds a call,
+ * so that where nobody answers the runner's own stop comes first and names the
+ * host (D-137).
+ */
+const HOOK_HOLD_MARGIN_MS = 30_000;
 
 /**
  * What a command's record keeps of the transcript reading where the hook's
@@ -495,14 +510,6 @@ function addStreamUsage(a: CountedStreamUsage, b: CountedStreamUsage): CountedSt
   };
 }
 
-/** `Bash` carries a command; everything else is described by its input. */
-function describeTool(name: string, input: unknown): string {
-  const record = (input ?? {}) as Record<string, unknown>;
-  if (name === "Bash" && typeof record.command === "string") return record.command;
-  if (typeof record.file_path === "string") return `${name} ${record.file_path}`;
-  return `${name} ${JSON.stringify(record)}`;
-}
-
 export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   const progress = request.onProgress ?? (() => undefined);
   const redact = request.redact ?? ((text: string) => text);
@@ -524,6 +531,12 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
    * refusing those is what the guard does.
    */
   const supervision = request.supervision ?? "runner_guard";
+  /**
+   * D-137: the gate that answers for an unlisted host,
+   * where there is one and the runner's guard holds the executor's calls. The
+   * direct-agent arm has no guard to hold a call with.
+   */
+  const gate = supervision === "runner_guard" ? (request.egress ?? null) : null;
   const guard =
     supervision === "runner_guard"
       ? preparePreToolGuard({
@@ -540,6 +553,14 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           ...(request.brief_records
             ? { brief: { text: request.prompt, records: request.brief_records } }
             : {}),
+          ...(gate === null
+            ? {}
+            : {
+                egress: {
+                  allow_list: [...request.profile.network_allow_list],
+                  wait_ms: request.ceilings.stallLimitMs + HOOK_HOLD_MARGIN_MS,
+                },
+              }),
         })
       : prepareUnguardedSettings();
 
@@ -773,9 +794,13 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     }
   };
 
+  /** Aborts every question still waiting on a person once the attempt stops. */
+  const waiting = new AbortController();
+
   const stop = (reason: TerminationReason, detail: string) => {
     if (terminated) return;
     terminated = true;
+    waiting.abort();
     termination = { reason, detail };
     progress(`terminating: ${reason} — ${detail}`);
     signal("SIGTERM");
@@ -807,6 +832,102 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
 
   const ticker = setInterval(() => breach(request.ceilings.tick()), 1_000);
   ticker.unref();
+
+  /**
+   * The runner's half of the egress relay (D-137).
+   *
+   * The hook holds a call naming an unlisted host and asks; this reads the
+   * ask, takes the command from the stream's own redacted record of that call
+   * — the block is on the stream before the hook runs — and settles each
+   * unlisted host through the gate, while the stall window is held. An allow
+   * joins the attempt's list and the call runs; a refusal refuses the call with
+   * what the gate says to tell the executor; no answer within the window ends
+   * the attempt `unlisted_egress_host`.
+   */
+  const relayed = new Set<string>();
+  const commandOf = (toolUseId: string): string | null => {
+    const index = recordOfToolUse.get(toolUseId);
+    return index === undefined ? null : (commands[index]?.detail ?? null);
+  };
+  const settleAsk = async (ask: EgressAsk & { name: string }, asking: EgressGate): Promise<void> => {
+    // The block is on the stream before the hook runs, and the stream is read
+    // a moment behind it: the runner's own record of the call is waited for.
+    let command = commandOf(ask.tool_use_id);
+    for (let tries = 0; command === null && tries < 50 && !terminated; tries += 1) {
+      await new Promise((resolveLater) => setTimeout(resolveLater, 100));
+      command = commandOf(ask.tool_use_id);
+    }
+    // What a person is shown, and asked about, is the runner's own redacted
+    // record of the call, never what the ask file says: a call the stream
+    // never carried is refused, and so is a host the record does not name.
+    if (command === null) {
+      answerAsk(guard.directory, ask.name, {
+        answer: "refuse",
+        reason:
+          `${ask.hosts.join(", ")} is not on this run's network allow-list, and the runner did not read this call ` +
+          "from its stream, so it cannot be shown to a person and is refused. Finish the work without it.",
+      });
+      return;
+    }
+    const named = new Set(extractHosts(command));
+    for (const host of ask.hosts) {
+      if (egress.isAllowed(host)) continue;
+      if (!named.has(host)) {
+        answerAsk(guard.directory, ask.name, {
+          answer: "refuse",
+          reason:
+            `A host this call names is not on this run's network allow-list and not one the runner's record of ` +
+            "the call shows, so it cannot be put to a person and the call is refused. Finish the work without it.",
+        });
+        return;
+      }
+      const release = request.ceilings.holdForPerson();
+      let verdict: EgressVerdict;
+      try {
+        verdict = await asking.ask({
+          host,
+          command,
+          wait_ms: request.ceilings.stallLimitMs,
+          signal: waiting.signal,
+        });
+      } catch (error) {
+        verdict = {
+          answer: "refuse",
+          tell: redact(
+            `${host} is not on this run's network allow-list, and whether to allow it could not be asked ` +
+              `(${error instanceof Error ? error.message : String(error)}). Finish the work without it.`,
+          ),
+        };
+      } finally {
+        release();
+      }
+      // The attempt stopped for another reason while it waited: the process is
+      // going, and nothing is left to answer.
+      if (waiting.signal.aborted) return;
+      if (verdict.answer === "allow") {
+        egress.allow(host);
+        continue;
+      }
+      if (verdict.answer === "refuse") {
+        answerAsk(guard.directory, ask.name, { answer: "refuse", reason: verdict.tell });
+        return;
+      }
+      answerAsk(guard.directory, ask.name, { answer: "refuse", reason: verdict.detail });
+      stop("unlisted_egress_host", verdict.detail);
+      return;
+    }
+    answerAsk(guard.directory, ask.name, { answer: "allow" });
+  };
+  const relay =
+    gate === null
+      ? null
+      : setInterval(() => {
+          for (const ask of pendingAsks(guard.directory, relayed))
+            void settleAsk(ask, gate).catch((error: unknown) => {
+              progress(`the egress question could not be settled: ${error instanceof Error ? error.message : String(error)}`);
+            });
+        }, 100);
+  relay?.unref();
 
   /**
    * A closed laptop is a disconnect, not a pause (SCP-079 criterion 9). The
@@ -1193,8 +1314,14 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         // runs as a person's ordinary Claude Code — nothing of the runner's
         // decides its calls — so a kill here would void its run for a reason
         // the arm never saw, while the record still says what it reached for.
+        //
+        // D-137: a call the guard's hook holds is not
+        // ended here. The hook holds it before it runs and the relay above
+        // settles its host with a person; only a call nothing holds ends the
+        // attempt on what the stream shows.
+        const held = gate !== null && (PRE_TOOL_HOOKED_TOOLS as readonly string[]).includes(block.name);
         for (const denied of egress.observe(detail, `tool:${block.name}`, at)) {
-          if (supervision !== "runner_guard") continue;
+          if (supervision !== "runner_guard" || held) continue;
           stop("unlisted_egress_host", `${denied.host} is not on the resolved allow-list`);
         }
       }
@@ -1339,11 +1466,14 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     });
     child.on("error", (error) => {
       clearInterval(ticker);
+      if (relay !== null) clearInterval(relay);
       suspend.stop();
       rejectDone(error);
     });
     child.on("close", (code, signal) => {
       clearInterval(ticker);
+      if (relay !== null) clearInterval(relay);
+      waiting.abort();
       suspend.stop();
       // Again after the close, because a terminated attempt never reaches a
       // result envelope and its refusals are the ones a reader most needs.

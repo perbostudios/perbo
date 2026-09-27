@@ -102,11 +102,11 @@ const running = (over: Partial<Job> = {}): Job =>
 describe("discardTicket", () => {
   it("removes the ticket's records and its preferences", async () => {
     const repo = repository();
-    for (const suffix of [".approach.json", ".drift.json"] as const)
+    for (const suffix of [".approach.json", ".drift.json", ".options.json"] as const)
       writeFileSync(ticketPath(repo, "PRB-1", suffix), "{}\n");
     const profile = state();
     await discardTicket(deps({ profile }), repo, "PRB-1");
-    for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json", ".drift.json"] as const)
+    for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json", ".drift.json", ".options.json"] as const)
       expect(existsSync(ticketPath(repo, "PRB-1", suffix))).toBe(false);
     expect(profile.titles).toEqual({});
     expect(profile.archived).toEqual([]);

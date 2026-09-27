@@ -3,7 +3,7 @@ import { pad } from "./text.js";
 
 /**
  * A name held to a fixed column is an identifier, so it may be cut, but only
- * where the cut shows (D-NEW-nothing-shown-is-cut).
+ * where the cut shows (D-133).
  */
 describe("pad", () => {
   it("fills a name shorter than the column out to it", () => {

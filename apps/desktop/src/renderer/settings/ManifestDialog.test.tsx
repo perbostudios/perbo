@@ -122,7 +122,7 @@ describe("the worktree manifest dialog", () => {
     await waitFor(() => expect(closes).toHaveLength(1));
   });
 
-  it("holds each off-limits glob to what one holds where it is typed, and saves it without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+  it("holds each off-limits glob to what one holds where it is typed, and saves it without a refusal (D-133)", async () => {
     const { saves } = mount(() => manifest(A, ["old/**"]));
     await waitFor(() => expect(paths().value).toBe("old/**"));
     const full = "p".repeat(TYPED_PATH_MAX_CHARS);

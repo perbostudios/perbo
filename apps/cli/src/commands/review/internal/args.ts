@@ -9,7 +9,7 @@
  * be given together.
  */
 
-import type { ModelProvider } from "@perbo/model";
+import { MODEL_PROVIDERS, type ModelProvider } from "@perbo/model";
 import {
   listFlag,
   parseArgv,
@@ -146,10 +146,10 @@ function readFormat(value: string): ReviewFormat {
 }
 
 function readProvider(value: string): ModelProvider {
-  if (value !== "anthropic" && value !== "claude-cli" && value !== "codex-cli") {
-    throw new UsageError("--provider must be 'anthropic', 'claude-cli' or 'codex-cli'");
+  if (!(MODEL_PROVIDERS as readonly string[]).includes(value)) {
+    throw new UsageError("--provider must be 'anthropic', 'claude-cli', 'codex-cli' or 'opencode-cli'");
   }
-  return value;
+  return value as ModelProvider;
 }
 
 function readMaxTurns(value: string): number {

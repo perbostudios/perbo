@@ -285,7 +285,7 @@ describe("writing the attempts record", () => {
     expect(readFileSync(path, "utf8")).toBe("{ this is not the record }\n");
   });
 
-  it("names five of what it could not read, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names five of what it could not read, then how many more (D-133)", () => {
     const path = join(scratch("perbo-unreadable-many-"), "state", `${RECORD_TICKET}.attempts.json`);
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, JSON.stringify({ ticket_id: RECORD_TICKET, attempts: [1, 2, 3, 4, 5, 6, 7] }));

@@ -5,7 +5,7 @@ import type { EditingSession, SpecSections } from "./protocol.js";
 /**
  * The state a reading of the plan against its spec is of (D-128), which a
  * basic ticket's Confirm contract compares with the last reading's
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  */
 
 describe("the state a reading is of", () => {

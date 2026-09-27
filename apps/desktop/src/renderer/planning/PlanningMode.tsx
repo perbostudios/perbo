@@ -40,7 +40,7 @@ const DriftPane = lazy(() =>
  * against the spec and puts each place the two have parted, one at a time
  * (D-128), the lowest tab while a problem is open; and the contract, above
  * it, where the one approval is. Which
- * of them a planning offers is `flowFor`'s (D-NEW-basic-and-epic-flows).
+ * of them a planning offers is `flowFor`'s (D-138).
  *
  * One pane at a time, with the interview docked beside it (D-102) and the
  * plan's history opening as a drawer over the pane, so the chat is there from
@@ -89,7 +89,7 @@ export function PlanningMode({
   // naming a pane it has not got is not where the person is.
   //
   // The contract is written down with the state it was reached at, which
-  // keeps it a tab until that state moves (D-NEW-basic-and-epic-flows):
+  // keeps it a tab until that state moves (D-138):
   // once, as the person arrives, so a change that lands elsewhere while they
   // read it — a turn of the chat, another process — still takes the tab
   // away. A change the person makes on a basic ticket's contract is theirs,
@@ -163,7 +163,7 @@ export function PlanningMode({
     ) : landing.checking ? (
       // A fresh basic plan, checked for what it disturbs before it lands on
       // Impact or the contract. Nothing reads it against the spec here: the
-      // model drafted it from the spec (D-NEW-basic-and-epic-flows).
+      // model drafted it from the spec (D-138).
       <WaitScreen
         bare
         title="Checking the impact"
@@ -216,7 +216,7 @@ export function PlanningMode({
           bar between them still moves. On Problems the card in the pane is the
           chat's own card, and a second beside it would be two ways to do one
           thing; on the contract the criteria are the person's to edit by hand
-          (D-NEW-basic-and-epic-flows). Not before the planning has a pane to
+          (D-138). Not before the planning has a pane to
           stand beside, either. */}
       {pane !== "drift" && pane !== "contract" && pane !== null && (
         <>

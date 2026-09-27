@@ -88,7 +88,7 @@ describe("the Graph pane's reads", () => {
   });
 });
 
-describe("a node on the Graph pane (D-NEW-basic-and-epic-flows)", () => {
+describe("a node on the Graph pane (D-138)", () => {
   it("says under its title how many criteria it covers and the paths expected to satisfy them", async () => {
     const criterion = { id: "ac_1", text: "It holds.", kind: "test" as const, assertion: "It holds.", requirement: null, manual: null };
     nodes = [{ id: "node_1", title: "First part", criteria: [criterion], paths: ["src/a/**", "src/b.ts"], page: null }];

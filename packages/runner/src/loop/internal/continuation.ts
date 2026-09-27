@@ -18,7 +18,7 @@ import type { AttemptsRecord } from "../../attempts.js";
 import { handsToExecutor, recordDecisions, type DecidedFinding } from "../../decisions.js";
 import type { BundleStore } from "../../bundle.js";
 import { sameCommit } from "../../resume.js";
-import { commitsSince } from "../../seal.js";
+import { changedPathsBetween, commitsSince } from "../../seal.js";
 import type { RoundState } from "./state.js";
 
 /**
@@ -104,9 +104,12 @@ export interface Direction {
  * after it left open, and the commit the branch should still be at.
  *
  * The last verification's open set is the authoritative one — each round
- * narrows it — and the commit it judged is the one the branch should still be
- * at. Null where there is no readable review, or where a verification cannot
- * say what it left open.
+ * narrows it. The commit the branch should still be at is the last one a
+ * verification judged, or the review's where none did: a round the scope rule
+ * refused (SCP-194) records the commit it refused under a key of its own and
+ * judged no tree, so a branch left at that commit has moved past what was
+ * judged and is reviewed afresh. Null where there is no readable review, or
+ * where a verification cannot say what it left open.
  */
 export function judgedOnRecord(input: { bundles: BundleStore; ticket_id: string }): {
   review: ReviewArtifact;
@@ -174,10 +177,9 @@ export function judgedOnRecord(input: { bundles: BundleStore; ticket_id: string 
     ),
   );
 
+  const lastJudged = verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined);
   const head =
-    lastVerification === undefined
-      ? review.target.head_commit
-      : (lastVerification.inputs["head_commit"] ?? null);
+    lastJudged === undefined ? review.target.head_commit : (lastJudged.inputs["head_commit"] ?? null);
   if (typeof head !== "string" || head.length === 0) return null;
   return { review, node_reviews, reviewed_at: last.created_at, openKeys, givenKeys, head_commit: head };
 }
@@ -298,7 +300,7 @@ export function decidedDelivery(input: {
 
 /**
  * The review a retained branch is published under
- * (D-NEW-publish-a-retained-branch-later): the one on record, with each
+ * (D-136): the one on record, with each
  * person's answer recorded on the finding it closed — shipped as it is, or
  * handed to the executor and closed by a verification — which is what the run
  * that retained the branch recorded on it.
@@ -351,7 +353,18 @@ export async function confirmContinuation(
   if (state.continuing === null) return state;
   const head = await branchHead(state.workspace.path, state.baseCommit);
   if (head !== null && sameCommit(head, state.continuing.head_commit)) {
-    return { ...state, continuing: null };
+    // The change set the judged commit holds is what the first round's
+    // widening is measured against (SCP-194), as a later round's is against
+    // the round before it: only a path this round adds is a widening.
+    return {
+      ...state,
+      continuing: null,
+      previousChangedPaths: await changedPathsBetween({
+        worktree: state.workspace.path,
+        base_commit: state.baseCommit,
+        head_commit: head,
+      }),
+    };
   }
   progress(
     `the branch is at ${head ?? "its base"} and the last review judged ` +

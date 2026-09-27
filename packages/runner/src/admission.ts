@@ -153,6 +153,12 @@ export const ADMISSION_RULES = {
    * the guard wrote before the attempt ends.
    */
   agent_directory_unknown: "agent_directory_unknown",
+  /**
+   * A call naming a host off the network allow-list that a person refused, or
+   * that the run refuses without asking (D-137). Not a
+   * write rule: what is refused is the destination the call named.
+   */
+  egress: "unlisted_egress_host",
 } as const;
 
 export type AdmissionRule = (typeof ADMISSION_RULES)[keyof typeof ADMISSION_RULES];

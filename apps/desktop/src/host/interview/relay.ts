@@ -22,7 +22,7 @@ export type Relayed =
    * What the session said, redacted and whole: the host decides whether it is
    * said now, held, dropped, or asked for again condensed, because that
    * depends on what the turn does next (D-102) and on whether it fits the
-   * record (D-NEW-nothing-shown-is-cut).
+   * record (D-133).
    */
   | { kind: "said"; text: string }
   /** The session admitted a write to the spec; the file lands as the call returns. */
@@ -73,7 +73,7 @@ export function interviewSaid(message: Record<string, unknown>): string | null {
  * would be relaying whatever wrote it rather than the protocol it declared.
  *
  * Everything the session wrote is redacted on the way through and nothing is
- * cut (D-NEW-nothing-shown-is-cut): the session's own words that do not fit
+ * cut (D-133): the session's own words that do not fit
  * the record are the host's to ask for again, and an identifier — a session
  * id, a tool or rule name — is held to its field's width.
  */
@@ -191,7 +191,7 @@ export function relayed(line: string): Relayed {
 
 /**
  * A model's text on its way to the person: redacted and its whitespace
- * flattened, and never cut (D-NEW-nothing-shown-is-cut) — so the same rule
+ * flattened, and never cut (D-133) — so the same rule
  * reads a question, an answer and a finding. Empty where nothing survived,
  * which the caller decides about: a field its schema requires cannot be shown
  * as nothing.

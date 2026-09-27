@@ -187,6 +187,10 @@ describe("the run and doctor configurations", () => {
     expect(runConfig({ ...settings, executorProvider: "codex-cli" }, limits, false)).toMatchObject({
       agent_binary: "codex",
     });
+    expect(runConfig({ ...settings, executorProvider: "opencode-cli" }, limits, false)).toMatchObject({
+      agent_binary: "opencode",
+      agent_provider: "opencode-cli",
+    });
   });
 
   it("carries person-only merge on every run, and publishes only when asked", () => {

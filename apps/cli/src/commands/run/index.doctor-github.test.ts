@@ -327,7 +327,7 @@ async function doctor(
     argv: doctorArgs(repo, options.json),
     streams,
     cwd: process.cwd(),
-    deps: { diagnose: () => Promise.resolve(materializable) },
+    deps: { diagnose: () => Promise.resolve(materializable), claudeModels: () => Promise.resolve([]) },
   });
   return streams.out();
 }

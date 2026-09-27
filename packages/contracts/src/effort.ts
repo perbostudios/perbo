@@ -8,11 +8,14 @@ import { z } from "zod";
  * - `claude-cli`: `claude --effort <level>`.
  * - `codex-cli`: the `effort` of a `codex app-server` `turn/start`.
  * - `anthropic`: the Messages API's `output_config.effort`.
+ * - `opencode-cli`: none. OpenCode names a model's levels per model, and Perbo
+ *   sends it none (D-134).
  */
 export const EFFORT_LEVELS = {
   "claude-cli": ["low", "medium", "high", "xhigh", "max"],
   "codex-cli": ["low", "medium", "high", "xhigh", "max", "ultra"],
   anthropic: ["low", "medium", "high", "xhigh", "max"],
+  "opencode-cli": [],
 } as const;
 
 export type EffortProvider = keyof typeof EFFORT_LEVELS;

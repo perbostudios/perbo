@@ -163,7 +163,7 @@ export function renderArtifact(
   for (const check of artifact.checks) {
     const mark = CHECK_MARK[check.status] ?? "?";
     const style: Style = check.status === "passed" ? "ok" : "bad";
-    // The command and the summary whole (D-NEW-nothing-shown-is-cut): the
+    // The command and the summary whole (D-133): the
     // summary right of the command where both fit the width, and under the
     // row, wrapped, where they do not.
     const command = (check.command ?? "").padEnd(24);
@@ -252,7 +252,7 @@ export function renderArtifact(
       `  ${paint(tag, style)}  ${paint(ruleId, "hi")}` + " ".repeat(gap) + paint(conf, "dim"),
     );
     const criterion = finding.criterion_id ? `  ${finding.criterion_id}` : "";
-    // The location whole (D-NEW-nothing-shown-is-cut), and the criterion beside
+    // The location whole (D-133), and the criterion beside
     // it where the two fit the width, under it where they do not.
     const at = finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""}` : "(no file)";
     if (11 + at.length + criterion.length <= WIDTH) {
@@ -275,7 +275,7 @@ export function renderArtifact(
       : "";
     const prefix = `  ${pad(tag, 8)} ${pad(finding.rule_id, 24)} `;
     const row = `  ${paint(pad(tag, 8), style)} ${pad(finding.rule_id, 24)} `;
-    // The location whole (D-NEW-nothing-shown-is-cut): beside the rule where it fits.
+    // The location whole (D-133): beside the rule where it fits.
     if (prefix.length + at.length <= WIDTH) lines.push(row + paint(at, "dim"));
     else lines.push(row.trimEnd(), ...wrap(at, 11).map((line) => paint(line, "dim")));
   }

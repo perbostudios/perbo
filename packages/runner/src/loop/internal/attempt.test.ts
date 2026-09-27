@@ -171,7 +171,7 @@ describe("what an attempt that finished is recorded as", () => {
     ).toEqual({ reason: "no_changes", detail: "the branch adds no change to its base" });
   });
 
-  it("names each refused command whole, and how many more past five (D-NEW-nothing-shown-is-cut)", () => {
+  it("names each refused command whole, and how many more past five (D-133)", () => {
     const long =
       "node -e \"require('fs').writeFileSync('/etc/hosts', 'a line the guard read in full before refusing it')\"";
     const commands = [0, 1, 2, 3, 4, 5, 6].map((n) => ({

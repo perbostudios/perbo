@@ -27,8 +27,24 @@ export type { DeliveredChecksReading, TicketDeliveryState } from "./delivery.js"
 export { GithubCredentialError, requireGithubCredential } from "./github-credential.js";
 export type { GithubCredentialReading } from "./github-credential.js";
 export { acquireServeLock, liveRunLocks, ServeLockedError } from "./lock.js";
-export { BaseSourceSchema, publishRetained, runTicket, TicketRunConfigSchema } from "./loop/index.js";
-export type { BaseSource, RetainedPublishResult, TicketRunResult } from "./loop/index.js";
+export {
+  addToNetworkAllowList,
+  answerEgressQuestion,
+  EgressAnswerRefusedError,
+  EgressQuestionsError,
+  readEgressQuestions,
+} from "./egress-questions.js";
+export { RECORD_LOCK_WAIT_MS, readRecordLock, RecordLockedError, recordLockPath, withRecordLock } from "./record-lock.js";
+export type { RecordLock } from "./record-lock.js";
+export {
+  AGENT_DEFAULTS,
+  AGENT_PROVIDERS,
+  BaseSourceSchema,
+  publishRetained,
+  runTicket,
+  TicketRunConfigSchema,
+} from "./loop/index.js";
+export type { AgentProvider, BaseSource, RetainedPublishResult, TicketRunResult } from "./loop/index.js";
 export type { DecidedFinding } from "./decisions.js";
 export { mergeLoopPullRequest } from "./merge.js";
 export type { LoopMergeOutcome } from "./merge.js";

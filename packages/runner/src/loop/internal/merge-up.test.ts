@@ -515,7 +515,7 @@ describe("mergeUp itself", () => {
     expect(git(worktree, "rev-parse", "HEAD").trim()).not.toBe(tip);
     expect(git(worktree, "status", "--porcelain")).toContain("?? src/collides.ts");
   }, MERGE_UP_TIMEOUT_MS);
-  it("carries git's whole refusal, every line of it (D-NEW-nothing-shown-is-cut)", async () => {
+  it("carries git's whole refusal, every line of it (D-133)", async () => {
     const repo = runnerRepository(scratch);
     const worktree = branchWorktree(repo.dir, "blocked-many");
     writeFileSync(join(worktree, "src", "own.ts"), "export const own = 1;\n");

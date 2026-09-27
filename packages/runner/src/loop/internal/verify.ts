@@ -1,9 +1,8 @@
 import { closureVerifySchema, type ClosureVerification } from "@perbo/review";
-import { createModel, type Model } from "@perbo/model";
+import { ZERO_USAGE, createModel, type Model } from "@perbo/model";
 import { formatUsd } from "@perbo/contracts";
 import type {
   CheckResult,
-  ExecutionAttempt,
   Finding,
   PlanContractWithCriteria,
   SecretIndex,
@@ -242,19 +241,16 @@ export async function verifyRound(args: {
   ledger: Ledger;
   bundles: BundleStore;
   attemptId: string;
-  attempt: ExecutionAttempt;
   sealed: SealResult;
   /** The whole-change check results the verification is gated on. */
   gating: CheckResult[];
-  /** Every check result, recorded with the round. */
-  checks: CheckResult[];
   declines: Decline[];
   /** The findings this round was asked to close. */
   toClose: Finding[];
   widened: string[];
   scopeGiven: Finding[];
   pathsAllowed: string[];
-  /** The round's record where nothing has judged it, for a stop that refuses to verify. */
+  /** The round's record before its verification judged it: its attempt, checks and declines. */
   record: RoundRecord;
   maxRounds: number;
   /** The ticket's budget for this attempt's credential, null where it has none. */
@@ -265,7 +261,7 @@ export async function verifyRound(args: {
   clock: () => Date;
   progress: (message: string) => void;
 }): Promise<Step> {
-  const { config, state, ledger, sealed, secrets, clock, progress } = args;
+  const { config, state, ledger, sealed, progress } = args;
   // D-065: declined findings are the person's now — they skip the model
   // half of verification and leave the executor's open set. The
   // deterministic half still applies to the round's tree: verifyClosures
@@ -274,7 +270,13 @@ export async function verifyRound(args: {
   // SCP-194: a scope round that widened is refused before anything is
   // paid to verify it. Nothing is lost — the change set stays on the
   // branch and the finding stays open — and the stop says which paths
-  // arrived and what the contract admits.
+  // arrived and what the contract admits. The refusal is recorded as the
+  // round's verification, a scope failure that moves the round to
+  // `independent_review` as a closure verification does (D-061), so a person
+  // reads what it was judged on. It judged no tree a later round can build
+  // on, so it anchors no continuation.
+  const declinedKeys = new Set(args.declines.map((decline) => decline.finding_key));
+  const toVerify = args.toClose.filter((finding) => !declinedKeys.has(finding.key));
   const widenedStep = refuseWidening({
     widened: args.widened,
     scopeGiven: args.scopeGiven,
@@ -282,11 +284,9 @@ export async function verifyRound(args: {
     pathsAllowed: args.pathsAllowed,
   });
   if (widenedStep !== null) {
-    ledger.addRound(args.record);
+    recordVerification(args, toVerify, widenedVerification(toVerify, widenedStep.end.detail), "refusal");
     return widenedStep;
   }
-  const declinedKeys = new Set(args.declines.map((decline) => decline.finding_key));
-  const toVerify = args.toClose.filter((finding) => !declinedKeys.has(finding.key));
   progress(`verifying closures, round ${state.round}`);
   const verification = await args.verify({
     findings: toVerify,
@@ -300,7 +300,80 @@ export async function verifyRound(args: {
     ),
     onProgress: progress,
   });
+  recordVerification(args, toVerify, verification, "verifier");
 
+  return routeVerification({
+    verification,
+    toVerify,
+    openFindings: state.openFindings,
+    declines: ledger.declines.length,
+    handed: new Set(state.directions.map((direction) => direction.finding_key)),
+    remediationRound: state.remediationRound,
+    maxRounds: args.maxRounds,
+    spend: ledger.spend(),
+    budget: args.budget,
+    configPath: args.configPath,
+  });
+}
+
+/**
+ * What judged a refused round, as its bundle records it: the runner's scope
+ * rule (SCP-194), with no prompt and no model, because none was asked.
+ */
+const REFUSAL_VERSIONS = {
+  code: "stage-3",
+  prompt: "none",
+  policy: "scope-widening-refusal",
+  model: "none",
+  tool: "runner",
+} as const;
+
+/**
+ * A widened round's verification: the scope failure the refusal states,
+ * whole, and every finding the round was given still open, since nothing
+ * was asked whether any of them closed.
+ */
+function widenedVerification(toVerify: readonly Finding[], refusal: string): ClosureVerification {
+  return {
+    prompt_version: REFUSAL_VERSIONS.prompt,
+    per_finding: toVerify.map((finding) => ({
+      finding_key: finding.key,
+      status: "cannot_tell",
+      pointer: "",
+      idiomatic: "cannot_tell",
+      practice: "",
+    })),
+    deterministic_failure: refusal,
+    deterministic_failure_kind: "scope",
+    all_closed: false,
+    open_keys: toVerify.map((finding) => finding.key),
+    usage: ZERO_USAGE,
+    cost_micros: 0,
+    cost_basis: "not_incurred",
+  };
+}
+
+/**
+ * A round's verification on the record: its review bundle, which moves the
+ * round from `VERIFYING` to `INDEPENDENT_REVIEW` as every closure
+ * verification does (D-061), and the round beside it on the ledger.
+ *
+ * The verifier's bundle names the commit it judged as `head_commit`, which is
+ * what a later run continues from. A refusal judged no tree, so it names the
+ * commit it refused as `refused_head_commit` instead and anchors nothing: a
+ * re-run of a widened branch reviews it afresh.
+ */
+function recordVerification(
+  args: Pick<
+    Parameters<typeof verifyRound>[0],
+    "config" | "contract" | "state" | "ledger" | "bundles" | "attemptId" | "sealed" | "declines" | "record" | "secrets" | "clock"
+  >,
+  toVerify: readonly Finding[],
+  verification: ClosureVerification,
+  judge: "verifier" | "refusal",
+): void {
+  const { config, state, sealed, clock } = args;
+  const refused = judge === "refusal";
   args.bundles.write({
     kind: "review",
     subject_id: `cv_${args.attemptId}`,
@@ -308,7 +381,7 @@ export async function verifyRound(args: {
     inputs: {
       changeset_id: sealed.changeset?.changeset_id ?? null,
       base_commit: state.baseCommit,
-      head_commit: sealed.head_commit,
+      ...(refused ? { refused_head_commit: sealed.head_commit } : { head_commit: sealed.head_commit }),
       remediation_round: state.round,
       round_kind: state.kind,
       verification: true,
@@ -326,13 +399,15 @@ export async function verifyRound(args: {
       findings_open: verification.open_keys.join(","),
     },
     context_manifest: [],
-    versions: {
-      code: "stage-3",
-      prompt: verification.prompt_version,
-      policy: "closure-verification",
-      model: config.reviewer_model ?? config.model,
-      tool: config.reviewer_provider,
-    },
+    versions: refused
+      ? { ...REFUSAL_VERSIONS }
+      : {
+          code: "stage-3",
+          prompt: verification.prompt_version,
+          policy: "closure-verification",
+          model: config.reviewer_model ?? config.model,
+          tool: config.reviewer_provider,
+        },
     usage: {
       input_tokens: verification.usage.input_tokens,
       output_tokens: verification.usage.output_tokens,
@@ -357,39 +432,18 @@ export async function verifyRound(args: {
       },
     ],
     retention: { class: "replay_retained", expires_at: null },
-    secrets,
+    secrets: args.secrets,
     excluded_paths: sealed.excluded_paths,
-    deterministic: false,
+    deterministic: refused,
     model_version_pinned: true,
     now: clock(),
   });
 
-  ledger.addRound({
-    round: state.round,
-    kind: state.kind,
-    attempt: args.attempt,
-    superseded_attempts: state.superseded,
-    review: null,
-    node_reviews: [],
+  args.ledger.addRound({
+    ...args.record,
     verification,
-    checks: args.checks,
     // Open after verification plus declined: everything a person still
     // has in front of them at the end of this round.
     remediable_findings: verification.open_keys.length + args.declines.length,
-    directly_verified: 0,
-    declines: args.declines,
-  });
-
-  return routeVerification({
-    verification,
-    toVerify,
-    openFindings: state.openFindings,
-    declines: ledger.declines.length,
-    handed: new Set(state.directions.map((direction) => direction.finding_key)),
-    remediationRound: state.remediationRound,
-    maxRounds: args.maxRounds,
-    spend: ledger.spend(),
-    budget: args.budget,
-    configPath: args.configPath,
   });
 }

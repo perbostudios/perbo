@@ -85,6 +85,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     redact: (text) => text,
     record: () => undefined,
     egress: new EgressLog([]),
+    holdsEgress: false,
     stop: (reason) => stops.push(reason),
     progress: () => undefined,
     rebrief: (threadId) => {

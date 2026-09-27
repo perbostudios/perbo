@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL } from "./defaults.js";
+import { DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, DEFAULT_OPENCODE_MODEL } from "./defaults.js";
 import { MODEL_PROVIDERS, createModel } from "./provider.js";
 
 /**
@@ -13,6 +13,7 @@ const DEFAULTS: Record<(typeof MODEL_PROVIDERS)[number], string> = {
   anthropic: DEFAULT_CLAUDE_MODEL,
   "claude-cli": DEFAULT_CLAUDE_MODEL,
   "codex-cli": DEFAULT_CODEX_MODEL,
+  "opencode-cli": DEFAULT_OPENCODE_MODEL,
 };
 
 let previousKey: string | undefined;
@@ -26,8 +27,8 @@ afterAll(() => {
 });
 
 describe("createModel", () => {
-  it("names three providers, and builds the transport each one names", () => {
-    expect([...MODEL_PROVIDERS]).toEqual(["anthropic", "claude-cli", "codex-cli"]);
+  it("names four providers, and builds the transport each one names", () => {
+    expect([...MODEL_PROVIDERS]).toEqual(["anthropic", "claude-cli", "codex-cli", "opencode-cli"]);
     for (const provider of MODEL_PROVIDERS) {
       expect(createModel(provider, { submitSchema }).provider).toBe(provider);
     }
@@ -66,5 +67,10 @@ describe("createModel's effort", () => {
       /claude-cli takes low, medium, high, xhigh, max, not ultra/,
     );
     expect(() => createModel("anthropic", { submitSchema, effort: "ultra" })).toThrow(/anthropic takes/);
+    // OpenCode takes no level at all, so any one is refused.
+    expect(() => createModel("opencode-cli", { submitSchema, effort: "low" })).toThrow(
+      /opencode-cli takes no effort level, not low/,
+    );
+    expect(createModel("opencode-cli", { submitSchema, effort: null }).provider).toBe("opencode-cli");
   });
 });

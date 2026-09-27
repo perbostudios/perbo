@@ -3,6 +3,7 @@ import {
   CriterionIdSchema,
   DECISION_CHOICES,
   EffortLevelSchema,
+  EgressQuestionKeySchema,
   ExecutorSkillsSchema,
   GraphEditSchema,
   MaterializationEntrySchema,
@@ -10,10 +11,12 @@ import {
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
+  RUN_VERDICTS,
   StandingProhibitedEntrySchema,
   TICKET_NAME_CAP,
   type DecisionChoice,
   type GraphEdge,
+  type RunVerdict,
   type SizeEstimate,
   type StandingProhibitedEntry,
   type VerificationKind,
@@ -29,6 +32,7 @@ import type {
 } from "@perbo/contracts";
 import type { ImpactReport, SpecField } from "@perbo/planning/browser";
 import { DriftFindingSchema, MAX_DRIFT_FINDINGS } from "@perbo/planning/browser";
+import type { DecisionOptionsVerdict } from "@perbo/planning/browser";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
 
 /**
@@ -71,7 +75,7 @@ const key = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/);
  * The most characters each field a person types their own words into holds,
  * in the request that carries it. The field itself holds them to it where they
  * type, from this same constant, so nothing they typed is refused when sent or
- * cut afterwards (D-NEW-nothing-shown-is-cut).
+ * cut afterwards (D-133).
  */
 export const TYPED_TEXT_MAX_CHARS = 12_000;
 /** The most characters a path or glob a person types holds. */
@@ -100,12 +104,12 @@ export type Afk = z.infer<typeof AfkSchema>;
 export const SettingsSchema = z.strictObject({
   name: z.string().trim().max(PERSON_NAME_MAX_CHARS).default(""),
   onboardingComplete: z.boolean().default(false),
-  executorProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
+  executorProvider: z.enum(["claude-cli", "codex-cli", "opencode-cli"]).default("claude-cli"),
   executorSkills: ExecutorSkillsSchema.default([]),
   executorModel: z.string().trim().min(1).max(100).default("claude-opus-5"),
   reviewerModel: z.string().trim().min(1).max(100).default("claude-opus-5"),
   reviewerProvider: z
-    .enum(["claude-cli", "codex-cli", "anthropic"])
+    .enum(["claude-cli", "codex-cli", "opencode-cli", "anthropic"])
     .default("claude-cli"),
   /**
    * How hard each role's model thinks, from the levels its catalog row offers
@@ -114,7 +118,16 @@ export const SettingsSchema = z.strictObject({
    */
   executorEffort: EffortLevelSchema.nullable().default(null),
   reviewerEffort: EffortLevelSchema.nullable().default(null),
-  draftingProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
+  draftingProvider: z.enum(["claude-cli", "codex-cli", "opencode-cli"]).default("claude-cli"),
+  /**
+   * The model the Architect's chat runs on, chosen from the catalog of the
+   * provider it was chosen on, which the chat runs on only while that is the
+   * planning's drafting provider (D-102). Null takes the Architect's rule:
+   * Claude Opus 5.5 where Claude Code's catalog offers it, and otherwise the
+   * planning's executor model.
+   */
+  architectProvider: z.enum(["claude-cli", "codex-cli", "opencode-cli"]).nullable().default(null),
+  architectModel: z.string().trim().min(1).max(100).nullable().default(null),
   /**
    * Minutes without tool activity before a run is stopped (D-096). The one
    * setting here that stops a run: nothing bounds how long one takes, what it
@@ -144,6 +157,8 @@ export const TaskModelsSchema = SettingsSchema.pick({
   reviewerProvider: true,
   reviewerModel: true,
   draftingProvider: true,
+  architectProvider: true,
+  architectModel: true,
   executorSkills: true,
 }).extend({
   executorEffort: EffortLevelSchema.nullable(),
@@ -153,6 +168,7 @@ export type TaskModels = z.infer<typeof TaskModelsSchema>;
 export const ModelProviderSchema = z.enum([
   "claude-cli",
   "codex-cli",
+  "opencode-cli",
   "anthropic",
 ]);
 export type ModelProvider = z.infer<typeof ModelProviderSchema>;
@@ -171,6 +187,7 @@ export const ModelCatalogSchema = z.strictObject({
   source: z.enum([
     "claude-code",
     "codex-app-server",
+    "opencode",
     "anthropic-api",
     "sample",
   ]),
@@ -405,7 +422,7 @@ export const InterviewEditSchema = z.strictObject({
   /** Its place in the plan's history, counting from 1: what an undo names. */
   n: z.number().int().min(1),
   author: z.enum(["you", "interview"]),
-  /** What `perbo edit` said the edit did, whole: it names every glob it was given (D-NEW-nothing-shown-is-cut). */
+  /** What `perbo edit` said the edit did, whole: it names every glob it was given (D-133). */
   summary: z.string().min(1),
   undone: z.boolean(),
   /** The edit this one undid, by its number, or null for an edit of its own. */
@@ -442,7 +459,7 @@ export const InterviewEntrySchema = z.strictObject({
     z.strictObject({ kind: z.literal("turn"), text }),
     /**
      * What the session said: a message past the limit is asked for again,
-     * condensed, and never cut to fit (D-NEW-nothing-shown-is-cut).
+     * condensed, and never cut to fit (D-133).
      */
     z.strictObject({ kind: z.literal("said"), text: z.string().trim().min(1).max(INTERVIEW_SAID_MAX_CHARS) }),
     /**
@@ -454,7 +471,7 @@ export const InterviewEntrySchema = z.strictObject({
       tool: z.string().min(1).max(200),
       /** The admission rule that refused it, as the runner names it. */
       rule: z.string().min(1).max(200),
-      /** The command or path refused, and why, whole (D-NEW-nothing-shown-is-cut). */
+      /** The command or path refused, and why, whole (D-133). */
       target: z.string().nullable(),
       reason: z.string().min(1),
     }),
@@ -463,7 +480,7 @@ export const InterviewEntrySchema = z.strictObject({
       kind: z.literal("tool"),
       tool: z.string().min(1).max(200),
       ok: z.boolean(),
-      /** What the tool reported, whole (D-NEW-nothing-shown-is-cut). */
+      /** What the tool reported, whole (D-133). */
       detail: z.string(),
       edit: InterviewEditSchema.nullable(),
     }),
@@ -527,7 +544,7 @@ export const InterviewEntrySchema = z.strictObject({
        * The tool's output the note is about — why a line of the chat did not
        * parse, a stopped chat's stderr, a process's error — whole and with no
        * length cap, shown behind an `i` after the sentence
-       * (D-NEW-nothing-shown-is-cut).
+       * (D-133).
        */
       output: z.string().trim().min(1).optional(),
       /**
@@ -714,7 +731,7 @@ export const EditingSessionSchema = z.strictObject({
    * sections, the plan as its ticket last moved and the scope this planning
    * holds — or null before they have reached it. The contract stays a tab of
    * the planning while the state is still this one, and goes once anything
-   * in it moves (D-NEW-basic-and-epic-flows).
+   * in it moves (D-138).
    * A fingerprint: nothing reads it but the comparison.
    */
   confirmed: z.string().min(1).max(64).nullable(),
@@ -723,7 +740,7 @@ export const EditingSessionSchema = z.strictObject({
    * was of, as `readingState` in `shared/contract-editing.ts` states it, or
    * null before one was recorded for the plan this planning holds. A basic
    * ticket's Confirm contract reads the plan against the spec only where the
-   * state has moved since (D-NEW-basic-and-epic-flows). A fingerprint:
+   * state has moved since (D-138). A fingerprint:
    * nothing reads it but the comparison.
    */
   read: z.string().min(1).max(64).nullable(),
@@ -731,7 +748,7 @@ export const EditingSessionSchema = z.strictObject({
    * How many paths the last impact check of this planning's draft found
    * outside its scope, or null before one was made for the plan it holds. A
    * flat plan offers the Impact pane only where it found some
-   * (D-NEW-basic-and-epic-flows).
+   * (D-138).
    */
   impact: z.number().int().nonnegative().nullable(),
   form: EditingFormSchema,
@@ -753,11 +770,11 @@ export const EditingSessionSchema = z.strictObject({
    */
   interviewSession: z.string().min(1).max(200).nullable().default(null),
   /**
-   * Which provider's id that is (SCP-312). The two keep separate namespaces,
+   * Which provider's id that is (SCP-312). Each keeps a namespace of its own,
    * so a planning whose drafting provider has changed since starts a session
    * of its own rather than continuing one the new provider has never heard of.
    */
-  interviewProvider: z.enum(["claude", "codex"]).nullable().default(null),
+  interviewProvider: z.enum(["claude", "codex", "opencode"]).nullable().default(null),
   /** The model that session was started on, which the chat's header names. */
   interviewModel: z.string().min(1).max(100).nullable(),
 });
@@ -1122,7 +1139,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * The person is now on this planning's contract. Recorded on the session
    * as its `lastPane`, which is where the planning reopens
    * (D-130), with the state they reached it at
-   * as its `confirmed` (D-NEW-basic-and-epic-flows);
+   * as its `confirmed` (D-138);
    * not an edit, so it moves no revision.
    */
   z.strictObject({
@@ -1155,7 +1172,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   /**
    * The plan read against the spec it was drafted from, on the way from an
    * epic's plan to its contract and at a basic ticket's confirm of its
-   * contract (D-128, D-NEW-basic-and-epic-flows): where the two no longer
+   * contract (D-128, D-138): where the two no longer
    * promise the same thing, and the ways to close each difference.
    * `driftDismiss`, which no page asks for, dismisses the findings at the
    * current state as `perbo drift --dismiss` does, so the same reading is not
@@ -1365,7 +1382,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("sync"), ...reference }),
   /**
    * The merge press on a ticket whose run retained its branch without
-   * publishing (D-NEW-publish-a-retained-branch-later): the branch is pushed
+   * publishing (D-136): the branch is pushed
    * and its pull request opened, then opened in the browser.
    */
   z.strictObject({ kind: z.literal("publish"), ...reference }),
@@ -1390,12 +1407,39 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     ),
     digest: z.string().length(64),
   }),
+  /**
+   * The Architect's answers to the findings the ticket's last review left for
+   * a person, by each finding's key (D-135): the host runs
+   * `perbo options` on the ticket's own models, which prints the answers kept
+   * for that review and asks a model only for a finding not yet answered.
+   * The keys name findings the command checks against the review, and nothing
+   * here becomes an argument but them (ADR-0023 §4). What comes back is words
+   * for the person to pick; a picked one goes down in `decide` exactly as
+   * typed words do.
+   */
+  z.strictObject({
+    kind: z.literal("decisionOptions"),
+    ...reference,
+    findings: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1),
+  }),
   z.strictObject({
     kind: z.literal("verdict"),
     ...reference,
     findingKey: z.string().regex(/^[a-f0-9]{64}$/),
     decision: z.enum(["endorse", "override", "accept", "reject"]),
     note: text,
+  }),
+  /**
+   * The person's answer to the question a live run is waiting on, whether the
+   * executor may reach a host off the allow-list (D-137).
+   * Answered directly rather than as a job: the run it answers holds the
+   * ticket's lane, and it is that run that acts on the answer.
+   */
+  z.strictObject({
+    kind: z.literal("egressAnswer"),
+    ...reference,
+    question: EgressQuestionKeySchema,
+    allow: z.boolean(),
   }),
   z.strictObject({ kind: z.literal("cancel"), jobId: identifier }),
   z.strictObject({ kind: z.literal("openRepository"), repoId: identifier }),
@@ -1422,7 +1466,7 @@ export interface Repository {
   prohibitedPaths?: string[];
 }
 export interface Provider {
-  id: "claude" | "codex" | "anthropic";
+  id: "claude" | "codex" | "opencode" | "anthropic";
   name: string;
   installed: boolean;
   authenticated: boolean;
@@ -1452,6 +1496,8 @@ export interface Job {
   editing?: { sessionId: string; operationId: string } | undefined;
   /** A run's publication choice: whether it pushes and opens a pull request once the review gate passes. */
   publish?: boolean | undefined;
+  /** A run that completed on a verdict for the person: the outcome its CLI reported. */
+  outcome?: RunVerdict | undefined;
 }
 export interface TaskRow {
   repoId: string;
@@ -1519,6 +1565,8 @@ const JobUpdateSchema = z.object({
   kind: z.string(), label: z.string(), state: z.enum(["running", "stopping", "completed", "failed", "cancelled", "interrupted"]),
   startedAt: z.string(), endedAt: z.string().nullable(), log: z.string().max(80_000), error: z.string().nullable(), result: z.unknown(),
   editing: z.object({ sessionId: identifier, operationId: identifier }).optional(),
+  publish: z.boolean().optional(),
+  outcome: z.enum(RUN_VERDICTS).optional(),
 });
 export const PowerStateSchema = z.strictObject({
   holding: z.boolean(),
@@ -1670,12 +1718,6 @@ export interface DecisionQuestion {
    * none where the question takes the person's words for a principle alone.
    */
   choices: readonly DecisionChoice[];
-  options: {
-    title: string;
-    detail: string;
-    recommended?: boolean;
-    metadata?: string[];
-  }[];
 }
 /** What one card or row can say about a ticket's work without opening it (S4, S5). */
 export interface TaskSummary {
@@ -1696,7 +1738,7 @@ export interface UsageWindow {
   resetsAt: string | null;
 }
 export interface UsageProvider {
-  id: "claude" | "codex" | "anthropic";
+  id: "claude" | "codex" | "opencode" | "anthropic";
   name: string;
   role: string | null;
   /** Signed in on this machine, whether or not the provider reports a window. */
@@ -1785,7 +1827,9 @@ export interface ReplyMap {
   publish: Job;
   principle: Job;
   decide: Job;
+  decisionOptions: DecisionOptionsVerdict;
   verdict: Job;
+  egressAnswer: null;
   cancel: null;
   openRepository: null;
   openWorktree: null;
@@ -1818,7 +1862,7 @@ export const CHANGED = "perbo:changed";
 export const CLOSE_REQUEST = "perbo:close-request";
 export const CLOSE_RESPONSE = "perbo:close-response";
 export const CLOSE_CANCEL = "perbo:close-cancel";
-/** Why the editor could not save before closing, whole: the host's own words (D-NEW-nothing-shown-is-cut). */
+/** Why the editor could not save before closing, whole: the host's own words (D-133). */
 export const CloseResponseSchema = z.strictObject({ token: identifier, ok: z.boolean(), error: z.string().nullable() });
 declare global {
   interface Window {

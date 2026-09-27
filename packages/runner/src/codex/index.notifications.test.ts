@@ -30,6 +30,7 @@ function attempt(limits: Record<string, number> = {}, root: string | null = "roo
     redact: (text) => text,
     record: (item) => recorded.push(item),
     egress: new EgressLog([]),
+    holdsEgress: false,
     stop: (reason, detail) => stops.push({ reason, detail }),
     progress: (line) => lines.push(line),
     rebrief: (threadId) => rebriefs.push(threadId),

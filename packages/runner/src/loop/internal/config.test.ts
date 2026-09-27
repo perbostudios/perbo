@@ -25,3 +25,28 @@ describe("each role's effort in the run configuration", () => {
     expect(refused.error?.issues[0]?.message).toBe("claude-cli takes low, medium, high, xhigh, max, not ultra");
   });
 });
+
+describe("OpenCode as the run's executor and reviewer (D-134)", () => {
+  it("runs `opencode` on OpenCode Zen's Claude Opus 5 where the configuration names neither", () => {
+    expect(TicketRunConfigSchema.parse({ ...base, agent_provider: "opencode-cli" })).toMatchObject({
+      agent_binary: "opencode",
+      model: "opencode/claude-opus-5",
+    });
+    expect(TicketRunConfigSchema.parse({ ...base, reviewer_provider: "opencode-cli" }).reviewer_provider).toBe("opencode-cli");
+  });
+
+  it("takes no effort level for OpenCode, and says so", () => {
+    const refused = TicketRunConfigSchema.safeParse({
+      ...base,
+      agent_provider: "opencode-cli",
+      effort: "low",
+      reviewer_provider: "opencode-cli",
+      reviewer_effort: "high",
+    });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues.map((issue) => issue.message)).toEqual([
+      "opencode-cli takes no effort level, not low",
+      "opencode-cli takes no effort level, not high",
+    ]);
+  });
+});

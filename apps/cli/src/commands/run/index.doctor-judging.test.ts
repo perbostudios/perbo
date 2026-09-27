@@ -71,7 +71,7 @@ async function doctor(repo: string, json: boolean): Promise<{ text: string; code
     argv: doctorArgs(repo, json),
     streams: sinks,
     cwd: process.cwd(),
-    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
+    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable), claudeModels: () => Promise.resolve([]) },
   });
   return { text: sinks.out(), code };
 }

@@ -94,7 +94,7 @@ describe("impactView", () => {
     expect(view.index).toMatchObject({ read: true, commit: "abc1234" });
   });
 
-  it("writes how many paths it found outside the scope on the planning, which the rail offers Impact by (D-NEW-basic-and-epic-flows)", async () => {
+  it("writes how many paths it found outside the scope on the planning, which the rail offers Impact by (D-138)", async () => {
     const repo = repository();
     const recorded: [string, number][] = [];
     const found = deps(repo, session(["src/main.ts"]));

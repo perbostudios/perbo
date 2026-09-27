@@ -90,14 +90,28 @@ export type ScriptedStep =
     }
   /** An assistant message that is only words — what the executor's account arrives as. */
   | { step: "text"; text: string; agent?: ScriptedAgent }
-  /** Run the `PreToolUse` hook from the invocation's own `--settings` file. */
+  /**
+   * Run the `PreToolUse` hook from the invocation's own `--settings` file.
+   *
+   * `reply` then gives the executor the hook's answer as the binary does: a
+   * refusal comes back as an error `tool_result` carrying the hook's reason,
+   * and anything else as a `tool_result` saying the call ran.
+   */
   | {
       step: "hook";
       id: string;
       tool: string;
       input: Record<string, unknown>;
       agent?: ScriptedAgent;
+      reply?: boolean;
     }
+  /**
+   * The hook started first and the call's `tool_use` block written only
+   * `tool_use_after_ms` later, while the hook still holds the call: the stream
+   * the runner reads running behind the hook. The hook's answer then comes
+   * back as `reply` gives it.
+   */
+  | { step: "hook_first"; id: string; tool: string; input: Record<string, unknown>; tool_use_after_ms: number }
   /** The tool's result, as a `user` message — the first event that follows the hook. */
   | { step: "tool_result"; id: string; text: string; is_error?: boolean; agent?: ScriptedAgent }
   /** A `system` event, which is emitted while the hook is still running. */
@@ -324,7 +338,69 @@ if (behaviour.kind === "scripted") {
         tool_use_id: step.id,
         ...(step.agent ? { agent_id: step.agent.id, agent_type: step.agent.type } : {}),
       });
-      execFileSync("/bin/sh", ["-c", hookCommand()], { input, encoding: "utf8" });
+      const printed = execFileSync("/bin/sh", ["-c", hookCommand()], { input, encoding: "utf8" }).trim();
+      if (step.reply) {
+        const answer = printed.length > 0 ? JSON.parse(printed).hookSpecificOutput : null;
+        const refused = answer !== null && answer.permissionDecision === "deny";
+        emit({
+          type: "user",
+          ...child,
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: step.id,
+                content: refused ? answer.permissionDecisionReason : "ran",
+                is_error: refused,
+              },
+            ],
+          },
+        });
+      }
+    } else if (step.step === "hook_first") {
+      const dir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "fake-hook-"));
+      writeFileSync(join(dir, "in.json"), JSON.stringify({
+        session_id: "fake",
+        cwd: process.cwd(),
+        hook_event_name: "PreToolUse",
+        tool_name: step.tool,
+        tool_input: step.input,
+        tool_use_id: step.id,
+      }));
+      // Started and left running: the files carry its input and its answer,
+      // so nothing here waits on the event loop while it holds the call.
+      require("node:child_process").spawn(
+        "/bin/sh",
+        ["-c", hookCommand() + ' < "$D/in.json" > "$D/out.json"; touch "$D/done"'],
+        { env: { ...process.env, D: dir }, stdio: "ignore", detached: true },
+      ).unref();
+      const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      pause(step.tool_use_after_ms);
+      emit({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: step.id, name: step.tool, input: step.input }],
+          usage: { input_tokens: 7, output_tokens: 2 },
+        },
+      });
+      while (!existsSync(join(dir, "done"))) pause(20);
+      const printed = readFileSync(join(dir, "out.json"), "utf8").trim();
+      require("node:fs").rmSync(dir, { recursive: true, force: true });
+      const answer = printed.length > 0 ? JSON.parse(printed).hookSpecificOutput : null;
+      const refused = answer !== null && answer.permissionDecision === "deny";
+      emit({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: step.id,
+              content: refused ? answer.permissionDecisionReason : "ran",
+              is_error: refused,
+            },
+          ],
+        },
+      });
     } else if (step.step === "tool_result") {
       emit({
         type: "user",

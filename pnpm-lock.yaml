@@ -129,6 +129,9 @@ importers:
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@perbo/model':
+        specifier: workspace:*
+        version: link:../../packages/model
       '@perbo/test-support':
         specifier: workspace:*
         version: link:../../tooling/test-support

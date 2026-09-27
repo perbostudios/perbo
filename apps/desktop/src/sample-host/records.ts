@@ -1254,7 +1254,7 @@ export const driftRecords = new Map<string, DriftVerdict>();
 /**
  * One try at reading a sample plan against its spec, and the wait between
  * tries of one that did not run, as the host tries `perbo drift` until it
- * runs (D-NEW-basic-and-epic-flows). A try throws where the reading does not
+ * runs (D-138). A try throws where the reading does not
  * run — here, a spec that cannot be read, as `perbo drift` fails on one.
  * Tests replace either, to make a try fail or the wait instant.
  */
@@ -1269,7 +1269,7 @@ export const sampleReadings = {
  * drafted — on a basic ticket's contract page or in an epic's Graph pane — as
  * `perbo drift --dismiss` reads it off the edit log in `<KEY>.draft.json`:
  * the chat's edits are not here, and a re-draft empties it for its ticket.
- * A dismissal is refused for a ticket in it (D-NEW-basic-and-epic-flows).
+ * A dismissal is refused for a ticket in it (D-138).
  */
 export const handEdited = new Set<string>();
 /**
@@ -1934,7 +1934,12 @@ export function sampleCatalog(provider: ModelProvider): ModelCatalog {
         ]
       : provider === "anthropic"
         ? [["claude-opus-5", "Claude Opus 5", "Sample API model", []]]
-        : [
+        : provider === "opencode-cli"
+          ? [
+              ["opencode/big-pickle", "Big Pickle", "opencode/big-pickle", []],
+              ["opencode/claude-opus-5", "Claude Opus 5", "opencode/claude-opus-5", []],
+            ]
+          : [
             ["claude-opus-5", "Opus 5", "Sample · best for everyday, complex tasks", [...EFFORT_LEVELS["claude-cli"]]],
             ["claude-opus-5-5", "Opus 5.5", "Sample · the chat's model where it is offered", [...EFFORT_LEVELS["claude-cli"]]],
             ["claude-fable-5-1", "Fable 5.1", "Sample · hardest and longest-running tasks", [...EFFORT_LEVELS["claude-cli"]]],
@@ -2216,7 +2221,7 @@ export function forgetDrift(key: string, only: string | null): void {
  * Land a reading on the planning it was of, as the host does: nothing is
  * recorded on a plan the person went past — dismissed or approved — while it
  * was read (D-128), and the state the asker read at is recorded only where no
- * turn overlapped the reading (D-NEW-basic-and-epic-flows).
+ * turn overlapped the reading (D-138).
  */
 export function driftLanded(
   id: string,

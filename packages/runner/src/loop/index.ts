@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import {
   configPath,
+  egressQuestionsFileName,
   limitFor,
   limitsForCredential,
   STORE_DIRNAME,
@@ -37,6 +38,7 @@ import { recordDecisions, type DecidedFinding } from "../decisions.js";
 import { checkRound } from "./internal/check.js";
 import { publish, publishRelevel, type Delivery } from "./internal/deliver.js";
 import { execute } from "./internal/execute.js";
+import { RunEgressQuestions } from "./internal/egress.js";
 import { sealRound } from "./internal/seal.js";
 import { levelBeforeExecutor, levelBeforePublish } from "./internal/level.js";
 import { reviewRound } from "./internal/review.js";
@@ -109,10 +111,13 @@ export {
 } from "./internal/retained.js";
 
 export {
+  AGENT_DEFAULTS,
+  AGENT_PROVIDERS,
   BaseSourceSchema,
   MergedTicketContextSchema,
   TicketRunConfigSchema,
   guardProhibitedPaths,
+  type AgentProvider,
   type BaseSource,
   type TicketRunConfig,
 } from "./internal/config.js";
@@ -319,6 +324,20 @@ async function runLockedTicket(
     progress,
   });
 
+  /**
+   * D-137: the run's one question about the network,
+   * the refusals remembered on the ticket, and the hosts a person allowed.
+   */
+  const egressQuestions = new RunEgressQuestions({
+    recordPath: join(config.state_root, egressQuestionsFileName(contract.ticket_id)),
+    ticketId: contract.ticket_id,
+    ticketKey: config.ticket_key,
+    configPath,
+    profile,
+    progress,
+    clock,
+  });
+
   let outcome: TicketRunResult["outcome"] = "terminated";
   let detail = "";
   const decided = args.decided ?? [];
@@ -505,6 +524,7 @@ async function runLockedTicket(
         agent: agentRunner,
         progress,
         tally: (running) => tally.attempt(running),
+        egress: egressQuestions.forAttempt(attempt_id),
       });
       if ("next" in executed) {
         state = applyStep(state, executed);
@@ -695,10 +715,8 @@ async function runLockedTicket(
           ledger,
           bundles,
           attemptId: attempt_id,
-          attempt,
           sealed,
           gating,
-          checks,
           declines,
           toClose,
           widened,

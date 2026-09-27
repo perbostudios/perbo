@@ -8,7 +8,7 @@ const scratch = mkdtempSync(join(tmpdir(), "perbo-stored-review-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe("a stored review that does not parse", () => {
-  it("names five of what it could not read, then how many more (D-NEW-nothing-shown-is-cut)", () => {
+  it("names five of what it could not read, then how many more (D-133)", () => {
     const store = join(scratch, ".perbo");
     mkdirSync(reviewsDirIn(store), { recursive: true });
     writeFileSync(join(reviewsDirIn(store), "rev_broken.review.json"), JSON.stringify({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8 }));

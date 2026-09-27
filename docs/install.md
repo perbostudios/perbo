@@ -10,7 +10,7 @@ leaves your machine.
 |---|---|
 | Node.js 22 or later, and Git | the setup script and the CLI need both; nothing else is compiled on your machine |
 | The package manager the repository you point Perbo at installs with (`npm`, or the `pnpm`, `yarn` or `bun` it names) | each worktree is installed with it, so it must be on PATH |
-| Claude Code and/or Codex CLI, signed in (`claude auth login` / `codex login`) | Perbo runs whichever you choose, on your own subscription login; API keys are optional |
+| Claude Code and/or Codex CLI, signed in (`claude auth login` / `codex login`), or OpenCode 2 (`brew install anomalyco/tap/opencode-v2`) | Perbo runs whichever you choose, per role, on your own subscription login, API keys optional; OpenCode runs on `OPENCODE_API_KEY`, or on its free models without one |
 | `gh`, signed in (`gh auth login`) | pull requests are opened and read through your own GitHub credential |
 
 `perbo doctor` checks all of this against a repository and names whatever is missing.
@@ -66,8 +66,9 @@ program; `.perbo/` in any repository you used it on is yours, and stays until yo
 Nothing reaches Perbo: there is no Perbo account, database or cloud service, and neither the CLI
 nor the desktop sends telemetry. Two destinations receive anything, each under your own credential:
 
-1. **Your model provider.** The executor and the reviewer each call a model under your own login,
-   and what they send is what they read: the plan, the change, the checks, and the files in the
+1. **Your model provider.** The executor and the reviewer each call a model under your own login —
+   on OpenCode, OpenCode Zen under `OPENCODE_API_KEY`, or with no key for its free models — and
+   what they send is what they read: the plan, the change, the checks, and the files in the
    worktree they open. Materialized secrets are excluded from every artifact by content hash, but
    a model that reads a worktree containing one has read it.
 2. **GitHub**, through your own `git` and `gh`. `perbo run --publish` pushes the branch and opens

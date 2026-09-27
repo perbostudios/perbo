@@ -12,7 +12,7 @@ type Editor = ReturnType<typeof useContractEditing>;
  * another added — held in the editing session's form, so what is typed
  * survives leaving the page. The ticket's own editor and a basic ticket's
  * contract inside planning both edit criteria here
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  *
  * `onCommit` is told each time a criterion is saved or deleted, which is
  * where a caller that writes every change through at once does so. `marks`

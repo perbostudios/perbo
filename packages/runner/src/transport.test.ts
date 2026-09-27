@@ -268,7 +268,7 @@ describe("what the record says", () => {
 
 /**
  * The provider's own words are tool output, recorded and shown whole
- * (D-NEW-nothing-shown-is-cut): the evidence a failure was read from and the
+ * (D-133): the evidence a failure was read from and the
  * sentence that named its reset, however long either runs.
  */
 describe("the transport's words, whole", () => {

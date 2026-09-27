@@ -338,7 +338,7 @@ describe("contract verification approval", () => {
     ));
   });
 
-  it("holds a new allowed path to what a path holds where it is typed, and saves it without a refusal (D-NEW-nothing-shown-is-cut)", async () => {
+  it("holds a new allowed path to what a path holds where it is typed, and saves it without a refusal (D-133)", async () => {
     const context = await contextFor([criterion()]);
     const requests = captureEdits(context);
     mount(

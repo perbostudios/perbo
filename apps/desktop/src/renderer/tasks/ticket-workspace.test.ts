@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { TicketStateSchema } from "@perbo/contracts";
-import { homeOrder, homeRows, homeTally, homeTone, projectTicket, unseenAttention } from "./ticket-workspace.js";
+import { JOURNEY_END, homeOrder, homeRows, homeTally, homeTone, projectTicket, unseenAttention } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
+import { egressQuestionLine, egressSettledLine } from "@perbo/contracts";
 import type { Job } from "../../shared/protocol.js";
 
 async function fixture() {
@@ -146,6 +147,131 @@ describe("ticket workspace projection", () => {
     const result = projectTicket({ jobs: [], refreshingRepos: [] }, row, detail);
     expect(result.recoverable).toBe(true);
     expect(result.primary.label).toBe("See the stopped run");
+  });
+
+  /**
+   * The wheel of a stopped run stays at the stage the run had reached: from
+   * the stage lines its log printed, and from the attempts on record where the
+   * log holds none — never back at the contract, where the state a stop leaves
+   * the ticket at would put it.
+   */
+  it("keeps the wheel where a run stopped at review round 2 had taken it", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    const reviewed = detail.attempts[0]!;
+    if (reviewed.review === null) throw new Error("the fixture's first attempt must carry its review");
+    // Round 2 of review is the runner's round 1, after a refinement round.
+    const second = { ...reviewed, id: "second", round: 1, bundles: [], verification: null };
+    detail.attempts = [reviewed, second];
+    const log =
+      "  worktree /tmp/w on ayo/task at 123\n  executing\n  sealing the change set\n  check test: passed\n  review round 0\n" +
+      "  remediation round 1 of at most 6\n  sealing the change set\n  check test: passed\n  review round 1\n";
+    for (const state of ["failed", "independent_review"] as const) {
+      row.ticket.state = state;
+      // Stopped by the person, and ended on its own.
+      for (const ended of ["cancelled", "failed"] as const) {
+        workspace.jobs = [{ ...job, state: ended, log }];
+        expect(projectTicket(workspace, row, detail).stage, `${state}, ${ended}, from the log`).toBe(4);
+        workspace.jobs = [{ ...job, state: ended, log: "" }];
+        expect(projectTicket(workspace, row, detail).stage, `${state}, ${ended}, from the records`).toBe(4);
+      }
+    }
+    // Stopped after round 2's checks and before its review: the checks.
+    detail.attempts = [reviewed, { ...second, review: null, reviewDecision: null }];
+    expect(projectTicket(workspace, row, detail).stage).toBe(3);
+    // Stopped in the refinement round, as the log says.
+    workspace.jobs = [{ ...job, state: "cancelled", log: log.split("  sealing")[0] + "  sealing the change set\n  check test: passed\n  review round 0\n  remediation round 1 of at most 6\n" }];
+    expect(projectTicket(workspace, row, detail).stage).toBe(6);
+    // Nothing on record says: the stage the ticket's state names.
+    workspace.jobs = [];
+    detail.attempts = [];
+    row.ticket.state = "verifying";
+    expect(projectTicket(workspace, row, detail).stage).toBe(3);
+  });
+
+  it("offers Continue the task only after the person's own stop, taken or still settling, or Perbo closing", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    row.ticket.state = "failed";
+    const offered = Object.fromEntries(
+      (["cancelled", "stopping", "failed", "interrupted"] as const).map((state) => {
+        workspace.jobs = [{ ...job, state }];
+        return [state, projectTicket(workspace, row, detail).continuable];
+      }),
+    );
+    expect(offered).toEqual({ cancelled: true, stopping: true, failed: false, interrupted: true });
+    // No run on record, and a later command of another kind: the run's own stop is what counts.
+    workspace.jobs = [];
+    expect(projectTicket(workspace, row, detail).continuable).toBe(false);
+    workspace.jobs = [{ ...job, state: "cancelled" }, { ...job, id: "export", kind: "export", label: "Export", state: "completed" }];
+    expect(projectTicket(workspace, row, detail).continuable).toBe(true);
+    workspace.jobs = [{ ...job, state: "cancelled" }, { ...job, id: "again", state: "failed" }];
+    expect(projectTicket(workspace, row, detail).continuable).toBe(false);
+  });
+
+  /**
+   * A run the CLI ended on a verdict for the person completed, paused for
+   * them: yellow from the moment it ends, through the window where the records
+   * still say the stage the run started at, and never red; a run that did not
+   * complete is a failure and a stop.
+   */
+  it("reads a run ended on a verdict as paused for the person, yellow across the refresh window and never red", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    const read = (state: string, jobs: Job[], refreshing: boolean) => {
+      row.ticket.state = state as typeof row.ticket.state;
+      workspace.jobs = jobs;
+      workspace.refreshingRepos = refreshing ? [row.repoId] : [];
+      return projectTicket(workspace, row, detail);
+    };
+    const running = { ...job, state: "running" as const, endedAt: null, error: null };
+    const verdict = { ...job, state: "completed" as const, error: null, outcome: "escalated" as const };
+    // Running; ended, as the CLI's stage lines left the records; the records read; read again.
+    const window = [
+      read("provisioning", [running], false),
+      read("provisioning", [verdict], true),
+      read("provisioning", [verdict], false),
+      read("changes_requested", [verdict], true),
+      read("changes_requested", [verdict], false),
+    ];
+    expect(window.map((each) => each.tone)).toEqual([null, "yellow", "yellow", "yellow", "yellow"]);
+    for (const each of window.slice(1)) {
+      expect(each).toMatchObject({ recoverable: false, paused: true, stage: 5 });
+      expect(each.screen).not.toBe("stopped");
+    }
+    // Once nothing is being read, the card's way in is the answer.
+    for (const each of [window[2]!, window[4]!]) expect(each.primary).toEqual({ label: "Answer", view: "decisions" });
+    // Exit 3: the run did not complete, and it is a stop.
+    const failed = read("provisioning", [{ ...job, state: "failed" }], false);
+    expect(failed).toMatchObject({ tone: "red", recoverable: true, paused: false, screen: "stopped" });
+    // A run that completed on no verdict for the person is not a pause.
+    expect(read("provisioning", [{ ...verdict, outcome: undefined }], true).paused).toBe(false);
+    // A verdict run whose ticket has since moved on is not a pause.
+    expect(read("pr_open", [verdict], false)).toMatchObject({ paused: false, tone: "green" });
+    // A journey that ended is past every step, whatever the loop's last stage line named.
+    const reviewed = { ...verdict, outcome: undefined, log: "  executing\n  check test: passed\n  review round 1\n" };
+    for (const state of ["pr_open", "merged", "closed"]) expect(read(state, [reviewed], false).stage, state).toBe(JOURNEY_END);
+    // A loop stopped after review round 2 still sits at the review.
+    expect(read("failed", [{ ...reviewed, state: "cancelled" }], false).stage).toBe(4);
+  });
+
+  /**
+   * A run still going that waits on the person's answer about a host off the
+   * allow-list is paused for them: yellow, the wheel at the decisions, until
+   * the answer is printed, when the wheel goes back to the step the log names.
+   */
+  it("sits a run waiting on an unlisted host's answer at the decisions, and back at its step once answered", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    row.ticket.state = "executing";
+    const question = { key: "egq_0123456789abcdef", host: "registry.example.com", command: "curl https://registry.example.com" };
+    const ran = "  worktree /tmp/w on ayo/task at 123\n  executing\n";
+    const asked = ran + `  ${egressQuestionLine(question)}\n`;
+    const read = (log: string, state: Job["state"] = "running") => {
+      workspace.jobs = [{ ...job, state, endedAt: null, error: null, log }];
+      return projectTicket(workspace, row, detail);
+    };
+    expect(read(asked)).toMatchObject({ asking: true, stage: 5, tone: "yellow" });
+    expect(read(asked + `  ${egressSettledLine(question, "allowed")}\n`)).toMatchObject({ asking: false, stage: 2, tone: null });
+    expect(read(ran)).toMatchObject({ asking: false, stage: 2, tone: null });
+    // Stopped while it waits: the stop, not the question.
+    expect(read(asked, "stopping")).toMatchObject({ asking: false, tone: "red" });
   });
 
   it("withholds recovery while a completed command's canonical records are being refreshed", async () => {

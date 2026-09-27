@@ -13,7 +13,7 @@ export type RetainedBranch =
   | { branch: null; outcome: null; refusal: string };
 
 /**
- * D-NEW-publish-a-retained-branch-later: the branch a ticket's last run
+ * D-136: the branch a ticket's last run
  * retained without publishing, and the outcome the ticket records for that
  * run, read from the ticket alone. `perbo run --publish-retained` refuses with
  * `refusal`, and the desktop's merge screen says it.

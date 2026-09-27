@@ -46,7 +46,7 @@ const SPEC_SETTLES_IN_MS = 300;
 /**
  * How many times running the session is asked to condense words of its own
  * that the chat's record cannot hold before the host stops asking and says so
- * (D-NEW-nothing-shown-is-cut). Two, so a session that answers the first ask
+ * (D-133). Two, so a session that answers the first ask
  * with a message still too long is asked once more rather than for ever.
  */
 const CONDENSE_ASKS = 2;
@@ -341,7 +341,7 @@ export class InterviewHost {
       // in prose, and is kept only to say why a session that never started did
       // not start.
       onStderr: (text) => {
-        // A log excerpt, and one that starts on a whole line (D-NEW-nothing-shown-is-cut).
+        // A log excerpt, and one that starts on a whole line (D-133).
         stderr = logTail(stderr + text);
       },
       // The child itself has gone while something it started still holds its
@@ -370,7 +370,7 @@ export class InterviewHost {
             : {
                 kind: "note",
                 // What happened in one sentence, and what the chat's process
-                // said behind its `i`, redacted and whole (D-NEW-nothing-shown-is-cut).
+                // said behind its `i`, redacted and whole (D-133).
                 text: `The chat stopped with code ${String(code)}.`,
                 ...(stderr.trim() ? { output: redact(stderr.trim()) } : {}),
               },
@@ -599,10 +599,11 @@ export class InterviewHost {
   }
 
   /**
-   * The model this planning's chat starts on (`interviewModelFor`, D-102). Only
-   * Claude Code offers the chat's own model, so only its catalog is read: the
+   * The model this planning's chat starts on (`interviewModelFor`, D-102): the
+   * Architect model the person chose, and otherwise the Architect's rule. Only
+   * Claude Code offers the rule's own model, so only its catalog is read: the
    * one the model pickers last read, or else read here once and kept. A catalog
-   * that cannot be read offers nothing, and the chat starts on the planning's
+   * that cannot be read offers nothing, and the rule falls to the planning's
    * executor model, which is the model its spec is drafted with.
    */
   private async chatModel(models: TaskModels): Promise<string> {
@@ -681,7 +682,7 @@ export class InterviewHost {
       // message; this is what makes that true of a model that does not.
       if (this.afterTheNote.has(id)) return;
       // Words the chat's record cannot hold are asked for again, condensed,
-      // rather than cut to fit (D-NEW-nothing-shown-is-cut).
+      // rather than cut to fit (D-133).
       if (this.condenseAgain(id, { kind: "said", text: read.text })) return;
       // Nor before the note, in the moment between the write and the reading
       // that hands the spec over: a closing line arriving there would be said
@@ -785,7 +786,7 @@ export class InterviewHost {
   /**
    * Hand words of the session's own back to it where the record cannot hold
    * them, as a turn asking for them again, condensed without losing what they
-   * say (D-NEW-nothing-shown-is-cut); true where they are not to be said.
+   * say (D-133); true where they are not to be said.
    *
    * The turn is the host's own sentence, naming only lengths, so nothing the
    * session wrote becomes anything but the words it is asked to shorten

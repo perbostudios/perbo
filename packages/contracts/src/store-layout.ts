@@ -70,6 +70,19 @@ export function attemptsPath(ticketId: string): StorePath {
   return [STATE_DIR, attemptsFileName(ticketId)];
 }
 
+/**
+ * One ticket's egress questions: each unlisted host a run put to a person and
+ * the answer (D-137). The runner asks and waits on it,
+ * and `perbo verdict --egress` answers on it.
+ */
+export function egressQuestionsPath(ticketId: string): StorePath {
+  return [STATE_DIR, egressQuestionsFileName(ticketId)];
+}
+
+export function egressQuestionsFileName(ticketId: string): string {
+  return `${ticketId}.egress.json`;
+}
+
 export function ticketsDir(): StorePath {
   return [TICKETS_DIR];
 }
@@ -95,6 +108,14 @@ export function draftPath(key: string): StorePath {
  */
 export function driftPath(key: string): StorePath {
   return [TICKETS_DIR, `${key}.drift.json`];
+}
+
+/**
+ * The answers the Architect offered to the findings a review routed to a
+ * person, kept for that review (D-135).
+ */
+export function decisionOptionsPath(key: string): StorePath {
+  return [TICKETS_DIR, `${key}.options.json`];
 }
 
 /** The approach a graphed plan or a spec with No-Gos was admitted with. */

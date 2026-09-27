@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { planNodes } from "@perbo/contracts";
-import { keepsPersonsTitle, openDrafts, problemsHoldApproval, promiseOf } from "../shared/contract-editing.js";
+import { keepsPersonsTitle, openDrafts, problemsHoldApproval, promiseOf, turnHoldsApproval } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
 import { heldRepository, heldTicket, isRun } from "../shared/jobs.js";
 import { isArchivable, notArchivable, notCallable } from "../shared/archive.js";
@@ -38,6 +38,7 @@ import {
   doctorArgs,
   doctorConfig,
   editArgs,
+  egressAnswerArgs,
   graphEditArgs,
   principleArgs,
   publishArgs,
@@ -47,6 +48,7 @@ import {
   verdictArgs,
   writePrivate,
 } from "./jobs/commands.js";
+import { requireSuccess } from "./process.js";
 import type { Cli } from "./cli.js";
 import type { Changes } from "./changes.js";
 import type { ContractEditing, EditingOwner } from "../shared/contract-editing.js";
@@ -55,6 +57,7 @@ import type { InterviewHost } from "./interview/host.js";
 import type { JobRunner } from "./jobs/runner.js";
 import type { ChangeMarks } from "./plan/marks.js";
 import type { DriftReadings } from "./plan/drift.js";
+import { decisionOptions } from "./tickets/options.js";
 import type { ModelCatalogs } from "./providers/catalogs.js";
 import type { PowerHold } from "./power.js";
 import type { Profile, RegisteredRepository } from "./profile/store.js";
@@ -101,6 +104,8 @@ export interface HostModules {
   marks: ChangeMarks;
   drift: DriftReadings;
   catalogs: ModelCatalogs;
+  /** The wait between tries of a reading that did not run; tests make it instant. */
+  readingPause(ms: number): Promise<void>;
   usageProbe: { claude: typeof claudeUsage; codex: typeof codexUsage };
   snapshot(): Promise<Snapshot>;
   providers(): ReturnType<typeof probeProviders>;
@@ -520,7 +525,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       const saved = saveSpec(m.planDeps, repo, request);
       // The picker and the title bar name the planning by its spec's title,
       // and its contract stays a tab while its spec's sections do
-      // (D-NEW-basic-and-epic-flows), all read
+      // (D-138), all read
       // off the drafts list: a save that landed has that list read again.
       if (saved.conflicting.length === 0)
         m.changes.changed(false, { kind: "editing", sessionId: request.id });
@@ -584,7 +589,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         { repo, key: request.key, kind: request.kind, label: "Open the pull request" },
         async (job, run) => {
           // The merge press on a ticket whose run retained its branch
-          // (D-NEW-publish-a-retained-branch-later): the CLI pushes it and
+          // (D-136): the CLI pushes it and
           // opens its pull request, holding the person's credential as a run
           // does, under the configuration a run of this ticket is given with
           // publishing on — a person merges, whatever the repository says.
@@ -626,6 +631,37 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     ),
     run: scoped<"run">((repo, request) => loop(m, repo, request)),
     decide: scoped<"decide">((repo, request) => loop(m, repo, request)),
+    // D-135: answered here rather than as a job, so it holds
+    // nothing a decision or a run waits on; the card offers the typed field
+    // while it is asked.
+    decisionOptions: scoped<"decisionOptions">((repo, request) =>
+      decisionOptions(
+        {
+          cli: m.cli,
+          catalogs: m.catalogs,
+          models: (repoId, key) => m.profile.state.taskModels[repoId + ":" + key] ?? settings(),
+          pause: (ms) => m.readingPause(ms),
+        },
+        repo,
+        request.key,
+        request.findings,
+      ),
+    ),
+    // D-137: the question a live run is waiting on,
+    // answered directly and never as a job — the run holds the ticket's lane,
+    // and it is the run that acts on the answer, reading it off the ticket's
+    // record. The CLI refuses a question already answered, one whose window
+    // passed, and one no live run is waiting on, and its words are what the
+    // person is shown.
+    egressAnswer: scoped<"egressAnswer">(async (repo, request) => {
+      requireSuccess(
+        await m.cli.run(
+          egressAnswerArgs(request.key, request.question, request.allow, settings().name || "Local user"),
+          repo,
+        ),
+      );
+      return null;
+    }),
   }) as RequestHandlers<RouteContext>;
 }
 
@@ -901,7 +937,7 @@ async function replan(
   // The plan drafted here was read by its drafting, as one Generate plan
   // drafts is (D-128): recorded as read at the state it was drafted at, so its
   // first confirm unchanged reads nothing again, and a criterion edited first
-  // is what the confirm's reading judges (D-NEW-basic-and-epic-flows).
+  // is what the confirm's reading judges (D-138).
   const drafted = draftedReading((id) => m.registry.lookup(id), m.editing.read(opened.id));
   if (drafted !== null) m.editing.recordRead(opened.id, drafted);
   return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
@@ -944,9 +980,14 @@ function loop(
           false);
   // Refused, before anything starts, while a planning over the ticket records
   // problems open: an open problem holds approving for either shape, and the
-  // pages are not the only way to ask (D-NEW-basic-and-epic-flows).
+  // pages are not the only way to ask (D-138). And while
+  // the chat on one owes the person a turn, which may still be moving the plan
+  // approving would freeze (D-102).
   if (request.kind === "run" && request.approve) {
-    const held = problemsHoldApproval(m.profile.state.editingSessions, repo.id, request.key);
+    const records = m.profile.state.editingSessions;
+    const held =
+      problemsHoldApproval(records, repo.id, request.key) ??
+      turnHoldsApproval(records, repo.id, request.key, (id) => m.interviews.isWorking(id));
     if (held !== null) throw new Error(held);
   }
   const job = m.jobs.start(
@@ -998,7 +1039,8 @@ function loop(
         m.drift.forget(repo.id, request.key, null);
       }
       if (run.signal.aborted) return;
-      await run.invoke(runArgs(request.key, path, resumeFrom));
+      // A run that ends on a verdict for the person completes, paused for them.
+      await run.invoke(runArgs(request.key, path, resumeFrom), { verdict: true });
     },
   );
   // A filed ticket whose loop starts again is back on Home, and stays there

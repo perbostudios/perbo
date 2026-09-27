@@ -101,6 +101,8 @@ export class AttemptCeilings {
   private costMicros = 0;
   /** When the executor's stream last showed a tool call or a tool result. */
   private lastActivity: number;
+  /** How many of the executor's calls are held for a person's answer right now. */
+  private heldForPerson = 0;
   private breach: CeilingBreach | null = null;
 
   constructor(limits: LimitsTable, clock: () => number = Date.now, options: CeilingOptions = {}) {
@@ -179,6 +181,25 @@ export class AttemptCeilings {
   }
 
   /**
+   * A call is held while a person is asked whether its host may be reached
+   * (D-137). The executor is waiting on the person, not
+   * hung, so the stall window does not run while any call is held; the wait
+   * has its own bound, the same window, and ends the attempt as
+   * `unlisted_egress_host` rather than `stalled`. The window starts again from
+   * the moment the last held call is let go.
+   */
+  holdForPerson(): () => void {
+    this.heldForPerson += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.heldForPerson -= 1;
+      this.lastActivity = this.clock();
+    };
+  }
+
+  /**
    * Called on a timer; these are the two nothing on the stream can reach.
    *
    * The stall window runs from the last tool activity rather than from the
@@ -189,7 +210,7 @@ export class AttemptCeilings {
     const now = this.clock();
     return (
       this.test("attempt_wall_clock_ms", now - this.startedAt) ??
-      this.test("attempt_stall_ms", now - this.lastActivity)
+      (this.heldForPerson > 0 ? null : this.test("attempt_stall_ms", now - this.lastActivity))
     );
   }
 

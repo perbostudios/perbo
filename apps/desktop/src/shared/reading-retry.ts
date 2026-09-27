@@ -3,7 +3,7 @@
  * did not run — no credential, the network, a crash, a print that is not a
  * verdict: it is tried once, and again after each pause, so four tries over
  * about fourteen seconds before the reading fails and the page says so
- * (D-NEW-basic-and-epic-flows). Both hosts read it from here.
+ * (D-138). Both hosts read it from here.
  */
 export const READING_RETRY_PAUSES_MS: readonly number[] = [2_000, 4_000, 8_000];
 

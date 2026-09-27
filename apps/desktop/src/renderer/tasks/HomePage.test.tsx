@@ -89,7 +89,7 @@ describe("the archive's cost column", () => {
   });
 });
 
-describe("the search a person types (D-NEW-nothing-shown-is-cut)", () => {
+describe("the search a person types (D-133)", () => {
   it("is held to what an archive search holds where it is typed, on Home and in the archive, and exports without a refusal", async () => {
     const { workspace } = archived(null);
     const sent: Request[] = [];
@@ -196,8 +196,9 @@ describe("a Home card", () => {
     }
     const stopped = card("Ticket 3 failed").querySelector(".task-card-description > span")!;
     expect(stopped.className).toBe("");
-    // A failed ticket with nothing running for it is a stopped run, whatever the journal still holds.
-    expect(stopped.textContent).toBe("The run stopped. Its work and evidence have been retained — carry on with the task, plan it again, or delete it.");
+    // A failed ticket with nothing running for it is a stopped run, whatever the journal still holds, and
+    // with no stop of the person's on record it is not carried on from.
+    expect(stopped.textContent).toBe("The run stopped. Its work and evidence have been retained — plan it again or delete it.");
     // No outcome to say, or none read yet: the line keeps its height with a space, so the card does not move.
     cleanup();
     const workspace = board([["merged", pr], ["executing", null]]);
@@ -211,7 +212,7 @@ describe("a Home card", () => {
     for (const name of ["Ticket 0 merged", "Ticket 1 executing"])
       expect(card(name).querySelector(".task-card-outcome")!.textContent).toBe("\u00a0");
     // Whole, wrapping onto more lines at the card's other end rather than cut
-    // short there (D-NEW-nothing-shown-is-cut).
+    // short there (D-133).
     const rule = /\.task-card-description > \.task-card-outcome \{([^}]*)\}/.exec(
       readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"),
     )?.[1];
@@ -382,6 +383,17 @@ describe("a Home card", () => {
     expect(pill("Ticket 3 executing")).toBe("loop stopped");
     expect(pill("Ticket 4 merged")).toBe("completed");
     expect(pill("Ticket 5 changes_requested")).toBe("decisions required");
+  });
+
+  it("fills the ring of a pull request waiting on the merge decision, every step done", () => {
+    home(board([["pr_open", pr], ["changes_requested", null]]));
+    const ring = (name: string): HTMLElement => card(name).querySelector<HTMLElement>(".stage-ring")!;
+    expect(ring("Ticket 0 pr_open").getAttribute("aria-label")).toBe("Every step done");
+    expect(ring("Ticket 0 pr_open").getAttribute("style")).toContain("var(--ink) 0 100%,");
+    expect(ring("Ticket 1 changes_requested").getAttribute("style")).not.toContain("var(--ink) 0 100%,");
+    expect(card("Ticket 0 pr_open").querySelector(".stage-pill")!.textContent).toBe("review ready");
+    // A loop paused for the person sits at its step.
+    expect(ring("Ticket 1 changes_requested").getAttribute("aria-label")).toBe("Stage 5 of 6");
   });
 
   it("calls only a decided merge completed: a cancelled or rolled-back ticket a run carries keeps its stage and its ring", () => {

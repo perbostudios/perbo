@@ -538,7 +538,7 @@ it("lands a plan Start over drafts with none of the problems of the plan it repl
   expect(readingsOf(key)).toHaveLength(before);
 });
 
-it("tries a reading again until it runs, and stops trying once it is cancelled, landing nothing (D-NEW-basic-and-epic-flows)", async () => {
+it("tries a reading again until it runs, and stops trying once it is cancelled, landing nothing (D-138)", async () => {
   const { id, key } = await draftedFromSpec("reading-cancelled-between-tries", [
     "A signup queues exactly one email.",
     "A failed send is retried once.",
@@ -569,7 +569,7 @@ it("tries a reading again until it runs, and stops trying once it is cancelled, 
   }
 });
 
-it("records what the try that ran found, where the spec could not be read on the first (D-NEW-basic-and-epic-flows)", async () => {
+it("records what the try that ran found, where the spec could not be read on the first (D-138)", async () => {
   const slug = "reading-readable-later";
   const { id, key } = await draftedFromSpec(slug, [
     "A signup queues exactly one email.",
@@ -634,6 +634,33 @@ it("refuses to approve a ticket while a planning over it records problems open, 
   // Dismissed at the command line, which the chat's edits allow: none is open, and it approves.
   await sampleBridge.request({ kind: "driftDismiss", id });
   expect(editing.read(id).drift).toBeNull();
+  const run = await approve();
+  held.push(run);
+  expect(runs()).toHaveLength(1);
+  expect(ticket().approved_at).not.toBeNull();
+});
+
+it("refuses to approve a ticket while the chat on a planning over it owes a turn, naming it, and approves it once the turn is over (D-102)", async () => {
+  const { id, key } = await draftedFromSpec("approve-mid-turn", ["A signup queues exactly one email."]);
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const runs = () => snapshot.jobs.filter((each) => each.kind === "run" && each.key === key);
+  const { digest } = await sampleBridge.request({ kind: "detail", repoId, key });
+  const approve = () =>
+    sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: true, resumeFrom: null });
+  // A turn in flight, as the host counts one: sent, and not yet answered.
+  await sampleBridge.request({ kind: "interviewTurn", id, text: "take your time" });
+  expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(id);
+  await expect(approve()).rejects.toThrow(
+    `${key} is not approved while the chat is still talking on its planning: confirm it once the chat ` +
+      "has finished this turn.",
+  );
+  expect(runs()).toHaveLength(0);
+  expect(ticket().approved_at).toBeNull();
+  // The turn over, the approval is the person's.
+  await vi.waitFor(
+    async () => expect((await sampleBridge.request({ kind: "snapshot" })).working ?? []).not.toContain(id),
+    { timeout: 5000 },
+  );
   const run = await approve();
   held.push(run);
   expect(runs()).toHaveLength(1);

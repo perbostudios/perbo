@@ -4,13 +4,13 @@
 
 # Perbo
 
-Perbo runs a loop from an issue to a reviewed pull request: an executor — Claude Code or Codex — writes the change in a worktree of its own, an independent reviewer checks it against the plan you approved, fixing what it can and sending back only what needs a person, and a pull request carries what's left for you to merge.
+Perbo runs a loop from an issue to a reviewed pull request: an executor — Claude Code, Codex or OpenCode — writes the change in a worktree of its own, an independent reviewer checks it against the plan you approved, fixing what it can and sending back only what needs a person, and a pull request carries what's left for you to merge.
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licence-Apache--2.0-555" alt="Apache-2.0"></a>
 </p>
 
-- **Runs on your machine.** It uses your checkout, your tools and your Claude Code or Codex login. There is no Perbo server and no account to create.
+- **Runs on your machine.** It uses your checkout, your tools and your Claude Code or Codex login, or OpenCode. There is no Perbo server and no account to create.
 - **You approve the plan first.** Every ticket carries its outcome, how each part is proven and which files are in scope. Once you approve it, it can't change under you.
 - **The reviewer is independent.** It sees the approved plan, the diff and your repository's own checks. It never sees the agent's transcript or its account of what it did. Its prompts are [published in full](packages/review/PROMPTS.md).
 - **It fixes what it can.** A finding the agent can close goes back to the agent on the same branch, round after round. You see what's left.
@@ -22,7 +22,7 @@ Perbo runs a loop from an issue to a reviewed pull request: an executor — Clau
 ### Prerequisites
 
 - Node.js 22 or later, pnpm 9 (`corepack enable pnpm`) and Git
-- Claude Code or Codex, installed and signed in
+- Claude Code or Codex, installed and signed in, or OpenCode 2, installed
 - The GitHub CLI, signed in (`gh auth login`), for opening pull requests
 
 Perbo isn't published to a registry yet, so you build it from this repository.

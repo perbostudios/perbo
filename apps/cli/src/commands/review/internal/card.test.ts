@@ -5,7 +5,7 @@ import { WIDTH } from "../../../text.js";
 import { renderArtifact } from "./card.js";
 
 /**
- * The review card never cuts what a person reads (D-NEW-nothing-shown-is-cut):
+ * The review card never cuts what a person reads (D-133):
  * a check's command and summary, and a finding's location, go under their
  * row, wrapped, where they do not fit it.
  */

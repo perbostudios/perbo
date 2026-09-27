@@ -255,7 +255,7 @@ test("no process execution in the reviewer, with no exception", async () => {
   );
 });
 
-test("no process execution in the model package, except in its two named transports", async () => {
+test("no process execution in the model package, except in its three named transports", async () => {
   await refuses("packages/model/src/m.ts", ARGV, "No process execution in the model package");
   await refuses("packages/model/src/index.ts", ARGV, "No process execution in the model package");
   await refuses("packages/model/src/anthropic.ts", ARGV, "No process execution in the model package");
@@ -266,6 +266,8 @@ test("no process execution in the model package, except in its two named transpo
   );
   await allows("packages/model/src/claude-cli.ts", ARGV);
   await allows("packages/model/src/codex-cli.ts", ARGV);
+  await allows("packages/model/src/opencode.ts", ARGV);
+  await refuses("packages/model/src/nested/opencode.ts", ARGV, "No process execution in the model package");
 });
 
 // --------------------------------------------------------------------------
@@ -319,6 +321,7 @@ test("the reviewer and the model carry the ban too, transports included", async 
   await refuses("packages/model/src/m.ts", GH_ARGV, ONE_MODULE);
   await refuses("packages/model/src/claude-cli.ts", GIT_ARGV, ONE_MODULE);
   await refuses("packages/model/src/codex-cli.ts", GH_ARGV, ONE_MODULE);
+  await refuses("packages/model/src/opencode.ts", GIT_ARGV, ONE_MODULE);
 });
 
 // --------------------------------------------------------------------------

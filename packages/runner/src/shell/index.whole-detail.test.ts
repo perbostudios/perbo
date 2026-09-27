@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readCommandLine, resolveScope } from "./index.js";
 
 /**
- * The line a refusal is about is quoted whole (D-NEW-nothing-shown-is-cut).
+ * The line a refusal is about is quoted whole (D-133).
  *
  * Every reason the guard gives ends with the segment it read, and that segment
  * is the executor's own command: tool output a person reads to know what was

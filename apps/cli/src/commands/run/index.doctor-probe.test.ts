@@ -226,7 +226,9 @@ async function doctor(
       }),
     streams,
     cwd: process.cwd(),
-    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
+    // The catalog a proposal's model is read from, which offers nothing
+    // here: the fake binary on PATH is the reviewer, and it answers a probe.
+    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable), claudeModels: () => Promise.resolve([]) },
   });
   return { stdout: streams.out(), stderr: streams.err(), code };
 }

@@ -19,7 +19,8 @@ import type {
 } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
 import type { Route } from "../shell/route.js";
-import { confirmRoute } from "./panes.js";
+import { chatStillTalking, confirmRoute } from "./panes.js";
+import { useChatTalking } from "./turn-hold.js";
 
 /**
  * The Graph pane (D-100, D-101, SCP-316): the plan's execution graph, the size
@@ -59,6 +60,7 @@ export function GraphPane({
   const [startingOver, setStartingOver] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const talking = useChatTalking(workspace, session?.id);
 
   /**
    * The records this pane reads are written while a run moves, so the pane
@@ -118,11 +120,12 @@ export function GraphPane({
   // Where {@link confirmRoute} says every way there goes; the shortcut takes
   // the same way, so it cannot skip the reading.
   //
-  // Not while the chat is mid-turn on a plan not yet approved: what approving
-  // freezes is what the contract holds when it is read (ADR-0016), and a turn
-  // in flight may still be moving this plan. Checked here rather than only on
-  // the button, because the shortcut reaches this without passing one.
-  const thinking = !view?.approved && (workspace.working ?? []).includes(session?.id ?? "");
+  // Not while the chat is still talking on a plan not yet approved, from the
+  // moment a turn is sent until it is over (D-102): a turn in flight may still
+  // be moving this plan, and the confirm reads the plan the turn leaves.
+  // Checked here rather than only on the button, and the shortcut is null
+  // meanwhile, because the shortcut reaches this without passing one.
+  const thinking = !view?.approved && talking;
   const confirm = (): void => {
     if (view === undefined || busy || action.isPending || thinking) return;
     navigate(confirmRoute({ repoId, key: view.key, sessionId: session?.id, approved: view.approved, basic: false }));
@@ -566,7 +569,7 @@ const ZOOM_MAX = 2.5;
  *
  * Read-only on the contract, where the graph is read and not curated: it pans
  * and zooms, and nothing on it selects, draws or removes
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  */
 function Canvas({
   view,
@@ -940,7 +943,7 @@ function Node({
 /**
  * The plan's graph on the contract of an epic, in place of the criteria list:
  * read, panned and zoomed, and changed only on the Graph pane
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  */
 export function ContractGraph({ repoId, ticketKey }: { repoId: string; ticketKey: string }) {
   const graph = useGraph(repoId, ticketKey);
@@ -1039,7 +1042,7 @@ function ApproveBar({
           Start over from the spec…
         </button>
         {/* The way onward says it is waiting rather than going quiet. */}
-        {thinking && <span className="small muted">Waiting for the chat to finish this turn…</span>}
+        {thinking && <span className="small muted">{chatStillTalking("Confirm the plan")}</span>}
         <Button variant="primary" disabled={busy || thinking} onClick={onApprove}>
           {view.approved ? "Open the contract" : "Confirm the plan"}
         </Button>

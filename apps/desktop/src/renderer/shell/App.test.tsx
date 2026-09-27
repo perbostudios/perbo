@@ -256,6 +256,7 @@ describe("UI v2", () => {
               { label: "Weekly · Fable", usedPercent: 36, resetsAt: weekly.toISOString() },
             ] },
             { id: "codex", name: "Codex", role: "default reviewer", connected: true, plan: "Pro", windows: [{ label: "5-hour limit", usedPercent: 82, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }], detail: "Read from the Codex app-server." },
+            { id: "opencode", name: "OpenCode", role: null, connected: true, plan: null, windows: null, detail: "OpenCode reports what each run cost; it reports no plan window." },
             { id: "anthropic", name: "Anthropic API", role: null, connected: false, plan: null, windows: null, detail: "No API key in the app environment." },
           ],
           notes: ["webstore · PRB-2: The attempts record could not be read."],
@@ -283,6 +284,12 @@ describe("UI v2", () => {
     ]);
     expect(claude.querySelector(".connection-dot")?.classList.contains("disconnected")).toBe(false);
     expect(screen.getByText("Anthropic API").closest("section")!.querySelector(".connection-dot")?.classList.contains("disconnected")).toBe(true);
+    // OpenCode reports no plan window: its card is connected, draws no meter
+    // and says why, rather than reading as a provider that failed to answer.
+    const opencode = screen.getByText("OpenCode").closest("section")!;
+    expect(opencode.querySelector(".connection-dot")?.classList.contains("disconnected")).toBe(false);
+    expect(within(opencode).queryAllByRole("meter")).toEqual([]);
+    expect(within(opencode).getByText("OpenCode reports what each run cost; it reports no plan window.")).toBeTruthy();
     expect(document.querySelector(".usage-facts")?.textContent).toContain("$2.14");
     expect(screen.getByText(/1 unpriced attempt/)).toBeTruthy();
     // D-096: a ticket counted here stopped short of finishing, which is a
@@ -365,7 +372,7 @@ describe("UI v2", () => {
     );
   });
 
-  it("reaches the contract as one of the planning's tabs, and goes back to the plan by its tabs (D-NEW-basic-and-epic-flows)", async () => {
+  it("reaches the contract as one of the planning's tabs, and goes back to the plan by its tabs (D-138)", async () => {
     // Confirming a plan leads here from the Graph, and the contract is where a
     // person reads what approving would freeze. It is a tab of the planning,
     // so not being ready to approve is a click on the tab of the pane to

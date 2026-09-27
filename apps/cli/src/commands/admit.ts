@@ -154,7 +154,7 @@ const DEFAULT_PREFIX = "PRB";
 export type DraftProvider = ModelProvider;
 
 /** The drafting providers this build offers. */
-const DRAFT_PROVIDERS = ["anthropic", "claude-cli", "codex-cli"] as const;
+const DRAFT_PROVIDERS = ["anthropic", "claude-cli", "codex-cli", "opencode-cli"] as const;
 
 const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/;
 
@@ -259,7 +259,7 @@ const ADMISSION_FIELDS = {
   /** The spec's title is the name a person gave the work: the ticket takes it as it stands (D-127). */
   keepTitle: z.boolean(),
   provider: z.enum(DRAFT_PROVIDERS, {
-    error: "--provider must be 'anthropic', 'claude-cli' or 'codex-cli'",
+    error: "--provider must be 'anthropic', 'claude-cli', 'codex-cli' or 'opencode-cli'",
   }),
   model: ModelIdSchema.nullable(),
   manualReviewer: z.string().nullable(),
@@ -2636,7 +2636,7 @@ const wholeChange = (checks: readonly unknown[]): readonly unknown[] =>
  * ticket's history a function of log wording.
  */
 export function statesObserved(result: {
-  rounds: ReadonlyArray<{ checks: readonly unknown[]; review: unknown }>;
+  rounds: ReadonlyArray<{ checks: readonly unknown[]; review: unknown; verification: unknown }>;
   outcome: string;
 }): Array<{ to: Parameters<typeof transition>[1]; note: string }> {
   const path: Array<{ to: Parameters<typeof transition>[1]; note: string }> = [
@@ -2662,12 +2662,21 @@ export function statesObserved(result: {
           : "no deterministic checks are configured for this repository",
     });
   }
-  // Round 0 carries the one independent review; a remediation round carries a
-  // verification of that review's findings, not a second review (D-061). So
-  // the stage is claimed when any round was reviewed, or a ticket that was
-  // approved after remediation has no legal path to pr_open and strands.
+  // Round 0 carries the one independent review, and a later round is not
+  // reviewed again (D-061): its closure verification, or the scope refusal the
+  // loop records as one, is what moves it from `verifying` to
+  // `independent_review`, as its bundle records. So the stage is claimed where
+  // any round was reviewed or verified, whatever the round's executor changed:
+  // a run that continues a review's findings has no round 0 of its own, and its
+  // verified rounds are what moved it there.
+  const verified = result.rounds.filter((round) => round.verification).length;
   if (result.rounds.some((round) => round.review)) {
     path.push({ to: "independent_review", note: "reviewed independently" });
+  } else if (verified > 0) {
+    path.push({
+      to: "independent_review",
+      note: `${verified} remediation round${verified === 1 ? "" : "s"} judged by closure verification`,
+    });
   }
 
   switch (result.outcome) {

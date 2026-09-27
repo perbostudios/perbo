@@ -98,7 +98,7 @@ import { allowedPathsSentence, prohibitedPathsSentence } from "./shell/index.js"
  * could not connect to the call it makes.
  */
 /**
- * v14 (D-NEW-nothing-shown-is-cut): the account's request states the most the
+ * v14 (D-133): the account's request states the most the
  * record holds, so the executor writes it to fit rather than past it.
  */
 export const EXECUTOR_PROMPT_VERSION = "executor_v14";

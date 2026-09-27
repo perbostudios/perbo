@@ -45,7 +45,7 @@ import { ModelIdSchema, recordedEdits } from "./admit.js";
  * the plan and its spec may no longer promise the same thing, and this is the
  * reading that says where. The exit code is 0 whatever it finds; the desktop
  * holds approving the contract while a difference it records is open
- * (D-NEW-basic-and-epic-flows).
+ * (D-138).
  *
  * The verdict is kept beside the ticket against two hashes — the spec's bytes
  * and the plan's promise texts — and holds while neither moves. Admission
@@ -62,7 +62,7 @@ export const DriftInputSchema = z.strictObject({
   target: StoreTargetSchema,
   key: z.string().min(1, "drift requires a ticket key, e.g. PRB-1"),
   provider: z.enum(MODEL_PROVIDERS, {
-    error: "--provider must be 'anthropic', 'claude-cli' or 'codex-cli'",
+    error: "--provider must be 'anthropic', 'claude-cli', 'codex-cli' or 'opencode-cli'",
   }),
   model: ModelIdSchema.nullable(),
   /** Record going on to the contract with the differences open. */
@@ -136,7 +136,7 @@ export async function drift(
     // Only a plan nobody has edited by hand since it was drafted: the
     // interview's edits move the spec with the plan under its guard (D-128),
     // and a person's do not, so after one the problems are resolved by
-    // answering them or by editing (D-NEW-basic-and-epic-flows). The edit
+    // answering them or by editing (D-138). The edit
     // log beside the ticket says who made each edit since the draft.
     const edits = readDraftSnapshot(dir, key);
     if (edits === null) {

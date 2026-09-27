@@ -71,6 +71,12 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  *   retitled spec. The CLI gates nothing on it; the desktop holds approving
  *   the contract while a difference it records is open
  *   ([D-128](../../../../docs/11-open-decisions.md)).
+ * - `PRB-118.options.json` is the answers the Architect offered to the findings
+ *   the ticket's last review routed to a person, kept for that review so the
+ *   decision page reads them back rather than spending again. Read and written
+ *   only through `@perbo/planning`'s `decision-options-record.ts`, by
+ *   `perbo options`; nothing gates on it
+ *   ([D-135](../../../../docs/11-open-decisions.md)).
  */
 
 /** Lives beside the tickets and is not one; `listTickets` skips it by name. */
@@ -115,13 +121,14 @@ export const contractPathFor = contractPath;
 /** Where a ticket's approach lives, for a caller that reports the file. */
 export const approachPathFor = approachPath;
 
-/** A ticket file by name: not the contract, the draft, the approach or the sequence. */
+/** A ticket file by name: not the contract, the draft, the approach, a record kept beside it or the sequence. */
 const isTicketFile = (name: string) =>
   name.endsWith(".json") &&
   !name.endsWith(".contract.json") &&
   !name.endsWith(".draft.json") &&
   !name.endsWith(".approach.json") &&
   !name.endsWith(".drift.json") &&
+  !name.endsWith(".options.json") &&
   name !== SEQUENCE_FILE;
 
 /**

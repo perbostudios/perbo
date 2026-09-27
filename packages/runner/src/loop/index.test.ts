@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { hostname } from "node:os";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -20,6 +20,7 @@ import { BundleStore } from "../bundle.js";
 import { parkedWait } from "../attempts.js";
 import { RunLockedError, acquireRunLock, readRunLock, runLockPath } from "../lock.js";
 import { TicketRunConfigSchema, runTicket } from "./index.js";
+import { judgedOnRecord } from "./internal/continuation.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../transport.js";
 import { fakeAgent } from "../test-support/fake-agent.js";
 import {
@@ -3402,6 +3403,140 @@ describe("a scope escape handed back to a remediation round", () => {
     expect(result.detail).toContain("widened the change set");
     expect(result.detail).toContain("test/extra.test.ts");
     expect(result.detail).toContain("writes are admitted only under");
+  }, 90_000);
+
+  it("records a continued run's widened round as judged by its scope refusal", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    // Run 1 gets no remediation round, so its review is the one on record with
+    // the scope finding open: the state a `changes_requested` ticket is in.
+    config.max_remediation_rounds = 0;
+    const first = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: agentDouble((worktree) => {
+          mkdirSync(join(worktree, "src"), { recursive: true });
+          writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 1;\n");
+        }).run as never,
+        review: (async (input: Record<string, unknown>) => ({
+          artifact: makeReview({
+            review_id: "rev_0000000000000196",
+            decision: "remediable" as const,
+            findings: [scopeFinding],
+            head_commit: input.head_commit as string,
+            changeset_id: (input.changeset as { changeset_id: string }).changeset_id,
+          }),
+          bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+        })) as never,
+      },
+    });
+    expect(first.outcome).toBe("remediation_exhausted");
+
+    // Run 2 continues from that review, and its one round widens.
+    config.max_remediation_rounds = 6;
+    const second = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: agentDouble((worktree) => {
+          mkdirSync(join(worktree, "test"), { recursive: true });
+          writeFileSync(join(worktree, "test", "extra.test.ts"), "// a file nobody asked for\n");
+        }).run as never,
+        review: (async () => {
+          throw new Error("a continued run does not review the commit again");
+        }) as never,
+        verify: (async () => {
+          throw new Error("the widened round is refused before anything verifies it");
+        }) as never,
+      },
+    });
+
+    expect(second.outcome).toBe("changes_requested");
+    expect(second.detail).toContain("widened the change set");
+    // Measured against the change set the judged commit already held: only
+    // what this round added is named.
+    expect(second.detail).toContain("test/extra.test.ts");
+    expect(second.detail).not.toContain("src/feature.ts");
+    expect(second.rounds).toHaveLength(1);
+    const round = second.rounds[0]!;
+    expect(round.kind).toBe("remediate");
+    expect(round.review).toBeNull();
+    // The refusal is the round's verification: the scope failure in the
+    // stop's own words, and the finding it was given still open.
+    expect(round.verification).toMatchObject({
+      deterministic_failure: second.detail,
+      deterministic_failure_kind: "scope",
+      all_closed: false,
+      open_keys: [scopeFinding.key],
+      cost_micros: 0,
+      cost_basis: "not_incurred",
+    });
+
+    const store = new BundleStore({ root: config.bundle_root, retainContext: true });
+    const bundle = store
+      .forTicket(contract.ticket_id)
+      .find((entry) => entry.subject_id === `cv_${round.attempt.attempt_id}`);
+    expect(bundle?.kind).toBe("review");
+    expect(bundle?.transitions).toEqual([
+      expect.objectContaining({ from: "VERIFYING", to: "INDEPENDENT_REVIEW", reason: "closures still open" }),
+    ]);
+    expect(bundle?.inputs).toMatchObject({
+      deterministic_failure: second.detail,
+      findings_given: scopeFinding.key,
+      findings_closed: "",
+      findings_open: scopeFinding.key,
+    });
+    expect(JSON.parse(store.artifact(bundle!, "verification.json")!)).toEqual(round.verification);
+    // It judged no tree, so it names the commit it refused under its own key
+    // and anchors no continuation; nothing ran, and no model is named.
+    expect(bundle?.inputs["head_commit"]).toBeUndefined();
+    expect(bundle?.inputs["refused_head_commit"]).toBe(round.attempt.head_commit);
+    expect(bundle?.versions).toMatchObject({ model: "none", prompt: "none" });
+    expect(bundle?.replayability).toBe("exact");
+    // The review stays on record, anchored on the commit it judged, with the
+    // refusal's open set: a later run finds the review and sees the branch has
+    // moved past what was judged.
+    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id });
+    expect(judged?.review.review_id).toBe("rev_0000000000000196");
+    expect(judged?.head_commit).toBe(first.final_review!.target.head_commit);
+    expect(judged?.head_commit).not.toBe(round.attempt.head_commit);
+    expect(judged?.openKeys).toEqual(new Set([scopeFinding.key]));
+
+    // Run 3 on the widened branch: nothing judged that commit, so the run
+    // reviews it afresh rather than continuing from the refusal.
+    const reviewed: unknown[] = [];
+    const third = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: agentDouble((worktree) => {
+          rmSync(join(worktree, "test", "extra.test.ts"));
+        }).run as never,
+        review: (async (input: Record<string, unknown>) => {
+          reviewed.push(input);
+          return {
+            artifact: makeReview({
+              review_id: "rev_0000000000000197",
+              decision: "approve" as const,
+              findings: [],
+              head_commit: input.head_commit as string,
+              changeset_id: (input.changeset as { changeset_id: string }).changeset_id,
+            }),
+            bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+          };
+        }) as never,
+        verify: (async () => {
+          throw new Error("a widened branch is reviewed afresh, never verified against the refusal");
+        }) as never,
+      },
+    });
+    expect(reviewed).toHaveLength(1);
+    expect(third.rounds[0]!.kind).toBe("execute");
+    expect(third.detail).not.toContain("widened the change set");
+    expect(third.outcome).toBe("approved");
   }, 90_000);
 });
 

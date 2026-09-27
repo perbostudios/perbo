@@ -1,5 +1,6 @@
 import {
   DEFAULT_ENV_ALLOW_LIST,
+  OPENCODE_API_KEY_ENV,
   PROHIBITED_ACTIONS,
   PermissionProfileSchema,
   scrubEnvironment,
@@ -201,6 +202,17 @@ const CODEX_NETWORK_ALLOW_LIST = [
 ] as const;
 
 /**
+ * What an OpenCode executor reaches in place of Anthropic's hosts: OpenCode
+ * Zen, which serves every model an OpenCode role is let call, and the model
+ * catalogue OpenCode reads as it starts (D-134).
+ */
+const OPENCODE_NETWORK_ALLOW_LIST = [
+  "opencode.ai",
+  "models.dev",
+  ...DEFAULT_NETWORK_ALLOW_LIST.filter((host) => !host.endsWith("anthropic.com")),
+] as const;
+
+/**
  * One host name as a repository writes it: dot-separated labels of letters,
  * digits and inner hyphens, 253 characters at most. Exact, so a wildcard, a
  * scheme, a path, a port or a space is not one.
@@ -227,9 +239,16 @@ export const NetworkAllowListSchema = z.array(
 /** Pinned by the runner and never read from repository configuration (ADR-0030). */
 export const PINNED_PROVIDER_BASE_URL = "https://api.anthropic.com";
 
+/** The model host each executor is pinned to; a repository's configuration cannot set it. */
+const PROVIDER_BASE_URLS = {
+  "claude-cli": PINNED_PROVIDER_BASE_URL,
+  "codex-cli": "https://chatgpt.com/backend-api",
+  "opencode-cli": "https://opencode.ai/zen/v1",
+} as const;
+
 export function buildPermissionProfile(args: {
   worktree: string;
-  provider?: "claude-cli" | "codex-cli";
+  provider?: "claude-cli" | "codex-cli" | "opencode-cli";
   allow?: readonly string[];
   deny?: readonly string[];
   /** Hosts the repository adds to its provider's defaults (`network_allow_list`). */
@@ -241,14 +260,20 @@ export function buildPermissionProfile(args: {
     command_allow_list: [...(args.allow ?? DEFAULT_COMMAND_ALLOW_LIST)],
     command_deny_list: [...(args.deny ?? DEFAULT_COMMAND_DENY_LIST)],
     path_jail_root: args.worktree,
-    env_allow_list: [...DEFAULT_ENV_ALLOW_LIST],
+    // OpenCode Zen's key, by name, is the one credential an OpenCode executor
+    // is passed; every other executor authenticates from its own login.
+    env_allow_list: [...DEFAULT_ENV_ALLOW_LIST, ...(args.provider === "opencode-cli" ? [OPENCODE_API_KEY_ENV] : [])],
     network_allow_list: [
       ...new Set([
-        ...(args.provider === "codex-cli" ? CODEX_NETWORK_ALLOW_LIST : DEFAULT_NETWORK_ALLOW_LIST),
+        ...(args.provider === "codex-cli"
+          ? CODEX_NETWORK_ALLOW_LIST
+          : args.provider === "opencode-cli"
+            ? OPENCODE_NETWORK_ALLOW_LIST
+            : DEFAULT_NETWORK_ALLOW_LIST),
         ...(args.network ?? []),
       ]),
     ],
-    provider_base_url: args.provider === "codex-cli" ? "https://chatgpt.com/backend-api" : PINNED_PROVIDER_BASE_URL,
+    provider_base_url: PROVIDER_BASE_URLS[args.provider ?? "claude-cli"],
     lifecycle_scripts: args.lifecycle_scripts ?? "disabled",
     prohibited_actions: [...PROHIBITED_ACTIONS],
   });

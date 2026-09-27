@@ -10,9 +10,9 @@ export const CONFIRM_TO_CHECK = "Nothing was confirmed. Confirm again to check o
 /**
  * The pop-up over a confirm whose reading of the plan against its spec did
  * not run, once the host has tried it until it ran and every try failed
- * (D-NEW-basic-and-epic-flows): in the decision card's frame, as the simple
+ * (D-138): in the decision card's frame, as the simple
  * task's notice is, in the centre of the pane. It says why in one sentence,
- * with the whole error behind the `i` (D-NEW-nothing-shown-is-cut), and has
+ * with the whole error behind the `i` (D-133), and has
  * one button, which puts it away and leaves the person on the screen they
  * confirmed from, where confirming again reads the plan again. There is no
  * way on without the reading.

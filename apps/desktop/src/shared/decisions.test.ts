@@ -33,7 +33,7 @@ describe("the findings a person is asked to answer", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]?.title).toBe("the change proves itself");
     // The reason travels with it: a question with no context is not answerable.
-    expect(asked[0]?.context).toBe("the suite was added by the same change");
+    expect(asked[0]?.context).toBe("The suite was added by the same change.");
   });
 
   it("asks about an escalation", () => {
@@ -118,9 +118,9 @@ describe("the findings a person's answers and the rounds since have settled", ()
     verification: null,
     bundles: [{ kind: "review", subject_id: "rev_0000000000000002", created_at: "2026-09-24T09:00:00.000Z" }],
   };
-  const verified = (given: string[], open: string[]) => ({
+  const verified = (given: string[], open: string[], deterministic_failure: string | null = null) => ({
     review: null,
-    verification: { open_keys: open, per_finding: given.map((finding_key) => ({ finding_key })) },
+    verification: { open_keys: open, per_finding: given.map((finding_key) => ({ finding_key })), deterministic_failure },
     bundles: [],
   });
   const answer = (finding_key: string, over: Record<string, unknown> = {}) => ({
@@ -133,7 +133,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     ...over,
   });
   const settled = (attempts: unknown[], verdicts: unknown[]) =>
-    [...settledFindings({ attempts: attempts as never, verdicts })].sort();
+    [...settledFindings({ attempts: attempts as never, verdicts }).keys].sort();
 
   it("counts a standing answer that shipped it as it is, taken after the review", () => {
     expect(
@@ -184,7 +184,44 @@ describe("the findings a person's answers and the rounds since have settled", ()
   });
 
   it("keeps a settled finding off the questions", () => {
-    const asked = decisionQuestions(review([finding({ key: "a" }), finding({ key: "b" })]), new Set(["a"]));
+    const asked = decisionQuestions(review([finding({ key: "a" }), finding({ key: "b" })]), {
+      keys: new Set(["a"]),
+      refusal: null,
+    });
     expect(asked.map((question) => question.id)).toEqual(["b"]);
+  });
+
+  it("asks a finding a widened round left open with the scope refusal it was judged on, as a sentence of its own", () => {
+    const refusal =
+      "remediation round 1 was given 1 scope finding(s) and widened the change set instead: " +
+      "test/extra.test.ts were not in the change set it was asked to narrow. " +
+      "The contract's writes are admitted only under: `src/**`.";
+    const standing = settledFindings({ attempts: [reviewed, verified(["a", "b"], ["a", "b"], refusal)] as never, verdicts: [] });
+    expect(standing.refusal).toEqual({ sentence: refusal, open: new Set(["a", "b"]) });
+
+    const asked = decisionQuestions(
+      review([
+        finding({ key: "a" }),
+        finding({ key: "b", blocking_reason: null }),
+        finding({ key: "c", blocking_reason: null }),
+      ]),
+      standing,
+    );
+    expect(asked.map((question) => [question.id, question.context])).toEqual([
+      ["a", `The suite was added by the same change. R${refusal.slice(1)}`],
+      ["b", `R${refusal.slice(1)}`],
+      ["c", ""],
+    ]);
+  });
+
+  it("names no refusal where the last round's verification stopped on none", () => {
+    const standing = settledFindings({
+      attempts: [reviewed, verified(["a"], ["a"], "scope: an earlier round's failure"), verified(["a"], ["a"], null)] as never,
+      verdicts: [],
+    });
+    expect(standing.refusal).toBeNull();
+    expect(decisionQuestions(review([finding({ key: "a" })]), standing)[0]?.context).toBe(
+      "The suite was added by the same change.",
+    );
   });
 });
