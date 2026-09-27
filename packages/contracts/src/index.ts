@@ -22,6 +22,20 @@ export type {
   TerminationReason,
   VerifiedCommit,
 } from "./attempt.js";
+export {
+  USAGE_LIMIT_ROLES,
+  UsageLimitRoleSchema,
+  UsageLimitSchema,
+  usageLimitHolds,
+  usageLimitStop,
+} from "./usage-limit.js";
+export type {
+  UsageLimit,
+  UsageLimitAttempt,
+  UsageLimitReview,
+  UsageLimitRole,
+  UsageLimitStop,
+} from "./usage-limit.js";
 export { AuthoredAttemptSchema, issueAuthoredAttempts } from "./authored.js";
 export type { AuthoredAttempt } from "./authored.js";
 export {

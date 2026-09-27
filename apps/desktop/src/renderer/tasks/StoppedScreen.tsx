@@ -9,6 +9,11 @@ import type { StopReason, TaskContext } from "./task-context.js";
 import { LoopStages, TaskHeader } from "./LoopScreen.js";
 import { ConfirmDelete, deletes, ticketSpec, useCreate, useDiscardTicket, useSettle } from "../shell/create.js";
 import { draftedLanding } from "../planning/panes.js";
+import { ModelPicker, connectionsFor, useProviders } from "../settings/ConnectionScreens.js";
+import { providerName } from "../../shared/contract-editing.js";
+import { TaskModelsSchema, type ModelProvider, type Provider, type TaskModels } from "../../shared/protocol.js";
+import type { UsageLimitStop } from "@perbo/contracts/browser";
+import { resetLabel } from "./usage-limit.js";
 
 /**
  * The page a stopped run lands on.
@@ -27,18 +32,28 @@ import { draftedLanding } from "../planning/panes.js";
  * whole of each behind an `i`. The contract is approved and frozen
  * (ADR-0016), so there is no editing this plan back into shape: the work
  * deleted, the work planned again from the spec it came from, or — only after
- * the person's own stop or Perbo closing — another attempt against it. Plan
- * it again asks first, as the picker asks before a delete, saying what goes
- * and what stays ({@link confirmPlanAgain}), and once confirmed opens the
- * planning over the plan it drafts by itself. Nothing here changes the
- * lifecycle — the ticket stays where the stop left it until one of the three
- * is taken. At the other end of the same row is the way to the paused loop,
- * where the agents' recorded output is and the way back here, and the
+ * the person's own stop, Perbo closing or a provider's usage limit — another
+ * attempt against it. Plan it again asks first, as the picker asks before a
+ * delete, saying what goes and what stays ({@link confirmPlanAgain}), and once
+ * confirmed opens the planning over the plan it drafts by itself. Nothing here
+ * changes the lifecycle — the ticket stays where the stop left it until one of
+ * them is taken. At the other end of the same row is the way to the paused
+ * loop, where the agents' recorded output is and the way back here, and the
  * highlighted Continue the task at the far right.
+ *
+ * A run a provider's usage limit ended (D-NEW-pass-a-limited-loop-on) is
+ * said in one sentence with the reset the provider stated, and carries on two
+ * ways: Continue on another model, the highlighted one at the far right, which
+ * opens the contract's model picker for the role that was limited on the
+ * other connections signed in for it and starts the run from the stopped
+ * attempt's work on the one chosen; and Continue the task on the same
+ * connection, held until the stated reset has passed, since a limit is the
+ * connection's. Where no other connection runs that role, the page says so
+ * and Continue the task is the one way on.
  */
 export function StoppedScreen(context: TaskContext) {
   const { detail, repoId, navigate, show } = context;
-  const { ticket, title, jobs, latest, busy, held, projection } = taskRecords(context);
+  const { ticket, title, jobs, latest, busy, held, projection, models } = taskRecords(context);
   const action = useAction();
   const [deleting, setDeleting] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -50,6 +65,28 @@ export function StoppedScreen(context: TaskContext) {
   const summary = useTaskSummary(repoId, ticket.key, confirming && !ticket.delivery.branch);
   const branch = ticket.delivery.branch ?? summary.data?.branch ?? null;
   const [error, setError] = useState<string | null>(null);
+  // D-NEW-pass-a-limited-loop-on: the usage limit the run ended on, whether it
+  // still holds — read again at the stated reset, so Continue the task is
+  // offered the moment it passes — and the other connections that run the
+  // role it limited.
+  const limit = projection.limited;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (limit === null) return;
+    const left = Date.parse(limit.until) - now;
+    if (left <= 0) return;
+    // A timer longer than this fires at once, so a reset further out is read
+    // again when this one fires.
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(left + 50, 2_147_000_000));
+    return () => clearTimeout(timer);
+  }, [limit?.until, now]);
+  const holds = limit !== null && Date.parse(limit.until) > now;
+  const providers = useProviders();
+  const others =
+    limit === null || providers.data === undefined
+      ? []
+      : connectionsFor(providers.data, limit.role).filter((id) => id !== limit.provider);
+  const [passing, setPassing] = useState(false);
   const create = useCreate();
   const settle = useSettle();
   const discard = useDiscardTicket(action.mutateAsync, () => navigate({ page: "home" }));
@@ -98,7 +135,8 @@ export function StoppedScreen(context: TaskContext) {
         "The attempts it recorded and the evidence they sealed are still kept.",
     },
   ];
-  // Continue carries on only from the person's own stop or Perbo closing:
+  // Continue carries on only from the person's own stop, Perbo closing or a
+  // provider's usage limit (`carriesOn`):
   // every other reason is one another attempt at the same plan meets again,
   // and where the record is gone nothing says which it was.
   const onward = replannable
@@ -107,12 +145,12 @@ export function StoppedScreen(context: TaskContext) {
   const why = projection.continuable
     ? undefined
     : ending === null && closedGate === null
-      ? "Continue the task carries on only from a stop you made or from Perbo closing, and Perbo holds no record of " +
+      ? "Continue the task carries on only from a stop you made, from Perbo closing or from a provider's usage limit, and Perbo holds no record of " +
         `how this run ended, so it cannot tell which this was. ${onward}`
-      : "Continue the task carries on only from a stop you made or from Perbo closing, and this run stopped for " +
+      : "Continue the task carries on only from a stop you made, from Perbo closing or from a provider's usage limit, and this run stopped for " +
         `${reasons.length === 1 ? "the reason" : "the reasons"} listed, which another attempt at the same plan would ` +
         `meet again. ${onward}`;
-  const carryOn = (): void => {
+  const carryOn = (models?: TaskModels): void => {
     setError(null);
     void action
       .mutateAsync({
@@ -125,10 +163,23 @@ export function StoppedScreen(context: TaskContext) {
         approve: false,
         publish,
         resumeFrom: bundle?.bundle_id ?? null,
+        // The models the person carries a limited run on with, written to
+        // the ticket's models by the host: not part of the contract.
+        ...(models === undefined ? {} : { models: TaskModelsSchema.strip().parse(models) }),
       })
       .then(() => show("loop"))
       .catch(() => undefined);
   };
+  // After a usage limit, the same connection carries on once the reset the
+  // provider stated has passed.
+  const connection = limit === null ? "" : providerName(limit.provider);
+  const carryOnTitle = holds
+    ? `The usage limit on ${connection} holds until ${resetLabel(limit!)}, as the provider stated, and it covers ` +
+      `every model ${connection} runs. Continue the task carries on on ${connection} once it has passed; ` +
+      "Continue on another model carries on now."
+    : why;
+  // Another connection to carry the limited role on with, where one is signed in.
+  const passesOn = limit !== null && others.length > 0;
   // The stopped ticket and everything recorded after its contract go, and a
   // plan is drafted again from the spec, which stays: the work is back before
   // the loop, and off Home and out of the picker from the click — its spec
@@ -184,6 +235,12 @@ export function StoppedScreen(context: TaskContext) {
             </li>
           ))}
         </ul>
+        {limit !== null && providers.data !== undefined && others.length === 0 && (
+          <p className="stopped-limit">
+            {`No other connection that runs the ${limit.role} is signed in, so the task carries on on ${connection} ` +
+              (holds ? `once its limit resets ${resetLabel(limit)}.` : "now that its limit has reset.")}
+          </p>
+        )}
         {error !== null && <Notice tone="danger">{error}</Notice>}
         {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
       </div>
@@ -202,16 +259,42 @@ export function StoppedScreen(context: TaskContext) {
         )}
         <span className="spacer" />
         <Button onClick={() => show("loop")}>View the paused loop</Button>
-        {/* The highlighted action at the far right. */}
+        {/* The highlighted action at the far right: carrying a usage limit on
+            to another connection where there is one, and otherwise this. */}
         <Button
-          variant="primary"
-          disabled={!projection.continuable || busy || action.isPending}
-          title={why}
-          onClick={carryOn}
+          variant={passesOn ? "secondary" : "primary"}
+          disabled={!projection.continuable || holds || busy || action.isPending}
+          title={carryOnTitle}
+          onClick={() => carryOn()}
         >
           Continue the task
         </Button>
+        {limit !== null && (providers.data === undefined || passesOn) && (
+          <Button
+            variant="primary"
+            disabled={!passesOn || busy || action.isPending}
+            title={passesOn ? undefined : "Reading which connections are signed in…"}
+            onClick={() => setPassing(true)}
+          >
+            Continue on another model
+          </Button>
+        )}
       </div>
+      {passing && limit !== null && (
+        <PassOn
+          limit={limit}
+          holds={holds}
+          models={models}
+          connections={providers.data ?? []}
+          others={others}
+          pending={busy || action.isPending}
+          close={() => setPassing(false)}
+          start={(chosen) => {
+            setPassing(false);
+            carryOn(chosen);
+          }}
+        />
+      )}
       {confirming && (
         <ConfirmDelete
           label="Plan it again"
@@ -242,6 +325,75 @@ export function StoppedScreen(context: TaskContext) {
         </Dialog>
       )}
     </section>
+  );
+}
+
+/**
+ * Continue on another model (D-NEW-pass-a-limited-loop-on): the contract's
+ * model picker for the role the usage limit stopped, open on the first other
+ * connection signed in for it, the limited connection marked and held until
+ * its reset. What is chosen is written to the ticket's models and the run
+ * starts from the stopped attempt's work; the approved contract is untouched
+ * (ADR-0016). The reviewer's model is the person's choice (D-010), and the
+ * note says it is part of what the review's evidence records.
+ */
+function PassOn({
+  limit,
+  holds,
+  models,
+  connections,
+  others,
+  pending,
+  close,
+  start,
+}: {
+  limit: UsageLimitStop;
+  holds: boolean;
+  models: TaskModels;
+  connections: Provider[];
+  others: ModelProvider[];
+  pending: boolean;
+  close: () => void;
+  start: (models: TaskModels) => void;
+}) {
+  const [chosen, setChosen] = useState<TaskModels | null>(null);
+  const connection = providerName(limit.provider);
+  const provider =
+    chosen === null ? null : limit.role === "executor" ? chosen.executorProvider : chosen.reviewerProvider;
+  return (
+    <Dialog title="Continue on another model" onClose={close}>
+      <p>
+        {`${connection} reached its usage limit, which covers every model it runs` +
+          (holds ? ` until ${resetLabel(limit)}` : "") +
+          `. Choose the connection and the model the ${limit.role} carries on with: the run starts from the ` +
+          "stopped attempt's work, and the approved contract is not changed."}
+      </p>
+      {limit.role === "reviewer" && (
+        <p className="small muted">
+          The reviewer&apos;s model is part of what the review&apos;s evidence records: the review this run takes is
+          recorded as the model you choose here. Which model reviews is yours to choose, and nothing changes it
+          by itself.
+        </p>
+      )}
+      <ModelPicker
+        role={limit.role}
+        models={chosen ?? models}
+        onChange={setChosen}
+        connections={connections}
+        limited={holds ? { provider: limit.provider as ModelProvider, until: resetLabel(limit) } : null}
+        openOn={others[0] ?? null}
+      />
+      <div className="dialog-actions">
+        <Button onClick={close}>Keep it stopped</Button>
+        <Button
+          variant="primary"
+          disabled={chosen === null || pending || (holds && provider === limit.provider)}
+          onClick={() => start(chosen!)}
+        >
+          {provider === null ? "Continue on the model chosen" : `Continue on ${providerName(provider)}`}
+        </Button>
+      </div>
+    </Dialog>
   );
 }
 

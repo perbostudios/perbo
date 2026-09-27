@@ -1,9 +1,10 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
-import type { LimitsTableSchema, PlanContract } from "@perbo/contracts";
+import { usageLimitHolds, type LimitsTableSchema, type PlanContract } from "@perbo/contracts";
 import type { Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
 import { decisionQuestions, type SettledFindings } from "../../shared/decisions.js";
+import { providerName } from "../../shared/contract-editing.js";
 import type { FindingsOnRecord } from "../records.js";
 
 /**
@@ -248,6 +249,38 @@ export function assertResumable(detail: Detail, bundleId: string): void {
     )
   )
     throw new Error("The recovery bundle does not belong to this task.");
+}
+
+/**
+ * A run carried on with other models is one a provider's usage limit stopped
+ * (D-NEW-pass-a-limited-loop-on): the ticket's last attempt ended its run on
+ * that limit, the run resumes from that attempt's work, and the role the limit
+ * stopped is not put back on the limited connection before its stated reset —
+ * a usage limit is the connection's, every model of it. Refused otherwise, in
+ * a sentence that says which.
+ */
+export function assertPassesOn(
+  detail: Detail | null,
+  resumeFrom: string | null,
+  models: TaskModels,
+  now: Date,
+): void {
+  const last = detail?.attempts.at(-1);
+  const limit = last?.usageLimit ?? null;
+  if (detail === null || resumeFrom === null || last === undefined || limit === null)
+    throw new Error(
+      "Only a run a provider's usage limit stopped carries on with other models, from the stopped attempt's work; " +
+        "this task's models are settled with its approval.",
+    );
+  if (!last.bundles.some((bundle) => bundle.bundle_id === resumeFrom && bundle.kind === "execution"))
+    throw new Error("A run carried on with other models starts from the work of the attempt the usage limit stopped.");
+  const chosen = limit.role === "executor" ? models.executorProvider : models.reviewerProvider;
+  if (chosen === limit.provider && usageLimitHolds(limit, now))
+    throw new Error(
+      `The usage limit on ${providerName(limit.provider)} holds until ${limit.until} (${limit.zone}), and it ` +
+        "covers every model it runs: " +
+        `the ${limit.role} carries on on another connection, or on this one once the limit has reset.`,
+    );
 }
 
 /**

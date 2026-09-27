@@ -16,6 +16,7 @@ import {
   type SecretIndex,
   type VerifiedCommit,
   type TerminationReason,
+  type UsageLimit,
 } from "@perbo/contracts";
 import type { MaterializedWorkspace } from "@perbo/workspace";
 import type { AgentResult } from "../../adapter.js";
@@ -232,6 +233,38 @@ export function providerPark(args: {
   return { reset, parkMs, park };
 }
 
+/**
+ * The executor's usage limit an attempt ends the run on
+ * (D-NEW-pass-a-limited-loop-on), or null.
+ *
+ * An attempt its provider refused with a stated reset still ahead, which the
+ * run does not park for: one past `wait_for_provider_ms`, or one stated by the
+ * attempt that followed a park or a transport retry, which the routing ends
+ * the run on. The reset is read as `providerPark` reads it, from the sentence
+ * the runner wrote onto the termination; the connection and the model are the
+ * run configuration's and the invocation's, never a model's words.
+ */
+export function executorUsageLimit(args: {
+  termination: { reason: TerminationReason; detail: string };
+  park: AttemptWait | null;
+  provider: string;
+  model: string;
+  clock: () => Date;
+}): UsageLimit | null {
+  if (args.termination.reason !== "transport_unavailable" || args.park !== null) return null;
+  const now = args.clock();
+  const reset = resetInText(args.termination.detail, now);
+  if (reset === null || reset.until.getTime() <= now.getTime()) return null;
+  return {
+    role: "executor",
+    provider: args.provider,
+    model: args.model,
+    until: reset.until.toISOString(),
+    zone: reset.zone,
+    quoted: reset.quoted,
+  };
+}
+
 /** What the round leaves on the ticket's record, and what its routing reads. */
 export interface Recorded {
   /** The state the round goes on with: a completed round's change set is the next one's baseline. */
@@ -422,6 +455,13 @@ export function recordAttempt(args: {
     // Written before the loop sleeps, not after: a process killed while it
     // is parked has to leave the instant behind for the next run to honour.
     wait: park,
+    usage_limit: executorUsageLimit({
+      termination,
+      park,
+      provider: config.agent_provider,
+      model: args.agentResult.invocation.model,
+      clock,
+    }),
     declines,
   } satisfies ExecutionAttempt);
   // The next round inherits this one's commit and can name the attempt

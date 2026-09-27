@@ -33,6 +33,7 @@ import {
   approveArgs,
   assertEditable,
   assertDecidable,
+  assertPassesOn,
   assertResumable,
   decisionArgs,
   doctorArgs,
@@ -1012,8 +1013,18 @@ function loop(
     async (job, run) => {
       m.tickets.assertDigest(repo, request.key, request.digest);
       const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
-      if (resumeFrom)
-        assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
+      const onRecord = resumeFrom ? await m.tickets.detail(repo.id, request.key) : null;
+      if (resumeFrom) assertResumable(onRecord!, resumeFrom);
+      // D-NEW-pass-a-limited-loop-on: a ticket its provider's usage limit
+      // stopped carries on with the models the person chose, from the stopped
+      // attempt's work. They are the ticket's models from here, beside the
+      // contract rather than in it (ADR-0016), which stays as it was approved.
+      if (request.kind === "run" && request.models !== undefined) {
+        const models = TaskModelsSchema.strip().parse(request.models);
+        assertPassesOn(onRecord, resumeFrom, models, new Date());
+        m.profile.state.taskModels[repo.id + ":" + request.key] = models;
+        m.changes.preferences(m.profile.state);
+      }
       if (request.kind === "decide") {
         // Each answer closes its finding
         // (D-132); the principle

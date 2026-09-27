@@ -8,6 +8,7 @@ import {
   ReviewArtifactSchema,
   RunBundleSchema,
   TicketSchema,
+  UsageLimitSchema,
   hasAcceptanceCriteria,
 } from "@perbo/contracts";
 import type { Ticket } from "@perbo/contracts";
@@ -86,6 +87,7 @@ export const ReportSchema = z
           checks: z.array(CheckSchema).nullable(),
           verification: z.unknown(),
           declines: z.array(z.object({ finding_key: z.string() }).passthrough()).default([]),
+          usage_limit: UsageLimitSchema.extend({ waited: z.boolean() }).nullable(),
           bundles: z.array(RunBundleSchema),
         })
         .passthrough(),
@@ -136,6 +138,7 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
     })),
     verification: attempt.verification,
     declines: attempt.declines.map((decline) => decline.finding_key),
+    usageLimit: attempt.usage_limit,
     bundles: attempt.bundles,
   }));
 }

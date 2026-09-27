@@ -38,6 +38,7 @@ import {
   type PlanContract,
   type RunVerdict,
   type TerminationReason,
+  usageLimitStop,
 } from "@perbo/contracts";
 import {
   GREENFIELD_VERIFY,
@@ -56,6 +57,7 @@ import {
 } from "@perbo/workspace";
 import {
   AGENT_PROVIDERS,
+  BundleStore,
   DEFAULT_DELIVERED_CHECKS_BOUND_MS,
   ResumeRefusedError,
   RunRefusedError,
@@ -131,6 +133,7 @@ import {
   type PullRequestChecks,
 } from "../../pull-request.js";
 import { describeFailure } from "../../failure.js";
+import { usageLimitLines } from "../usage-limit.js";
 import { readCorpusCache, renderCorpusCache } from "./corpus-cache.js";
 import {
   configuredReviewer,
@@ -140,6 +143,7 @@ import {
 } from "./internal/probe.js";
 import { mergedTicketContext } from "./internal/relevel.js";
 import { DEFAULT_CLAUDE_MODEL } from "@perbo/model/defaults";
+import { MODEL_PROVIDERS } from "@perbo/model";
 import { proposedModel, readClaudeModels } from "./internal/catalog.js";
 import { judgingPaths, standingProhibited, storeDir, type JudgingPath } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
@@ -312,6 +316,17 @@ export interface ExecuteArgs {
    * rather than run the ticket. Takes `--ticket`.
    */
   publishRetained: boolean;
+  /**
+   * The executor's connection and model for this run, over what the run
+   * configuration names: how a ticket stopped on a provider's usage limit is
+   * carried on to another connection from the command line
+   * (D-NEW-pass-a-limited-loop-on).
+   */
+  provider: string | null;
+  model: string | null;
+  /** The reviewer's connection and model for this run, over the run configuration's. */
+  reviewerProvider: string | null;
+  reviewerModel: string | null;
 }
 
 const DOCTOR_FLAGS = {
@@ -354,6 +369,10 @@ const RUN_FLAGS = {
   "--pr": valueFlag(),
   "--relevel": switchFlag(),
   "--publish-retained": switchFlag(),
+  "--provider": valueFlag(),
+  "--model": valueFlag(),
+  "--reviewer-provider": valueFlag(),
+  "--reviewer-model": valueFlag(),
 } satisfies FlagTable;
 
 const RUN_GRAMMAR: Grammar<typeof RUN_FLAGS> = {
@@ -904,6 +923,51 @@ export function physicalLine(text: string): string {
   return text.replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, " ");
 }
 
+/**
+ * The run configuration with the connections and models the flags name put
+ * over it (D-NEW-pass-a-limited-loop-on).
+ *
+ * A connection the flags change takes what the configuration said for the old
+ * one with it — its binary, its model and its effort, each of which names
+ * something of that connection's — so the new one starts at its own defaults
+ * unless a model is named with it. A flag naming the connection already
+ * configured changes nothing but what it names.
+ */
+export function withModelChoice(
+  input: unknown,
+  flags: Pick<ExecuteArgs, "provider" | "model" | "reviewerProvider" | "reviewerModel">,
+): unknown {
+  if (flags.provider !== null && !(AGENT_PROVIDERS as readonly string[]).includes(flags.provider)) {
+    throw new UsageError(`--provider takes ${AGENT_PROVIDERS.join(", ")} (got '${flags.provider}')`);
+  }
+  if (flags.reviewerProvider !== null && !(MODEL_PROVIDERS as readonly string[]).includes(flags.reviewerProvider)) {
+    throw new UsageError(
+      `--reviewer-provider takes ${MODEL_PROVIDERS.join(", ")} (got '${flags.reviewerProvider}')`,
+    );
+  }
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return input;
+  const config: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  const configured = (key: string, fallback: string): string =>
+    typeof config[key] === "string" ? (config[key] as string) : fallback;
+  if (flags.provider !== null && flags.provider !== configured("agent_provider", "claude-cli")) {
+    config.agent_provider = flags.provider;
+    delete config.agent_binary;
+    delete config.model;
+    delete config.effort;
+  }
+  if (flags.model !== null) config.model = flags.model;
+  if (
+    flags.reviewerProvider !== null &&
+    flags.reviewerProvider !== configured("reviewer_provider", "claude-cli")
+  ) {
+    config.reviewer_provider = flags.reviewerProvider;
+    delete config.reviewer_model;
+    delete config.reviewer_effort;
+  }
+  if (flags.reviewerModel !== null) config.reviewer_model = flags.reviewerModel;
+  return config;
+}
+
 async function runExecute(options: ExecuteOptions): Promise<number> {
   const { args, streams } = options;
   const now = options.now ?? new Date();
@@ -1015,7 +1079,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
             (line) => streams.stderr(line),
           );
 
-  const parsedConfig = TicketRunConfigSchema.safeParse(configInput);
+  const parsedConfig = TicketRunConfigSchema.safeParse(withModelChoice(configInput, args));
   if (!parsedConfig.success) {
     // The file that failed, not the flag. On the `--ticket` path `args.config`
     // is null, so this read `null is not a valid run configuration` and named
@@ -1382,6 +1446,32 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   // run ends rather than by opening the store afterwards.
   const cost = runCost(result);
   streams.stderr(`\ncost      ${rollLabel(cost)}\n`);
+  // D-NEW-pass-a-limited-loop-on: a run that ended on a provider's usage
+  // limit says whose, and the command that carries its work on to another
+  // connection from the stopped attempt's bundle.
+  const lastRound = result.rounds.at(-1);
+  const limit = lastRound === undefined ? null : usageLimitStop(lastRound.attempt, lastRound.review);
+  if (lastRound !== undefined && limit !== null) {
+    const bundle = new BundleStore({ root: config.bundle_root, retainContext: true })
+      .list()
+      .find(
+        (entry) =>
+          entry.kind === "execution" &&
+          entry.subject_id === lastRound.attempt.attempt_id &&
+          entry.artifacts.some((artifact) => artifact.name === "change.diff" && artifact.retained),
+      );
+    const subject =
+      admitted !== null
+        ? `--ticket ${admitted.key}`
+        : args.contract !== null
+          ? `--contract ${args.contract} --config ${args.config ?? "<the run configuration>"}`
+          : args.pr !== null
+            ? `--pr ${args.pr}`
+            : `--outcome ${JSON.stringify(args.outcome ?? "")}`;
+    for (const line of usageLimitLines({ limit, subject, bundleId: bundle?.bundle_id ?? null })) {
+      streams.stderr(`${line}\n`);
+    }
+  }
   if (local) {
     streams.stderr(
       `read it back with: perbo inspect ${result.ticket_id}` +
@@ -3486,6 +3576,10 @@ export const executeCommandLine: NarratedCommand<ExecuteArgs, Record<string, nev
         pr: line.flags["--pr"] ?? null,
         relevel: line.flags["--relevel"] === true,
         publishRetained: line.flags["--publish-retained"] === true,
+        provider: line.flags["--provider"] ?? null,
+        model: line.flags["--model"] ?? null,
+        reviewerProvider: line.flags["--reviewer-provider"] ?? null,
+        reviewerModel: line.flags["--reviewer-model"] ?? null,
       },
       output: {},
     };

@@ -685,6 +685,7 @@ export function detail(key: string): Detail {
     // what another attempt carries on from. The sample's other attempts retain
     // nothing, so both offers the stopped page makes — carrying on, and
     // starting the attempt again — are there to see.
+    usageLimit: null,
     bundles: key === stoppedKey ? [stoppedBundle] : [],
   } satisfies Detail["attempts"][number];
   const closing = {

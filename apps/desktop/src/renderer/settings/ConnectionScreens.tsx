@@ -40,6 +40,15 @@ const offersRole = (connections: Provider[], id: ModelProvider, role: "executor"
   connections.some((connection) => connection.id === connectionOf(id) && connection.roles.includes(ROLE_LABELS[role]));
 const effortLabel = (level: EffortLevel | null): string => (level === null ? "Default" : EFFORT_LABELS[level]);
 /**
+ * The connections a role's picker offers: every provider the protocol names —
+ * the optional API for the reviewer only — that is signed in and whose
+ * connection the host offers this role on.
+ */
+export const connectionsFor = (connections: Provider[], role: "executor" | "reviewer"): ModelProvider[] =>
+  ModelProviderSchema.options.filter(
+    (id) => (role === "reviewer" || id !== "anthropic") && signedIn(connections, id) && offersRole(connections, id, role),
+  );
+/**
  * `provider`'s model catalog, read through the host while `enabled`. The
  * pickers and the setup screen share one reading by its key.
  */
@@ -87,6 +96,8 @@ export function ModelPicker({
   compact = false,
   connectionDot = true,
   disabled = false,
+  limited = null,
+  openOn = null,
 }: {
   role: "executor" | "reviewer";
   models: TaskModels;
@@ -96,8 +107,16 @@ export function ModelPicker({
   connectionDot?: boolean;
   /** Held shut, reading the saved choice, while whatever the choice is written with is busy. */
   disabled?: boolean;
+  /**
+   * A connection whose usage limit holds until `until`
+   * (D-NEW-pass-a-limited-loop-on): offered, marked as limited, and not
+   * chosen before then, nor any of its models — a limit is the connection's.
+   */
+  limited?: { provider: ModelProvider; until: string } | null;
+  /** Opened at once on this connection's choice, its catalog's own default model first. */
+  openOn?: ModelProvider | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(openOn !== null);
   const root = useRef<HTMLDivElement>(null);
   const provider =
     role === "executor" ? models.executorProvider : models.reviewerProvider;
@@ -109,12 +128,14 @@ export function ModelPicker({
     provider: ModelProvider;
     model: string;
     effort: EffortLevel | null;
-  } | null>(null);
+  } | null>(openOn === null ? null : { provider: openOn, model: "", effort: null });
   const selectedProvider = selection?.provider ?? provider;
-  const catalog = useCatalog(selectedProvider, open);
+  // A connection whose usage limit holds offers none of its models.
+  const held = selectedProvider === limited?.provider;
+  const catalog = useCatalog(selectedProvider, open && !held);
   // Every model the catalog offers, Claude Opus 5.5 first where it is offered,
   // and the one a role with nothing chosen takes (D-093).
-  const choices = pickerOrder(catalog.data?.models ?? []);
+  const choices = held ? [] : pickerOrder(catalog.data?.models ?? []);
   const selectedModel = (selection?.model ?? model) || catalogDefault(choices);
   const selectedChoice = choices.find((choice) => choice.id === selectedModel);
   // The levels this model offers; a level it does not offer sends nothing on
@@ -123,7 +144,7 @@ export function ModelPicker({
   const selectedEffort = selection !== null ? selection.effort : effort;
   const chosenEffort =
     selectedEffort !== null && levels.includes(selectedEffort) ? selectedEffort : null;
-  const done = !selectedChoice || catalog.isFetching || catalog.isError;
+  const done = !selectedChoice || catalog.isFetching || catalog.isError || held;
   const finish = (): void => {
     onChange(
       role === "executor"
@@ -222,10 +243,14 @@ export function ModelPicker({
                 <option
                   key={id}
                   value={id}
-                  disabled={connections !== undefined && (!signedIn(connections, id) || !offersRole(connections, id, role))}
+                  disabled={
+                    id === limited?.provider ||
+                    (connections !== undefined && (!signedIn(connections, id) || !offersRole(connections, id, role)))
+                  }
                 >
                   {providerName(id)}
                   {connectionKind(id)}
+                  {id === limited?.provider ? ` · limited until ${limited.until}` : ""}
                 </option>
               ))}
           </Dropdown>
