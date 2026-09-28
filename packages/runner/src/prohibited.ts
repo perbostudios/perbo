@@ -12,6 +12,7 @@ import {
   readCommandLine,
   resolveScope,
   everySegment,
+  joinedLine,
   splitCommandSegments,
   type CommandSegment,
   type Cwd,
@@ -413,9 +414,9 @@ export function inspectCommandWithCwd(
   // The write surface reads the line as a whole, because a `cd` in one command
   // is the working directory of the next.
   const read = readCommandLine(text, resolved);
-  // Continuations joined the way the segment reader joins them, so a segment
-  // is found in the line it was read from.
-  const line = text.replace(/\\\r?\n/g, " ");
+  // Continuations taken out the way the segment reader takes them out, so a
+  // segment is found in the line it was read from.
+  const line = joinedLine(text);
   const segments = commandSegments(line);
   // Where the shell stands when a segment runs: the line read up to that
   // segment, so a `cd` earlier on the line counts and nothing after it does.
