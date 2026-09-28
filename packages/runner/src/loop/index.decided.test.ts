@@ -6,7 +6,7 @@ import { scratchDirectories, type Repository } from "@perbo/test-support";
 import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../adapter.js";
 import { EgressLog } from "../egress.js";
-import { TicketRunConfigSchema, runTicket, type DecidedFinding } from "./index.js";
+import { AnswersOwedError, TicketRunConfigSchema, runTicket, type DecidedFinding } from "./index.js";
 import { finding, makeContract, makeReview, withoutInstall } from "../test-support/records.js";
 import { git, runnerRepository } from "../test-support/repository.js";
 
@@ -656,8 +656,53 @@ describe("the findings a stalled refinement left open", () => {
     expect(verifications).toHaveLength(2);
     // The row the CLI writes on the ticket for that run.
     const history = [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }];
-    return { contract, config, history };
+    return { repo, contract, config, history };
   }
+
+  it("refuses the next run before anything starts where none of them is answered", async () => {
+    const { contract, config, history } = await stalled();
+    const run = runTicket({ config, contract, history, decided: [], hooks: noModel });
+    await expect(run).rejects.toBeInstanceOf(AnswersOwedError);
+    await expect(run).rejects.toThrow(
+      new RegExp(
+        `^PRB13's last run finished trying and left 2 finding\\(s\\) for you to answer \\(${stuck!.key.slice(0, 12)}, ` +
+          `${alsoStuck!.key.slice(0, 12)}\\), none of them handed to the executor, so this run does not start: answer each ` +
+          "with `perbo verdict PRB13 --decide <finding> --choice approach\\|let-it-decide\\|ship-as-is`",
+      ),
+    );
+  }, 120_000);
+
+  it("refuses it where one is shipped as it is and the other unanswered, and the answer given still stands", async () => {
+    const { contract, config, history } = await stalled();
+    const shipped = decision(stuck!.key, DECISION_WORDS.ship_as_is);
+    await expect(runTicket({ config, contract, history, decided: [shipped], hooks: noModel })).rejects.toThrow(
+      `left 1 finding(s) for you to answer (${alsoStuck!.key.slice(0, 12)})`,
+    );
+    const later = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [shipped, decision(alsoStuck!.key, DECISION_WORDS.ship_as_is)],
+      hooks: noModel,
+    });
+    expect(later.outcome).toBe("approved");
+    expect(later.decided.map((row) => row.finding_key)).toEqual([stuck!.key, alsoStuck!.key]);
+  }, 120_000);
+
+  it("reviews afresh, and is not refused, where the branch has moved since", async () => {
+    const { repo, contract, config, history } = await stalled();
+    sealOnBranch(repo, contract, { "src/by-hand.ts": "export const byHand = true;\n" });
+    const reviews: unknown[] = [];
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [],
+      hooks: { agent: fixing().run as never, review: reviewer(reviews, "changes_requested", []) },
+    });
+    expect(reviews).toHaveLength(1);
+    expect(second.rounds[0]!.kind).toBe("execute");
+  }, 120_000);
 
   it("runs one round scoped to the finding given an approach, ships the other, and delivers", async () => {
     const { contract, config, history } = await stalled();
@@ -716,6 +761,129 @@ describe("the findings a stalled refinement left open", () => {
     expect(verifications).toEqual([[alsoStuck!.key]]);
     expect(second.outcome).toBe("escalated");
     expect(second.detail).toContain(stuck!.key);
+  }, 120_000);
+});
+
+/**
+ * D-065 beside D-132: a finding the executor declined in a round that then
+ * stalled is not the person's to answer by a choice, since a principle is its
+ * answer; the other finding it left open is. Answering that one delivers, or
+ * runs the round it hands on, and the run ends `escalated` with the declined
+ * finding left for the person.
+ */
+describe("a finding the executor declined in a refinement that stalled", () => {
+  const [declined, open] = (
+    [
+      ["a", "fixture.choice", "Which fixture the suite loads is not settled."],
+      ["b", "verification.execution_missing", "No execution result establishes the totals."],
+    ] as const
+  ).map(([digit, rule_id, statement]) => finding({ key: digit.repeat(64), rule_id, statement }));
+  const reason = "which fixture the suite loads is a product call";
+
+  /** Writes a new change every call, and declines `declined` whenever it is handed it. */
+  const declining = () => {
+    const calls: string[] = [];
+    let count = 0;
+    const inner = agentDouble((worktree) => {
+      mkdirSync(join(worktree, "src"), { recursive: true });
+      writeFileSync(join(worktree, "src", "fix.ts"), `export const fixed = ${++count};\n`);
+    });
+    const run = async (request: Parameters<typeof inner.run>[0]): Promise<AgentResult> => {
+      calls.push(request.prompt);
+      const result = await inner.run(request);
+      return request.prompt.includes(declined!.key)
+        ? {
+            ...result,
+            transcript: [JSON.stringify({ type: "result", subtype: "success", result: `NO_PRACTICE ${declined!.key}: ${reason}` })],
+          }
+        : result;
+    };
+    return { run, calls };
+  };
+
+  /** Records what each verification is handed and closes what `closes` names. */
+  const verifier = (seen: string[][], closes: readonly string[]) =>
+    (async (input: { findings: Array<{ key: string }> }) => {
+      const keys = input.findings.map((entry) => entry.key);
+      seen.push(keys);
+      const open = keys.filter((key) => !closes.includes(key));
+      return {
+        prompt_version: "closure_verify_v1",
+        per_finding: keys.map((finding_key) => ({
+          finding_key,
+          status: closes.includes(finding_key) ? "closed" : "not_closed",
+          pointer: "src/fix.ts",
+        })),
+        deterministic_failure: null,
+        all_closed: open.length === 0,
+        open_keys: open,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        cost_micros: 30,
+        cost_basis: "provider_list_estimate",
+      };
+    }) as never;
+
+  /** Run 1: round 1 declines one finding and closes none of the other, so the run stalls. */
+  async function stalledWithDecline() {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    const verifications: string[][] = [];
+    const first = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: declining().run as never,
+        review: reviewer([], "remediable", [declined!, open!]),
+        verify: verifier(verifications, []),
+      },
+    });
+    expect(first.outcome).toBe("remediation_stalled");
+    expect(verifications).toEqual([[open!.key]]);
+    const history = [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }];
+    return { contract, config, history };
+  }
+
+  it("puts only the other finding to the person, and refuses a run until it is answered", async () => {
+    const { contract, config, history } = await stalledWithDecline();
+    await expect(runTicket({ config, contract, history, decided: [], hooks: noModel })).rejects.toThrow(
+      `left 1 finding(s) for you to answer (${open!.key.slice(0, 12)})`,
+    );
+  }, 120_000);
+
+  it("delivers on the other shipped as it is, executing nothing, and leaves the declined one to the person", async () => {
+    const { contract, config, history } = await stalledWithDecline();
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [decision(open!.key, DECISION_WORDS.ship_as_is)],
+      hooks: noModel,
+    });
+    expect(second.rounds).toEqual([]);
+    expect(second.outcome).toBe("escalated");
+    expect(second.detail).toContain("nothing was executed or reviewed again");
+    expect(second.detail).toContain(`the executor declined are yours to decide, and \`perbo principle add\` is the answer: ${declined!.key}`);
+    expect(second.final_review!.findings.find((row) => row.key === declined!.key)!.status).toBe("open");
+  }, 120_000);
+
+  it("runs one round on the other handed on, never the declined one, and ends escalated once it is closed", async () => {
+    const { contract, config, history } = await stalledWithDecline();
+    const agent = declining();
+    const verifications: string[][] = [];
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [decision(open!.key, "Record the execution result the criterion names.", new Date(), "approach")],
+      hooks: { agent: agent.run as never, review: noModel.review, verify: verifier(verifications, [open!.key]) },
+    });
+    expect(verifications).toEqual([[open!.key]]);
+    expect(agent.calls).toHaveLength(1);
+    expect(agent.calls[0]).not.toContain(declined!.key);
+    expect(second.outcome).toBe("escalated");
+    expect(second.detail).toContain(declined!.key);
   }, 120_000);
 });
 

@@ -7,7 +7,7 @@ import { InterviewHost, type InterviewDeps } from "./host.js";
 import { ContractEditing } from "../../shared/contract-editing.js";
 import { INTERVIEW_WROTE_THE_SPEC, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
 import type { PromisePair } from "../../shared/contract-editing.js";
-import type { Change, EditingSession, InterviewEntry } from "../../shared/protocol.js";
+import type { Change, EditingSession, InterviewEntry, TaskModels } from "../../shared/protocol.js";
 import type { LineProcess, LineProcessOptions } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -75,6 +75,8 @@ function host(
   known: InterviewDeps["catalogs"]["known"] = () => Promise.resolve(undefined),
   /** The records as the app finds them on disk as it starts. */
   saved: EditingSession[] = [],
+  /** The provider new tasks draft on, which a planning with no ticket takes; the settings' default where none is given. */
+  drafting?: TaskModels["draftingProvider"],
 ) {
   let records: EditingSession[] = structuredClone(saved);
   const told: Change[] = [];
@@ -87,7 +89,10 @@ function host(
       records = structuredClone(next);
     },
     repository: () => undefined,
-    defaults: () => TaskModelsSchema.strip().parse(SettingsSchema.parse({})),
+    defaults: () => {
+      const models = TaskModelsSchema.strip().parse(SettingsSchema.parse({}));
+      return drafting === undefined ? models : { ...models, draftingProvider: drafting };
+    },
     detail: () => {
       throw new Error("no detail in this test");
     },
@@ -457,7 +462,7 @@ describe("a session asking what it has already asked (D-117)", () => {
     return { w, id, child, shown, answerTheCard, writeSpec, sent };
   }
 
-  it("puts one card for questions asked twice and again after they were answered, sends each answer once, and asks nothing once the spec is written", async () => {
+  it("puts one card for questions asked twice and again after they were answered, sends each answer once, and puts nothing once every question is answered", async () => {
     const { w, id, child, shown, answerTheCard, writeSpec, sent } = await planning();
     // The planning's own record, in order: the questions put twice in one
     // turn, the session owning up to it, and the turn over.
@@ -504,30 +509,28 @@ describe("a session asking what it has already asked (D-117)", () => {
     expect(w.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toBeNull();
   });
 
-  it("takes down what it asked before once a turn writes the spec and asks nothing, and only then", async () => {
-    // Answered in part, and then the spec written without the rest: the
-    // session has gone on, and a card left for the rest would hold Generate
-    // plan back for questions nobody is waiting on.
-    const left = await planning();
-    left.child.say({ type: "asked", groups: EVERYTHING.slice(1) });
-    left.child.say({ type: "idle", turns: 1 });
-    const asked = left.w.conversation(left.id).find((entry) => entry.line.kind === "asked")!.n;
-    await left.answerTheCard();
-    expect(left.w.editing.read(left.id).asking).toEqual({ entry: asked, answered: 1 });
-    left.writeSpec();
-    left.child.say({ type: "idle", turns: 1 });
-    expect(left.w.editing.read(left.id).asking).toBeNull();
-    expect(left.w.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toBeNull();
-
-    // A turn that ends without writing the spec leaves the card up: the
-    // session is still waiting on the answer.
-    const waiting = await planning();
-    waiting.child.say({ type: "asked", groups: EVERYTHING.slice(1) });
-    waiting.child.say({ type: "idle", turns: 1 });
-    await waiting.answerTheCard();
-    waiting.child.say(said("Thanks."));
-    waiting.child.say({ type: "idle", turns: 1 });
-    expect(waiting.w.editing.read(waiting.id).asking).not.toBeNull();
+  it("puts every group asked in one call in turn, through turns that write the spec and ask nothing more", async () => {
+    // All three asked at once, and the spec written as each answer is read:
+    // the session is still waiting on the groups it has not had answered, and
+    // the person has not been shown them yet.
+    const { w, id, child, shown, answerTheCard, writeSpec } = await planning();
+    child.say({ type: "asked", groups: EVERYTHING });
+    child.say({ type: "idle", turns: 1 });
+    const asked = w.conversation(id).find((entry) => entry.line.kind === "asked")!.n;
+    await answerTheCard();
+    writeSpec();
+    child.say({ type: "idle", turns: 1 });
+    expect(w.editing.read(id).asking).toEqual({ entry: asked, answered: 1 });
+    expect(w.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toEqual({ entry: asked, answered: 1 });
+    await answerTheCard();
+    writeSpec();
+    child.say({ type: "idle", turns: 1 });
+    expect(w.editing.read(id).asking).toEqual({ entry: asked, answered: 2 });
+    await answerTheCard();
+    writeSpec();
+    child.say({ type: "idle", turns: 1 });
+    expect(shown).toEqual([`${asked}:0`, `${asked}:1`, `${asked}:2`]);
+    expect(w.editing.read(id).asking).toBeNull();
 
     // And one that writes the spec and asks in the same turn is asking now.
     const asking = await planning();
@@ -540,6 +543,202 @@ describe("a session asking what it has already asked (D-117)", () => {
       ),
     ).toBe(true);
     expect(asking.w.editing.read(asking.id).asking).not.toBeNull();
+  });
+
+  it("does not take a lettered answer to a group waiting behind as the answer to the one in front", async () => {
+    const { w, id, child } = await planning();
+    child.say({ type: "asked", groups: EVERYTHING });
+    child.say({ type: "idle", turns: 1 });
+    await w.interviews.turn(id, "a) Pixel-art sprites drawn in code\nb) Simple beeps generated in code");
+    // Read as the interview reads it: not the flap and the score's answer, so
+    // nothing is recorded and the asking ends.
+    expect(w.editing.read(id).answers).toEqual([]);
+    expect(w.editing.read(id).asking).toBeNull();
+  });
+
+  it("does not take a lettered answer to an asking waiting behind as the answer to the asking in front", async () => {
+    const { w, id, child } = await planning();
+    // Two askings: the flap and the score in front, the look and the sound
+    // asked later and waiting behind them.
+    child.say({ type: "asked", groups: [EVERYTHING[0]!] });
+    child.say({ type: "asked", groups: [EVERYTHING[2]!] });
+    child.say({ type: "idle", turns: 1 });
+    const [first, behind] = w.conversation(id).filter((entry) => entry.line.kind === "asked").map((entry) => entry.n);
+    expect(w.editing.read(id).asking).toEqual({ entry: first, answered: 0 });
+    expect(w.editing.read(id).askingNext).toEqual([behind]);
+    // The later asking's answers under the letters of the one in front: read as
+    // the interview reads them against what waits behind, not the flap and
+    // the score's answer, so nothing is recorded and every asking ends.
+    await w.interviews.turn(id, "a) Pixel-art sprites drawn in code\nb) Simple beeps generated in code");
+    expect(w.editing.read(id).answers).toEqual([]);
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).askingNext).toEqual([]);
+  });
+});
+
+describe("what a turn tells the interview of the questions it waits on (D-117)", () => {
+  const option = (label: string) => ({ label, detail: null, recommended: false });
+  const WHERE = { title: "Where it lands", parts: [{ question: "Where?", options: [option("Home"), option("Board")] }] };
+  const finding = {
+    heading: "Criterion 1 and R1",
+    difference: "Criterion 1 and R1 say different things.",
+    options: [option("Change the plan"), option("Change the spec")],
+  };
+  /** The turns the session was sent, as they went down. */
+  const sent = (child: FakeInterview) =>
+    child.written.map((line) => JSON.parse(line) as { text: string; asking?: string });
+
+  async function running() {
+    const w = host(repository());
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    await w.interviews.start(session.id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    return { w, id: session.id, child };
+  }
+  /** A problem between the plan and the spec put in front of the person, and the session's own question behind it. */
+  function problemInFront(w: Awaited<ReturnType<typeof running>>["w"], id: string, child: FakeInterview) {
+    w.editing.landDrift(
+      id,
+      { findings: [finding], dismissed: false } as unknown as Parameters<typeof w.editing.landDrift>[1],
+      false,
+      (line) => w.interviews.say(id, line),
+      () => w.interviews.askingChanged(id),
+    );
+    const problem = w.editing.read(id).asking!.entry;
+    child.say({ type: "asked", groups: [WHERE] });
+    const asked = w.conversation(id).filter((entry) => entry.line.kind === "asked").at(-1)!.n;
+    expect(w.editing.read(id).asking).toEqual({ entry: problem, answered: 0 });
+    expect(w.editing.read(id).askingNext).toEqual([asked]);
+    return asked;
+  }
+
+  it("sends the answer to a problem of the host's as keeping the session's questions, and puts them next", async () => {
+    const { w, id, child } = await running();
+    const asked = problemInFront(w, id, child);
+    await w.interviews.turn(id, "Change the plan");
+    expect(sent(child).at(-1)).toEqual({ type: "turn", text: "Change the plan", asking: "kept" });
+    expect(w.editing.read(id).asking).toEqual({ entry: asked, answered: 0 });
+    // The session's own group is read off the turn by both ends alike.
+    await w.interviews.turn(id, "Home");
+    expect(sent(child).at(-1)).toEqual({ type: "turn", text: "Home" });
+    expect(w.editing.read(id).asking).toBeNull();
+  });
+
+  it("sends the person's own words past a problem of the host's as ending the session's questions too", async () => {
+    const { w, id, child } = await running();
+    problemInFront(w, id, child);
+    await w.interviews.turn(id, "Home");
+    expect(sent(child).at(-1)).toEqual({ type: "turn", text: "Home", asking: "ended" });
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).askingNext).toEqual([]);
+  });
+
+  it("sends its own ask to condense as keeping the questions, and leaves the card up", async () => {
+    const { w, id, child } = await running();
+    child.say({ type: "asked", groups: [WHERE] });
+    const asked = w.conversation(id).find((entry) => entry.line.kind === "asked")!.n;
+    child.say({
+      type: "message",
+      message: { type: "assistant", message: { content: [{ type: "text", text: "x".repeat(12_001) }] } },
+    });
+    const condense = sent(child).at(-1)!;
+    expect(condense.text).toMatch(/^Perbo: .*Write it again, condensed to fit/);
+    expect(condense.asking).toBe("kept");
+    expect(w.editing.read(id).asking).toEqual({ entry: asked, answered: 0 });
+  });
+
+  it("puts nothing the session before asked once the interview starts a new session, and takes its answers down too", async () => {
+    const repo = repository();
+    const { w, id, child } = await (async () => {
+      const w = host(repo);
+      const session = await w.open();
+      w.editing.recordSpec(session.id, "retry-a-failed-run");
+      await w.interviews.start(session.id);
+      const child = w.spawned[0]!.child;
+      child.say(started("sdk-1"));
+      return { w, id: session.id, child };
+    })();
+    const WHO = { title: "Who", parts: [{ question: "Who?", options: [option("Me"), option("Them")] }] };
+    const WHEN = { title: "When", parts: [{ question: "When?", options: [option("Now"), option("Later")] }] };
+    // One question answered, one in front of the person and one waiting behind it.
+    child.say({ type: "asked", groups: [WHERE] });
+    await w.interviews.turn(id, "Home");
+    expect(w.editing.read(id).answers).toHaveLength(1);
+    child.say({ type: "asked", groups: [WHO] });
+    child.say({ type: "asked", groups: [WHEN] });
+    const lines = w.conversation(id);
+    expect(w.editing.read(id).askingNext).toHaveLength(1);
+    child.close(0);
+
+    // The same provider continues the session, and what it asked and heard stands.
+    const same = host(repo, undefined, w.records());
+    await same.interviews.start(id);
+    expect(same.spawned[0]!.args).toContain("--session");
+    expect(same.editing.read(id).asking).not.toBeNull();
+    expect(same.editing.read(id).askingNext).toHaveLength(1);
+    expect(same.editing.read(id).answers).toHaveLength(1);
+
+    // Another provider starts a session of its own, which has asked nothing
+    // and heard nothing. New tasks draft on Codex now, and so does this
+    // planning, which has no ticket.
+    const other = host(repo, undefined, w.records(), "codex-cli");
+    await other.interviews.start(id);
+    expect(other.spawned[0]!.args).not.toContain("--session");
+    expect(other.editing.read(id).asking).toBeNull();
+    expect(other.editing.read(id).askingNext).toEqual([]);
+    expect(other.editing.read(id).answers).toEqual([]);
+    expect(other.told.filter((change) => change?.kind === "interview").at(-1)?.asking).toBeNull();
+    expect(other.conversation(id)).toEqual(lines);
+    // The question the session before had answered, asked again by the new
+    // one: put as a card, and its answer goes down to the session waiting on it.
+    const fresh = other.spawned[0]!.child;
+    fresh.say(started("codex-1"));
+    fresh.say({ type: "asked", groups: [WHERE] });
+    const again = other.conversation(id).filter((entry) => entry.line.kind === "asked").at(-1)!.n;
+    expect(other.editing.read(id).asking).toEqual({ entry: again, answered: 0 });
+    await other.interviews.turn(id, "Board");
+    expect(sent(fresh).at(-1)).toEqual({ type: "turn", text: "Board" });
+    expect(other.editing.read(id).answers).toEqual([{ question: "Where?", labels: ["Home", "Board"], answer: "Board" }]);
+    expect(other.editing.read(id).asking).toBeNull();
+  });
+
+  it("takes the answers down when the interview starts a new session with nothing left asked", async () => {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    child.say({ type: "asked", groups: [WHERE] });
+    await w.interviews.turn(id, "Home");
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).answers).toHaveLength(1);
+    child.close(0);
+    const other = host(repo, undefined, w.records(), "codex-cli");
+    await other.interviews.start(id);
+    expect(other.editing.read(id).answers).toEqual([]);
+  });
+
+  it("keeps a problem of the host's in front when the interview starts a new session, and drops what waited behind it", async () => {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    problemInFront(w, id, child);
+    const problem = w.editing.read(id).asking;
+    child.close(0);
+    const other = host(repo, undefined, w.records(), "codex-cli");
+    await other.interviews.start(id);
+    expect(other.editing.read(id).asking).toEqual(problem);
+    expect(other.editing.read(id).askingNext).toEqual([]);
   });
 });
 

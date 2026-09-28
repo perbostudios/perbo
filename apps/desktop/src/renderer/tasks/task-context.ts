@@ -1,4 +1,4 @@
-import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, type Cost } from "@perbo/contracts/browser";
+import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, settledRow, type Cost } from "@perbo/contracts/browser";
 import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
 import { ATTEMPT_STARTS, runnerStages, runnerTally, spokenByAttempt, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
@@ -388,14 +388,19 @@ const RUN_OUTCOME_SENTENCES: Record<string, string> = {
  * beside the outcome sentences they stand for.
  */
 const NOTHING_ASKED = {
-  /** The executor declined what was left (D-065), as the attempts record it: answered by a principle, not on the card. */
-  declined: {
+  /**
+   * The executor declined what was left (D-065), as the attempts record it:
+   * answered by a principle, not on the card. Plan it again is named only
+   * where the page offers it.
+   */
+  declined: (planAgain: boolean): StopReason => ({
     text: "The executor declined the findings left open, saying no practice determines them.",
     detail:
       "The executor declined the findings left open, saying no practice determines them; its reasons are on the " +
       "round record. A declined finding takes no answer on the decision card: `perbo principle add` records " +
-      "your answer in .perbo/principles.md, which the executor reads on the next run.",
-  },
+      "your answer in .perbo/principles.md, which the executor reads on the next run" +
+      (planAgain ? ", and Plan it again starts that run from the spec." : "."),
+  }),
   /** An escalation with nothing declined and nothing on the record for the person, as an incomplete review's can be. */
   escalated: {
     text: "The review escalated the run, and put nothing on its record to you.",
@@ -410,7 +415,7 @@ const NOTHING_ASKED = {
       "The review this run ended on is not readable in the records Perbo holds, so no question on it can be " +
       "asked, and the loop stopped here rather than pausing for you with nothing to answer.",
   },
-} satisfies Record<string, StopReason>;
+} satisfies Record<string, StopReason | ((planAgain: boolean) => StopReason)>;
 
 /** A run's outcome as a sentence (`RUN_OUTCOME_SENTENCES`). */
 export const outcomeSentence = (outcome: string): string =>
@@ -428,13 +433,18 @@ const rowWords = (entry: Pick<Detail["ticket"]["history"][number], "note" | "to"
  * escalation, that the executor declined what was left where an attempt since
  * the review records declines, and otherwise that the review put nothing to
  * them; for any other outcome, its row's outcome in Perbo's words and that
- * nothing is left to answer. Null where its last row is not such a run's end.
+ * nothing is left to answer. Null where the row that left the ticket where it
+ * is, a run refused for owed answers passed over (`settledRow`), is not such a
+ * run's end.
+ * `planAgain` says whether the page offers Plan it again, which a reason
+ * names only where it does.
  */
 export function gateClosedReasons(
   history: Detail["ticket"]["history"],
   attempts: readonly Pick<AttemptView, "review" | "declines">[],
+  planAgain: boolean,
 ): StopReason[] | null {
-  const last = history.at(-1);
+  const last = settledRow(history);
   if (last === undefined || !last.note.startsWith(gateClosedNote(""))) return null;
   const outcome = runEndedOn(last.note);
   if (outcome === null) return null;
@@ -443,7 +453,7 @@ export function gateClosedReasons(
   if (outcome === "escalated")
     return [
       attempts.slice(reviewed).some((attempt) => (attempt.declines ?? []).length > 0)
-        ? NOTHING_ASKED.declined
+        ? NOTHING_ASKED.declined(planAgain)
         : NOTHING_ASKED.escalated,
     ];
   const text = outcomeSentence(outcome);

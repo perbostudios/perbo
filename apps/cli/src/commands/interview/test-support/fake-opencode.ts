@@ -55,6 +55,8 @@ export interface FakeOpenCode {
     scratch: string[];
     /** Every model the chat's own session refused as not found. */
     modelRefused: string[];
+    /** Every model the chat's own session was set to. */
+    selected: string[];
   };
 }
 
@@ -72,6 +74,8 @@ export function fakeOpenCode(options: {
    * directory's snapshot lacks is refused `model not found` there.
    */
   staleSnapshots?: number;
+  /** The scratch session, counted from 1, at which the process ends with code 3 and a line on stderr, unanswered. */
+  exitAtScratch?: number;
 }): FakeOpenCode {
   mkdirSync(options.root, { recursive: true });
   const binary = join(options.root, "opencode");
@@ -88,6 +92,7 @@ const sessionId = ${JSON.stringify(options.sessionId)};
 let refuseResumes = ${JSON.stringify(options.refuseResumes ?? 0)};
 const modeOption = { id: 'mode', currentValue: 'build', options: ${JSON.stringify(options.modes ?? ["build", "plan"])}.map((value) => ({ value, name: value })) };
 const staleSnapshots = ${JSON.stringify(options.staleSnapshots ?? 0)};
+const exitAtScratch = ${JSON.stringify(options.exitAtScratch ?? null)};
 const snapshots = new Map(); let staleSession = false; let scratchSessions = 0;
 const configOptionsFor = (directory) => {
   if (!snapshots.has(directory)) snapshots.set(directory, snapshots.size < staleSnapshots);
@@ -150,13 +155,14 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
   const m = JSON.parse(line);
   if (m.method === undefined && waiting.has(m.id)) { const done = waiting.get(m.id); waiting.delete(m.id); done(m.result); return; }
   if (m.method === 'initialize') send({ id: m.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+  if (m.method === 'session/new' && m.params.cwd.includes('catalogue-') && scratchSessions + 1 === exitAtScratch) { note({ scratch: m.params.cwd }); process.stderr.write('opencode crashed\n'); setTimeout(() => process.exit(3), 20); return; }
   if (m.method === 'session/new' && m.params.cwd.includes('catalogue-')) { note({ scratch: m.params.cwd }); send({ id: m.id, result: { sessionId: 'scratch-' + (++scratchSessions), configOptions: configOptionsFor(m.params.cwd) } }); return; }
   if (m.method === 'session/delete') { note({ deleted: m.params.sessionId }); send({ id: m.id, result: {} }); return; }
   if (m.method === 'session/new') { cwd = m.params.cwd; const configOptions = configOptionsFor(cwd); staleSession = configOptions[0].options.length === 1; await connect(); send({ id: m.id, result: { sessionId, configOptions } }); }
   if (m.method === 'session/resume' && refuseResumes > 0) { refuseResumes -= 1; note({ resumeRefused: m.params.sessionId }); send({ id: m.id, error: { code: -32603, message: 'Internal error: Internal service failure' } }); return; }
   if (m.method === 'session/resume') { cwd = m.params.cwd; note({ resumed: m.params.sessionId }); const configOptions = configOptionsFor(cwd); staleSession = configOptions[0].options.length === 1; await connect(); send({ id: m.id, result: { configOptions } }); }
   if (m.method === 'session/set_config_option' && staleSession) { note({ modelRefused: m.params.value }); send({ id: m.id, error: { code: -32602, message: 'Invalid params: model not found: ' + m.params.value } }); return; }
-  if (m.method === 'session/set_config_option') send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: m.params.value }] } });
+  if (m.method === 'session/set_config_option') { note({ selected: m.params.value }); send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: m.params.value }] } }); }
   if (m.method === 'session/prompt') { note({ prompt: m.params.prompt[0].text }); void play(m.id); }
 });
 `,
@@ -187,6 +193,7 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
         resumed: (all.find((entry) => "resumed" in entry)?.["resumed"] as string | undefined) ?? null,
         scratch: all.flatMap((entry) => ("scratch" in entry ? [entry["scratch"] as string] : [])),
         modelRefused: all.flatMap((entry) => ("modelRefused" in entry ? [entry["modelRefused"] as string] : [])),
+        selected: all.flatMap((entry) => ("selected" in entry ? [entry["selected"] as string] : [])),
       };
     },
   };

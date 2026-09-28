@@ -8,6 +8,7 @@ import {
   type RetainedBranch,
   type ReviewArtifact,
   type HistoryRow,
+  sameCommit,
 } from "@perbo/contracts";
 import { git, isAttemptBranch } from "@perbo/workspace";
 import { readAttemptsRecord, sealedByAttempt } from "../../attempts.js";
@@ -17,7 +18,6 @@ import type { DeliveredChecksReading } from "../../delivery.js";
 import { acquireRunLock } from "../../lock.js";
 import type { LoopMergeOutcome } from "../../merge.js";
 import { RunRefusedError } from "../../refusal.js";
-import { sameCommit } from "../../resume.js";
 import type { TicketRunConfig } from "./config.js";
 import { resolvePorts, type LoopPorts } from "./context.js";
 import { attemptsThatSealed, judgedOnRecord, retainedReview } from "./continuation.js";

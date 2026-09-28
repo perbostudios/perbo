@@ -956,7 +956,8 @@
               "deterministic_failure": null,
               "findings_given": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
               "findings_closed": "695fe286e11bf5d151135a69f41f4dd3301fba95053e8369b05dd63b85ded127",
-              "findings_open": ""
+              "findings_open": "",
+              "findings_declined": ""
             },
             "context_manifest": [],
             "versions": {

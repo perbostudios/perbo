@@ -14,7 +14,14 @@ import { openDrafts, problemsHoldApproval, titleChanged, turnHoldsApproval, turn
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { heldTicket, isLive, isRun } from "../shared/jobs.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
+import { questionsOnRecord } from "../shared/decisions.js";
+import {
+  ANOTHER_PLANNING_HOLDS,
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
+  deletePullRequestOpen,
+  pullRequestOpen,
+} from "../shared/discard.js";
 import { ANTHROPIC_API_ABOUT, HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
 import { egressSettledLine } from "@perbo/contracts/browser";
@@ -484,6 +491,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   replan: async (request) => {
     const { ticket } = ticketRow(request.key);
+    // A ticket whose pull request is open is not deleted, so it is not planned
+    // again either, as the host refuses it (D-129).
+    if (pullRequestOpen(ticket)) throw new Error(deletePullRequestOpen(ticket));
     // The spec the stopped plan was drafted from, in the words the CLI refuses
     // in, because this is the same question `admit --start-over` asks and a
     // person should not meet two sentences for one answer.
@@ -505,8 +515,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // reachable way to press this with nothing to draft from.
     if (specFiles()[named] === undefined) throw new Error(`no spec at ${spec}`);
     // And only beside a spent record, in `admit`'s own words: a spec whose
-    // ticket is still live has its plan.
-    if (!["failed", "plan_invalid", "cancelled"].includes(ticket.state))
+    // ticket is still live has its plan. A ticket in `changes_requested` whose
+    // record asks the person nothing is spent too, as the host reads it (D-132).
+    const unanswerable =
+      ticket.state === "changes_requested" && questionsOnRecord(detail(request.key)).length === 0;
+    if (!unanswerable && !["failed", "plan_invalid", "cancelled"].includes(ticket.state))
       throw new Error(
         `${request.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
           `${request.key} is ${ticket.state}, which is past re-drafting, so this spec has its plan`,
@@ -1020,11 +1033,16 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   sync: (request) =>
     job("sync", request.repoId, request.key, () => {
       const { ticket } = ticketRow(request.key);
-      if (ticket.delivery.state === "open") {
+      if (ticket.delivery.state !== "open") return;
+      // The sample's pull request is merged where the ticket waits at
+      // `pr_open`, and was closed on GitHub where an escalated run published
+      // it and the ticket waits elsewhere (D-129): the record says so, and the
+      // ticket stays where it is.
+      if (ticket.state === "pr_open") {
         moveTicket(ticket, [{ to: "merged", note: "The pull request was merged." }]);
         ticket.delivery.state = "merged";
-        ticket.delivery.observed_at = new Date().toISOString();
-      }
+      } else ticket.delivery.state = "closed";
+      ticket.delivery.observed_at = new Date().toISOString();
     }),
   // The merge press on a retained branch: pushed and its pull request opened
   // as the host does it, refused as the CLI refuses it

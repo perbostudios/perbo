@@ -4,6 +4,7 @@ import {
   isAttemptBranch,
   recordedBranch,
   shortSlug,
+  ticketBranchStillAt,
   ticketKey,
 } from "./naming.js";
 
@@ -109,5 +110,44 @@ describe("the branch a ticket already has", () => {
     expect(
       recordedBranch({ delivery: "prb/scp017/one", attempt: "ayo/scp017/two", lease: "prb/scp0160/three" }, TICKET),
     ).toBeNull();
+  });
+});
+
+describe("whether a ticket's branch is still at the commit judged (D-132)", () => {
+  const JUDGED = "a".repeat(40);
+  const MOVED = "b".repeat(40);
+  const input = { ticket_key: "PRB-16", ticket_id: "ticket_SCP016", outcome: "Provision one isolated worktree" };
+  /** The checkout's branches, by ref, and the refs each read asked for. */
+  const checkout = (branches: Record<string, string>) => {
+    const asked: string[] = [];
+    return {
+      asked,
+      resolveCommit: async (ref: string) => {
+        asked.push(ref);
+        return branches[ref] ?? null;
+      },
+    };
+  };
+
+  it("reads the branch the records name, and is true only where its tip is the commit judged", async () => {
+    const at = checkout({ "refs/heads/ayo/scp016/two": JUDGED });
+    expect(await ticketBranchStillAt({ ...input, ...at, recorded: { attempt: "ayo/scp016/two" }, commit: JUDGED })).toBe(true);
+    // An abbreviated commit names the same one.
+    expect(
+      await ticketBranchStillAt({ ...input, ...at, recorded: { attempt: "ayo/scp016/two" }, commit: JUDGED.slice(0, 12) }),
+    ).toBe(true);
+    expect(at.asked).toEqual(["refs/heads/ayo/scp016/two", "refs/heads/ayo/scp016/two"]);
+    const moved = checkout({ "refs/heads/ayo/scp016/two": MOVED });
+    expect(await ticketBranchStillAt({ ...input, ...moved, recorded: { attempt: "ayo/scp016/two" }, commit: JUDGED })).toBe(
+      false,
+    );
+  });
+
+  it("reads the branch the loop mints where the records name none, and is false where the branch is absent", async () => {
+    const minted = `refs/heads/${branchName(input)}`;
+    const at = checkout({ [minted]: JUDGED });
+    expect(await ticketBranchStillAt({ ...input, ...at, recorded: {}, commit: JUDGED })).toBe(true);
+    expect(at.asked).toEqual([minted]);
+    expect(await ticketBranchStillAt({ ...input, ...checkout({}), recorded: {}, commit: JUDGED })).toBe(false);
   });
 });

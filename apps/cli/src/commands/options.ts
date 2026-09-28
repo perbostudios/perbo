@@ -8,6 +8,7 @@ import {
   decidable,
   decisionChoicesFor,
   hasAcceptanceCriteria,
+  leftToPrinciple,
   loopOnRecord,
   NOTHING_TRIED,
   routedToPerson,
@@ -118,6 +119,13 @@ export async function options(
       throw new UsageError(
         `${wanted.slice(0, 12)} is not a finding of ${key}'s last review (${review.review_id}); ` +
           "`perbo inspect` lists its findings",
+      );
+    // A finding the executor declined takes no answer here, as the decision
+    // card asks none of it: a principle is its answer (D-065).
+    if (leftToPrinciple(finding, loop))
+      throw new UsageError(
+        `${wanted.slice(0, 12)} (${finding.rule_id}) is a finding the executor declined (D-065), and no ` +
+          "choice closes it: `perbo principle add` carries your answer to the executor",
       );
     if (finding.status !== "open" || !(routedToPerson(finding, loop) || finding.closure === "human"))
       throw new UsageError(

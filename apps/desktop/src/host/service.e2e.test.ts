@@ -1483,6 +1483,102 @@ describe("the graph while the work runs", () => {
     expect(ticketRun(await service.snapshot(), unread)).toMatchObject({ paused: false, stoppedShort: true });
   });
 
+  it("refuses a run that owes the person's answers while the branch is at the commit judged, and starts one once a person has moved it (D-132)", async () => {
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run") {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-C", repo, ...args], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_AUTHOR_NAME: "Owen", GIT_AUTHOR_EMAIL: "o@example.com", GIT_COMMITTER_NAME: "Owen", GIT_COMMITTER_EMAIL: "o@example.com" },
+      }).trim();
+    // The branch the loop worked on, at the commit its review judged.
+    const judged = git("rev-parse", "HEAD");
+    const branch = `prb/${ticketId.replace(/^ticket_/, "")}/work`;
+    git("branch", branch, judged);
+    const stuck = "7".repeat(64);
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [],
+      review: {
+        createdAt: "2026-09-27T12:48:05.305Z",
+        body: JSON.stringify({
+          review_id: "rev_one",
+          decision: "remediable",
+          target: { head_commit: judged },
+          findings: [
+            {
+              key: stuck,
+              rule_id: "verification.execution_missing",
+              criterion_id: "ac_1",
+              status: "open",
+              routing: "remediable",
+              closure: "executor",
+              statement: "No execution result establishes the total.",
+            },
+          ],
+        }),
+      },
+    });
+    // Only the review is read here: the branch is the one the delivery record
+    // names, and `perbo inspect` reads no hand-written attempt.
+    rmSync(join(repo, ".perbo", "state", `${ticketId}.attempts.json`));
+    const ticketPath = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(ticketPath, "utf8")) as { state: string; history: unknown[]; delivery: Record<string, unknown> };
+    // The run stalled on it, on the branch its delivery record names.
+    writeFileSync(
+      ticketPath,
+      JSON.stringify({
+        ...ticket,
+        state: "changes_requested",
+        approved_at: "2026-09-27T12:00:00.000Z",
+        delivery: { ...ticket.delivery, branch },
+        history: [
+          ...ticket.history,
+          { at: "2026-09-27T12:53:04.517Z", from: ticket.state, to: "changes_requested", note: "the gate closed: remediation_stalled" },
+        ],
+      }),
+    );
+    const start = async () => {
+      const detail = await service.detail(repoId, "PRB-1");
+      return finished(
+        service,
+        (
+          await service.request({
+            kind: "run",
+            repoId,
+            key: "PRB-1",
+            digest: detail.digest,
+            approve: false,
+            publish: false,
+            resumeFrom: null,
+          })
+        ).id,
+      );
+    };
+
+    expect((await service.detail(repoId, "PRB-1")).owed.map((question) => question.id)).toEqual([stuck]);
+    const refused = await start();
+    expect(refused.state).toBe("failed");
+    expect(refused.error).toContain("PRB-1's last run finished trying and left 1 question for you to answer");
+    expect(calls).toEqual([]);
+
+    // A person commits a fix by hand on the branch: \`perbo run\` reviews
+    // that afresh, and the desktop offers and starts the same run.
+    const byHand = git("commit-tree", `${judged}^{tree}`, "-p", judged, "-m", "a fix by hand");
+    git("update-ref", `refs/heads/${branch}`, byHand);
+    expect((await service.detail(repoId, "PRB-1")).owed).toEqual([]);
+    const ran = await start();
+    expect(ran.error).toBeNull();
+    expect(calls.map((call) => call[0])).toEqual(["run"]);
+  });
+
   it("records none of a person's answers where one of them is not one the loop acts on", async () => {
     const calls: string[][] = [];
     const runner: typeof runProcess = async (binary, args, options) => {
@@ -6341,7 +6437,7 @@ readline.createInterface({ input: process.stdin })
       const record = JSON.parse(readFileSync(made.ticket, "utf8")) as Record<string, unknown>;
       writeFileSync(made.ticket, JSON.stringify({ ...record, state: "pr_open" }));
       await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
-        "PRB-1 has a pull request open",
+        "PRB-1's pull request is open",
       );
       expect(existsSync(made.ticket), "the ticket").toBe(true);
       expect(existsSync(made.spec), "the spec its plan is read against").toBe(true);
@@ -6928,7 +7024,7 @@ describe("a stopped run's ticket", () => {
     writeFileSync(made.at, JSON.stringify({ ...held, state: "pr_open" }));
     await expect(
       made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" }),
-    ).rejects.toThrow(/has a pull request open, and that is a record this machine does not own/);
+    ).rejects.toThrow(/pull request is open, and that is a record this machine does not own/);
     expect(existsSync(join(made.repo, ".perbo", "tickets", "PRB-1.json"))).toBe(true);
     expect(existsSync(join(made.repo, "specs", slug))).toBe(true);
     // Merged on GitHub, and the work is the person's to delete again.
@@ -7001,6 +7097,126 @@ describe("a stopped run's ticket", () => {
     expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
   });
 
+  describe("Plan it again where the loop ended on a verdict (D-132)", () => {
+    /** PRB-1 as a run that closed the gate left it, its review asking the person `asks`. */
+    async function closedGate(runner: typeof runProcess, asks: boolean) {
+      const made = await stopped(runner);
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; ticket_id: string };
+      writeFileSync(made.at, JSON.stringify({ ...held, state: "changes_requested" }));
+      const body = Buffer.from(
+        JSON.stringify({
+          review_id: "rev_one",
+          decision: asks ? "escalate" : "remediable",
+          findings: [
+            {
+              key: "a".repeat(64),
+              rule_id: "product.retry",
+              status: asks ? "open" : "resolved",
+              routing: asks ? "escalates" : "remediable",
+              statement: "Keep the retry button?",
+            },
+          ],
+        }),
+      );
+      const sha256 = createHash("sha256").update(body).digest("hex");
+      mkdirSync(join(made.repo, ".perbo", "bundles", "objects"), { recursive: true });
+      writeFileSync(join(made.repo, ".perbo", "bundles", "objects", sha256), body);
+      writeFileSync(
+        join(made.repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ab.json"),
+        JSON.stringify({
+          bundle_id: "bundle_00000000000000ab",
+          kind: "review",
+          created_at: "2026-09-10T10:00:00.000Z",
+          subject_id: "rev_one",
+          ticket_id: held.ticket_id,
+          artifacts: [{ name: "review.json", sha256, bytes: body.length, retained: true }],
+        }),
+      );
+      return made;
+    }
+
+    it("drafts the plan again where the record asks the person nothing", async () => {
+      let repo = "";
+      const made = await closedGate(drafting(() => repo), false);
+      repo = made.repo;
+      const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+      expect(opened.key).toBe("PRB-2");
+      expect(existsSync(made.at), "the stopped ticket").toBe(false);
+    });
+
+    it("is refused where the record still asks the person, before anything is deleted", async () => {
+      const made = await closedGate(async (binary, args, options) => runProcess(binary, args, options), true);
+      await expect(
+        made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+      ).rejects.toThrow(/PRB-1 is changes_requested, which is past re-drafting/);
+      expect(existsSync(made.at), "the ticket").toBe(true);
+    });
+  });
+
+  describe("Plan it again and delete where an escalated run's pull request is open (D-129)", () => {
+    it("refuses both before anything is deleted or drafted, naming the pull request", async () => {
+      const seen: string[][] = [];
+      const made = await stopped(async (binary, args, options) => {
+        seen.push(args.slice(1, args.indexOf("--repo")));
+        return runProcess(binary, args, options);
+      });
+      // An escalated run that published (D-065): the ticket waits at
+      // changes_requested, and its pull request is open on GitHub.
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; delivery: Record<string, unknown> };
+      writeFileSync(
+        made.at,
+        JSON.stringify({
+          ...held,
+          state: "changes_requested",
+          delivery: { ...held.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+        }),
+      );
+      seen.length = 0;
+      const refusal =
+        "PRB-1's pull request #15 is open, and that is a record this machine does not own. Close or merge it on GitHub, " +
+        "then Refresh from GitHub; the work can be deleted or planned again after that.";
+      await expect(made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(refusal);
+      await expect(made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(refusal);
+      expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
+      expect(existsSync(made.at), "the ticket").toBe(true);
+      expect(existsSync(made.attempts), "the attempts record").toBe(true);
+      expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(true);
+    });
+
+    it("reads the pull request again on Refresh from GitHub, and deletes the work once it reads closed", async () => {
+      const synced: string[][] = [];
+      let at = "";
+      const made = await stopped(async (binary, args, options) => {
+        const command = args.slice(1, args.indexOf("--repo"));
+        if (command[0] !== "sync") return runProcess(binary, args, options);
+        synced.push(command);
+        // What `perbo sync` records where `gh` reports the pull request closed:
+        // the delivery record, and the ticket where it waits.
+        const read = JSON.parse(readFileSync(at, "utf8")) as { delivery: Record<string, unknown> };
+        writeFileSync(at, JSON.stringify({ ...read, delivery: { ...read.delivery, state: "closed" } }));
+        return { code: 0, stdout: "", stderr: "", cancelled: false };
+      });
+      at = made.at;
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; delivery: Record<string, unknown> };
+      writeFileSync(
+        made.at,
+        JSON.stringify({
+          ...held,
+          state: "changes_requested",
+          delivery: { ...held.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+        }),
+      );
+      await expect(made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(
+        /PRB-1's pull request #15 is open/,
+      );
+      const sync = await made.service.request({ kind: "sync", repoId: made.repoId, key: "PRB-1" });
+      expect((await finished(made.service, sync.id)).state).toBe("completed");
+      expect(synced).toEqual([["sync", "PRB-1"]]);
+      await made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" });
+      expect(existsSync(made.at), "the ticket").toBe(false);
+    });
+  });
+
   describe("Plan it again where the pull request is open", () => {
     it("is refused before anything is deleted or drafted, because that ticket is not deleted", async () => {
       const seen: string[][] = [];
@@ -7013,7 +7229,7 @@ describe("a stopped run's ticket", () => {
       seen.length = 0;
       await expect(
         made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
-      ).rejects.toThrow(/PRB-1 is pr_open, which is past re-drafting/);
+      ).rejects.toThrow(/PRB-1's pull request is open, and that is a record this machine does not own/);
       expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
       expect(existsSync(made.at), "the ticket").toBe(true);
       expect(existsSync(made.attempts), "the attempts record").toBe(true);

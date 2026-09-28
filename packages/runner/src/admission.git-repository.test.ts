@@ -52,6 +52,41 @@ const REDIRECTS = [
   "HOME=/tmp/h; git x main",
   "declare -x XDG_CONFIG_HOME=/tmp/c; git x main",
   "export GIT_DIR=/tmp/r/.git && git log",
+  // env's options read as getopt reads them: a cluster letter that takes a
+  // value takes the rest of its word, or the next word where nothing follows.
+  "env -iu X HOME=/tmp/h git status",
+  "env -vu X HOME=/tmp/h git status",
+  "env -iC /tmp HOME=/tmp/h git status",
+  "env -uX HOME=/tmp/h git status",
+  "env -a name HOME=/tmp/h git status",
+  // An escaped quote opens nothing, a single-quoted backslash escapes
+  // nothing, and a double-quoted one escapes the quote after it.
+  "X=\\' HOME=/tmp/h git status \\'",
+  "X='a\\' HOME=/tmp/h git status",
+  'X="a\\" " HOME=/tmp/h git status',
+  // Made by the shell's own assigning commands, whatever their options: a
+  // variable the environment already exports keeps its export.
+  "declare -gx HOME=/tmp/h; git status",
+  "declare HOME=/tmp/h; git status",
+  "local -x HOME=/tmp/h; git status",
+  "readonly HOME=/tmp/h; git status",
+  "export -- HOME=/tmp/h; git status",
+  "export PAGER HOME=/tmp/h; git status",
+  // `env` and the assigning builtins are handed their words as the shell
+  // hands them over, quotes and backslashes removed.
+  'env "HOME=/tmp/h" git status',
+  "env H\\OME=/tmp/h git status",
+  "env -i 'XDG_CONFIG_HOME=/tmp/c' git status",
+  "export 'HOME=/tmp/h'; git status",
+  'declare -x "HOME=/tmp/h"; git status',
+  // `env` reads every operand that holds an `=` as an assignment, whatever its name.
+  "env A+=1 HOME=/tmp/h git status",
+  "env 'A B=1' HOME=/tmp/h git status",
+  "env 1=2 HOME=/tmp/h git status",
+  // `NAME+=value` appends to NAME, in front of git and through a builtin.
+  "HOME+=/x git status",
+  "export HOME+=/x; git status",
+  "GIT_DIR+=/x git log",
   // Through a wrapper, a nested shell and a substitution.
   "HOME=/tmp/h sh -c 'git x main'",
   "sh -c 'HOME=/tmp/h git x main'",
@@ -94,7 +129,7 @@ describe("git pointed at a repository or config file the line picks", () => {
 });
 
 describe("what the rule leaves to the others", () => {
-  for (const line of ["git rev-parse --git-dir", "git log --oneline"]) {
+  for (const line of ["git rev-parse --git-dir", "git log --oneline", "echo \\'hi\\'"]) {
     it(`admits ${JSON.stringify(line)} on every executor`, () => {
       expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
       expect(codex(line).decision, line).toBe("allowed");
@@ -116,11 +151,51 @@ describe("what the rule leaves to the others", () => {
     });
   }
 
+  for (const line of [
+    "env -iu X git status",
+    "declare -g FOO=1; git status",
+    // A quoted name in front of a program is that program's name, and assigns nothing.
+    "'HOME=/x' git status",
+    "H\\OME=/x git status",
+    // `env` sets `HOME+`, and leaves `HOME` as it was.
+    "env HOME+=/x git status",
+    "export PAGER+=x; git log",
+  ]) {
+    it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_repository_redirect });
+    });
+  }
+
   it("leaves a HOME on a line that runs no git to the other rules", () => {
     for (const line of ["HOME=/tmp/h node scripts/build.js", "sh -c 'HOME=/tmp/h node x.js'"]) {
       expect(claude(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
     }
   });
+
+  for (const line of ["env 'A=1' pnpm test", "export PATH+=:/x; pnpm test", "env 'HOME=/tmp/h' pnpm test"]) {
+    it(`admits ${JSON.stringify(line)} on the hook, which runs no git`, () => {
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_repository_redirect });
+    });
+  }
+
+  it("leaves a HOME appended to on a line that runs no git to the other rules", () => {
+    for (const line of ["HOME+=/x node scripts/build.js"]) {
+      expect(claude(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
+    }
+  });
+
+  for (const line of ["git -C", "git status; git -C"]) {
+    it(`reads ${JSON.stringify(line)}, whose last option has no value, on every executor`, () => {
+      // git refuses the line and runs nothing, and the guard reads it rather than failing.
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_repository_redirect);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_repository_redirect });
+    });
+  }
 
   it("leaves `git -C . log` to the allow list: no refusal on the hook, the allow list's on Codex and OpenCode", () => {
     expect(claude("git -C . log")).toMatchObject({ decision: "allowed", rule: null });

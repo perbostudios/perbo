@@ -1,6 +1,6 @@
 # Domain and Event Model
 
-Perbo keeps one local domain: a directory of JSON records under `.perbo/`, validated by the Zod schemas in `@perbo/contracts`, which are the truth about the shape of every record below. Attempts, bundles and verdicts are appended and never rewritten, and a ticket's `history` records every transition, so there is no separate event bus or outbox.
+Perbo keeps one local domain: a directory of JSON records under `.perbo/`, validated by the Zod schemas in `@perbo/contracts`, which are the truth about the shape of every record below. Attempts, bundles, verdicts and a ticket's `history` are appended and never rewritten, and the `history` records every transition, so there is no separate event bus or outbox.
 
 ```text
 Ticket → PlanContract → ExecutionAttempt → ChangeSet + CheckResult[] → ReviewArtifact → pull request → MERGED

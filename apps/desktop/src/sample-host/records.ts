@@ -57,12 +57,14 @@ import {
 } from "../shared/contract-editing.js";
 import { ChangeMarks } from "../shared/change-marks.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
+import { owedOnRecord } from "../shared/decisions.js";
 import { calledOffPrefix } from "../shared/archive.js";
 import { busyMessage, heldTicket, inTheWay, isLive, journal } from "../shared/jobs.js";
 import {
   DELETE_TICKET_GONE,
   DELETE_WAITS_FOR_TICKET_COMMAND,
   deletePullRequestOpen,
+  pullRequestOpen,
 } from "../shared/discard.js";
 import type {
   PlanContract,
@@ -707,6 +709,19 @@ export function detail(key: string): Detail {
   } satisfies Detail["attempts"][number];
   const attempts =
     ticket.state === "plan_review" ? [] : remediated ? [reviewed, closing] : [reviewed];
+  // The rows `perbo verdict --decide` would hold for this ticket.
+  const verdicts = (decisionsTaken.get(key) ?? []).map((row) => ({
+    review: { reference: key, ticket_id: ticket.ticket_id, ticket_key: key, pull_request_url: null },
+    finding_key: row.finding_key,
+    rule_id: "product.dead_letter",
+    routing: "escalates",
+    decision: "decide",
+    choice: row.choice,
+    author: "Sample person",
+    decided_at: row.decided_at,
+    note: row.note,
+    superseded_at: null,
+  }));
   return {
     ticket,
     contract,
@@ -735,19 +750,10 @@ export function detail(key: string): Detail {
       unavailable: 0,
     },
     principles: principlesRecorded.map((principle) => `- ${principle}\n`).join(""),
-    // The rows `perbo verdict --decide` would hold for this ticket.
-    verdicts: (decisionsTaken.get(key) ?? []).map((row) => ({
-      review: { reference: key, ticket_id: ticket.ticket_id, ticket_key: key, pull_request_url: null },
-      finding_key: row.finding_key,
-      rule_id: "product.dead_letter",
-      routing: "escalates",
-      decision: "decide",
-      choice: row.choice,
-      author: "Sample person",
-      decided_at: row.decided_at,
-      note: row.note,
-      superseded_at: null,
-    })),
+    verdicts,
+    // What a run of this ticket would be refused for, as the host reads it:
+    // the sample's branches never move, so what its record owes is owed.
+    owed: ticket.approved_at === null ? [] : owedOnRecord({ ticket, attempts, verdicts }),
     effective: { stallMinutes: 12, ticketDollars: 2.5 },
     report: { sample: true },
   };
@@ -2670,7 +2676,7 @@ export function discardTicket(repoId: string, key: string): string | null {
   if (heldTicket(snapshot.jobs, repoId, key)) return DELETE_WAITS_FOR_TICKET_COMMAND;
   const row = snapshot.tasks.find((entry) => entry.repoId === repoId && entry.ticket.key === key);
   if (row === undefined) return DELETE_TICKET_GONE;
-  if (row.ticket.state === "pr_open") return deletePullRequestOpen(key);
+  if (pullRequestOpen(row.ticket)) return deletePullRequestOpen(row.ticket);
   snapshot.tasks = snapshot.tasks.filter((entry) => entry !== row);
   plans.delete(key);
   approaches.delete(key);

@@ -189,6 +189,8 @@ export interface OpenCodeInterviewOptions {
    */
   dataDirectory: string;
   env?: NodeJS.ProcessEnv;
+  /** How the transport waits between catalogue snapshots (`awaitOpenCodeModel`); a timer where omitted. */
+  wait?: (ms: number) => Promise<void>;
 }
 
 const ToolCallSchema = z
@@ -421,11 +423,15 @@ class AcpClient {
   private buffer = "";
   private stderr = "";
   private failure: Error | null = null;
+  /** The rejections that are OpenCode's own answer refusing a request, rather than the transport failing. */
+  private readonly openCodeRefusals = new WeakSet<Error>();
   private closed = false;
+  private readonly wait: ((ms: number) => Promise<void>) | undefined;
 
   constructor(options: OpenCodeInterviewOptions, session: InterviewSession, tools: ServedTools) {
     this.session = session;
     this.tools = tools;
+    this.wait = options.wait;
     this.root = mkdtempSync(join(tmpdir(), "perbo-interview-opencode-"));
     chmodSync(this.root, 0o700);
     for (const directory of ["config", "state", "cache"]) mkdirSync(join(this.root, directory), { mode: 0o700 });
@@ -475,14 +481,19 @@ class AcpClient {
       clientInfo: { name: "perbo_interview", version: "0.1.0" },
     });
     // The chat's session sees the catalogue snapshot its checkout's first
-    // session took, so a model it names is waited for in a scratch session's
-    // snapshot first (`awaitOpenCodeModel`).
-    if (session.model !== null)
-      await awaitOpenCodeModel({
-        model: session.model,
-        scratch: () => mkdtempSync(join(this.root, "catalogue-")),
-        request: (method, params) => this.request(method, params),
-      });
+    // session took, so the catalogue is settled in scratch sessions' snapshots
+    // first (`awaitOpenCodeModel`): until one offers the model the chat names,
+    // or with none named until two agree on a default. A named model is
+    // selected by name, and so is that default for a new session; a resumed
+    // one with none named keeps the model it already runs on, which OpenCode
+    // names only once the checkout's snapshot has been taken.
+    const model = await awaitOpenCodeModel({
+      model: session.model,
+      scratch: () => mkdtempSync(join(this.root, "catalogue-")),
+      request: (method, params) => this.request(method, params),
+      refused: (error) => this.refused(error),
+      ...(this.wait === undefined ? {} : { wait: this.wait }),
+    });
     const opened = z
       .object({
         sessionId: z.string().optional(),
@@ -518,30 +529,35 @@ class AcpClient {
       new Promise((resolveLater) => setTimeout(resolveLater, TOOLS_LISTED_WAIT_MS)),
     ]);
     await new Promise((resolveLater) => setTimeout(resolveLater, TOOLS_REGISTERED_GRACE_MS));
-    if (session.model !== null) {
-      const selected = z
-        .object({ configOptions: z.array(z.object({ id: z.string(), currentValue: z.unknown().optional() }).loose()) })
-        .loose()
-        .parse(await this.request("session/set_config_option", { sessionId: id, configId: "model", value: session.model }));
-      const current = selected.configOptions.find((option) => option.id === "model")?.currentValue;
-      if (current !== session.model) throw new Error(`opencode selected ${String(current)} instead of ${session.model}`);
-    }
+    if (session.model === null && session.resume !== null) return id;
+    const selected = z
+      .object({ configOptions: z.array(z.object({ id: z.string(), currentValue: z.unknown().optional() }).loose()) })
+      .loose()
+      .parse(await this.request("session/set_config_option", { sessionId: id, configId: "model", value: model }));
+    const current = selected.configOptions.find((option) => option.id === "model")?.currentValue;
+    if (current !== model) throw new Error(`opencode selected ${String(current)} instead of ${model}`);
     return id;
   }
 
   /**
    * A session asked for — opened or resumed — before OpenCode's model
-   * catalogue has arrived is refused; it is asked again.
+   * catalogue has arrived is refused; it is asked again. Any other failure is
+   * thrown at once.
    */
   private async retried(open: () => Promise<unknown>): Promise<unknown> {
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await open();
       } catch (error) {
-        if (attempt + 1 >= OPENCODE_SESSION_ATTEMPTS || this.closed) throw error;
+        if (!this.refused(error) || attempt + 1 >= OPENCODE_SESSION_ATTEMPTS || this.closed) throw error;
         await new Promise((resolveLater) => setTimeout(resolveLater, OPENCODE_SESSION_RETRY_MS));
       }
     }
+  }
+
+  /** Whether a request's rejection is OpenCode's own answer refusing it. */
+  private refused(error: unknown): boolean {
+    return error instanceof Error && this.openCodeRefusals.has(error);
   }
 
   /**
@@ -671,8 +687,11 @@ class AcpClient {
       const waiter = this.pending.get(message.id);
       if (!waiter) return;
       this.pending.delete(message.id);
-      if (message.error) waiter.reject(new Error(message.error.message ?? "opencode refused the request"));
-      else waiter.resolve(message.result);
+      if (message.error) {
+        const refusal = new Error(message.error.message ?? "opencode refused the request");
+        this.openCodeRefusals.add(refusal);
+        waiter.reject(refusal);
+      } else waiter.resolve(message.result);
       return;
     }
     if (message.method === "session/update") this.updated(message.params);

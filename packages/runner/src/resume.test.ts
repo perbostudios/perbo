@@ -7,13 +7,14 @@ import {
   SecretIndex,
   type MaterializationManifest,
   type PlanContract,
+  sameCommit,
 } from "@perbo/contracts";
 import type { AgentResult } from "./adapter.js";
 import { BundleStore } from "./bundle.js";
 import { EgressLog } from "./egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "./loop/index.js";
 import { EXECUTOR_PROMPT_VERSION, RESUMED_EXECUTOR_PROMPT_VERSION } from "./prompt.js";
-import { resolveResumeSource, sameCommit } from "./resume.js";
+import { resolveResumeSource } from "./resume.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "./transport.js";
 import { makeContract, makeReview } from "./test-support/records.js";
 import { git, runnerRepository } from "./test-support/repository.js";

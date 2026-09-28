@@ -61,51 +61,75 @@ export const OPENCODE_SESSION_RETRY_MS = 2_000;
 export const OPENCODE_MODEL_NOT_FOUND = "model not found";
 
 /**
- * Wait until OpenCode's ACP server offers `model`, before a role opens its
- * own session.
+ * Wait until OpenCode's ACP server offers the model a role runs, before the
+ * role opens its own session, and answer with that model.
  *
  * OpenCode's ACP server takes one snapshot of its model catalogue for each
  * directory, the first time a session is opened there, and keeps it for as
  * long as the process lives; its plugins settle after it starts, and a
  * snapshot taken before they have lacks models the settled catalogue holds
- * (measured on 2.0.14: 71 models where the settled catalogue has 77, its
- * default among the missing, about half the time). A model the snapshot lacks
- * is refused ("model not found") however often it is asked for in that
- * directory. So a role first opens a session in a directory of its own
- * (`scratch`), a fresh one each time so each is a fresh snapshot, until one
- * offers the model, deleting each as it goes, and only then opens the session
- * it works in: that directory's snapshot is taken after one that already
- * offered the model. `OPENCODE_SESSION_ATTEMPTS` snapshots at most,
- * `OPENCODE_SESSION_RETRY_MS` apart; a refusal of the session itself counts
- * as one.
+ * and names another default (measured on 2.0.14: 71 models and
+ * `opencode/mimo-v2.6-flash-free` where the settled catalogue has 77 and
+ * `opencode/longcat-2.5-preview-free`). A model the snapshot lacks is refused
+ * ("model not found") however often it is asked for in that directory. So a
+ * role first opens sessions in directories of its own (`scratch`), a fresh
+ * one each time so each is a fresh snapshot, deleting each as it goes, and
+ * only then opens the session it works in, whose directory's snapshot is
+ * taken after the scratch ones:
+ *
+ * - with a `model` named, until a snapshot offers it, and answers with it;
+ * - with none (`null`), until two snapshots name the same default with no
+ *   other snapshot between them, and answers with that default, which the
+ *   role then selects by name.
+ *
+ * `OPENCODE_SESSION_ATTEMPTS` sessions at most, `OPENCODE_SESSION_RETRY_MS`
+ * apart. A `session/new` OpenCode answered with an error — it refuses one
+ * asked for before its catalogue has arrived ("Internal service failure") —
+ * is one of those sessions but no snapshot, so it neither ends nor breaks two
+ * agreeing ones, and the last attempt's refusal is thrown as it came;
+ * `refused` says which of `request`'s rejections are such an answer.
+ * Any other rejection — the process gone, a request timed out — is thrown at
+ * once, unchanged.
  */
 export async function awaitOpenCodeModel(options: {
-  model: string;
+  model: string | null;
   /** A fresh, empty directory for one snapshot, made by the caller. */
   scratch: () => string;
   request: (method: string, params: unknown) => Promise<unknown>;
+  /** Whether a rejection of `request` is OpenCode's own answer refusing it. */
+  refused: (error: unknown) => boolean;
   wait?: (ms: number) => Promise<void>;
-}): Promise<void> {
+}): Promise<string> {
   const wait = options.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  /** The default the previous snapshot named, where it named one. */
+  let previous: string | null = null;
   for (let attempt = 1; ; attempt += 1) {
-    let offered: boolean;
+    let opened: {
+      sessionId?: unknown;
+      configOptions?: Array<{ id?: unknown; currentValue?: unknown; options?: Array<{ value?: unknown }> }>;
+    } | null;
     try {
-      const opened = (await options.request("session/new", { cwd: options.scratch(), mcpServers: [] })) as {
-        sessionId?: unknown;
-        configOptions?: Array<{ id?: unknown; options?: Array<{ value?: unknown }> }>;
-      } | null;
-      offered = (opened?.configOptions ?? []).some(
-        (option) => option.id === "model" && (option.options ?? []).some((choice) => choice.value === options.model),
-      );
-      if (typeof opened?.sessionId === "string")
-        await options.request("session/delete", { sessionId: opened.sessionId }).catch(() => undefined);
-    } catch {
-      offered = false;
+      opened = (await options.request("session/new", { cwd: options.scratch(), mcpServers: [] })) as typeof opened;
+    } catch (error) {
+      if (!options.refused(error) || attempt >= OPENCODE_SESSION_ATTEMPTS) throw error;
+      await wait(OPENCODE_SESSION_RETRY_MS);
+      continue;
     }
-    if (offered) return;
+    if (typeof opened?.sessionId === "string")
+      await options.request("session/delete", { sessionId: opened.sessionId }).catch(() => undefined);
+    const catalogue = (opened?.configOptions ?? []).find((option) => option.id === "model");
+    if (options.model !== null) {
+      if ((catalogue?.options ?? []).some((choice) => choice.value === options.model)) return options.model;
+    } else {
+      const named = typeof catalogue?.currentValue === "string" ? catalogue.currentValue : null;
+      if (named !== null && named === previous) return named;
+      previous = named;
+    }
     if (attempt >= OPENCODE_SESSION_ATTEMPTS)
       throw new Error(
-        `OpenCode did not offer ${options.model} in ${OPENCODE_SESSION_ATTEMPTS} catalogues: ${OPENCODE_MODEL_NOT_FOUND}`,
+        options.model !== null
+          ? `OpenCode did not offer ${options.model} in ${OPENCODE_SESSION_ATTEMPTS} catalogues: ${OPENCODE_MODEL_NOT_FOUND}`
+          : `OpenCode's catalogue did not settle on a default model in ${OPENCODE_SESSION_ATTEMPTS} catalogues`,
       );
     await wait(OPENCODE_SESSION_RETRY_MS);
   }

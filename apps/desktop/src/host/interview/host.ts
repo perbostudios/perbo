@@ -13,7 +13,12 @@ import {
   InterviewEntrySchema,
   TaskModelsSchema,
 } from "../../shared/protocol.js";
-import { interviewModelFor, type InterviewProviderName, type PromisePair } from "../../shared/contract-editing.js";
+import {
+  interviewModelFor,
+  interviewSessionArgs,
+  type InterviewProviderName,
+  type PromisePair,
+} from "../../shared/contract-editing.js";
 import { interviewArgv, interviewProvider } from "./argv.js";
 import { relayed } from "./relay.js";
 import type { Cli } from "../cli.js";
@@ -100,7 +105,8 @@ export interface InterviewDeps {
     | "architectTitled"
     | "beginAsking"
     | "answerAsking"
-    | "leaveAsking"
+    | "turnOnAsking"
+    | "newInterview"
     | "countNodes"
     | "adopt"
   >;
@@ -245,13 +251,6 @@ export class InterviewHost {
    */
   private readonly afterTheNote = new Set<string>();
   /**
-   * The sessions whose turn in flight has put a question of its own. A turn
-   * that writes the spec and puts none has finished with what it asked
-   * before, and its ending takes that asking down ({@link endTurn}). Cleared
-   * wherever a turn begins or ends.
-   */
-  private readonly askedThisTurn = new Set<string>();
-  /**
    * The reading owed after an admitted write, per session.
    *
    * One at a time: a turn that writes the file and then edits it again admits
@@ -344,6 +343,9 @@ export class InterviewHost {
     const provider = interviewProvider(session);
     const repo = this.deps.repository(session.repoId);
     const args = interviewArgv(repo, session, model);
+    // A new session has asked nothing, and its record beside the spec says so:
+    // the planning's card says the same (D-117).
+    if (interviewSessionArgs(session, provider).length === 0) this.deps.editing.newInterview(id);
     let stderr = "";
     let gone: () => void = () => undefined;
     const exited = new Promise<void>((resolve) => {
@@ -441,7 +443,11 @@ export class InterviewHost {
     const specBefore = owed === 1 ? this.specDigest(id) : null;
     const titleBefore = owed === 1 ? this.specTitle(id) : null;
     const pairBefore = owed === 1 ? this.deps.marks.pairOf(id, live.repoId) : null;
-    if (!live.child.write(encodeInterviewTurn(turn)))
+    // Where a problem of the host's own stands in front of the session's
+    // questions, the turn says what it did to them, since the session never
+    // saw that problem put and would read the answer to it against its own.
+    const asking = this.deps.editing.turnOnAsking(id, turn.text);
+    if (!live.child.write(encodeInterviewTurn(asking === undefined ? turn : { ...turn, asking })))
       throw new Error(
         "The chat is not listening. Start it again, then send this once it is running.",
       );
@@ -458,7 +464,6 @@ export class InterviewHost {
       this.planMovedThisTurn.delete(id);
       this.heldSaid.delete(id);
       this.opened.delete(id);
-      this.askedThisTurn.delete(id);
     }
     this.say(id, { kind: "turn", text: turn.text });
     // Recorded before it is answered, so the asking is judged against a
@@ -793,7 +798,6 @@ export class InterviewHost {
     // they are answering where one stands: recorded rather than counted back
     // out of the turns (D-117).
     if (asked !== null) {
-      this.askedThisTurn.add(id);
       this.deps.editing.beginAsking(id, asked.n);
       this.askingChanged(id);
     }
@@ -821,7 +825,12 @@ export class InterviewHost {
     const live = this.live.get(id);
     const text =
       `Perbo: ${overflow}. Write it again, condensed to fit, and leave out nothing it says.`;
-    if (asked < CONDENSE_ASKS && live?.child.write(encodeInterviewTurn({ type: "turn", text }))) {
+    // Perbo's own sentence, which answers nothing the session asked and leaves
+    // its questions where they are, as the dock leaves its card.
+    if (
+      asked < CONDENSE_ASKS &&
+      live?.child.write(encodeInterviewTurn({ type: "turn", text, asking: "kept" }))
+    ) {
       this.condensing.set(id, asked + 1);
       this.owed.set(id, (this.owed.get(id) ?? 0) + 1);
       this.say(id, null);
@@ -882,7 +891,6 @@ export class InterviewHost {
   private endTurn(id: string): void {
     this.sayWhatWasHeld(id);
     this.saySpecIsDrafted(id);
-    this.leaveWhatWasAsked(id);
     this.sayWhatWaitedOnTheNote(id);
     this.saySpecMovedToo(id);
     this.recordArchitectsTitle(id);
@@ -891,24 +899,7 @@ export class InterviewHost {
     this.doing.delete(id);
     this.saidDrafted.delete(id);
     this.afterTheNote.delete(id);
-    this.askedThisTurn.delete(id);
     this.forgetSpecCheck(id);
-  }
-
-  /**
-   * Take down what the interview asked before, where the turn ending wrote the
-   * spec and put no question of its own: the session has gone on without the
-   * answers, and a card left up for them would hold Generate plan back for
-   * questions nobody is waiting on. Pushed by whatever ends the turn, which
-   * says the asking as it leaves it.
-   */
-  private leaveWhatWasAsked(id: string): void {
-    if (!this.saidDrafted.has(id) || this.askedThisTurn.has(id)) return;
-    try {
-      this.deps.editing.leaveAsking(id);
-    } catch {
-      // The planning has gone, and its asking with it.
-    }
   }
 
   /** Say what was held, where the turn ended with it as the whole of it. */

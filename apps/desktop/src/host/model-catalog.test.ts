@@ -9,7 +9,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, delimiter, join } from "node:path";
 import { createScratch } from "@perbo/test-support";
-import { discoverModels } from "./model-catalog.js";
+import { discoverModels, firstLine } from "./model-catalog.js";
+import { PassThrough } from "node:stream";
 import { RequestSchema } from "../shared/protocol.js";
 
 const scratchDirectory = createScratch("perbo-catalog-test-");
@@ -358,6 +359,12 @@ describe("OpenCode's catalog (D-134)", () => {
       stallModelsBody?: boolean;
       /** Ignore SIGTERM and its stdin closing, as a server that will not stop does. */
       stubborn?: boolean;
+      /** On SIGTERM, write its database under its data directory a moment later and then exit, as OpenCode's does. */
+      writesOnStop?: boolean;
+      /** The integration list in place of the measured one. */
+      integrations?: unknown[];
+      /** The provider list's body, verbatim, in place of the JSON one. */
+      providersBody?: string;
     } = {},
   ) {
     const root = scratchDirectory();
@@ -385,13 +392,21 @@ describe("OpenCode's catalog (D-134)", () => {
     writeFileSync(
       binary,
       `#!/usr/bin/env node
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 const trace = (value) => appendFileSync(${JSON.stringify(trace)}, JSON.stringify(value) + '\\n');
 if (${JSON.stringify(options.stubborn === true)}) process.on('SIGTERM', () => undefined);
+if (${JSON.stringify(options.writesOnStop === true)}) process.on('SIGTERM', () => setTimeout(() => {
+  mkdirSync(join(process.env.XDG_DATA_HOME, 'opencode'), { recursive: true });
+  writeFileSync(join(process.env.XDG_DATA_HOME, 'opencode', 'opencode.db-wal'), 'checkpoint');
+  process.exit(0);
+}, 300));
 trace({ pid: process.pid, args: process.argv.slice(2), key: process.env.OPENCODE_API_KEY ?? null, anthropic: process.env.ANTHROPIC_API_KEY ?? null, project: process.env.OPENCODE_DISABLE_PROJECT_CONFIG });
 const models = ${JSON.stringify(models)};
 const providers = ${JSON.stringify(providers)};
+const integrations = ${JSON.stringify(options.integrations ?? null)};
+const providersBody = ${JSON.stringify(options.providersBody ?? null)};
 const expected = 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_PASSWORD).toString('base64');
 let reads = 0;
 const server = createServer((request, response) => {
@@ -399,7 +414,7 @@ const server = createServer((request, response) => {
   trace({ path: url.pathname, directory: url.searchParams.get('directory'), authorized: request.headers.authorization === expected });
   if (request.headers.authorization !== expected) { response.writeHead(401).end(); return; }
   const send = (data) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ location: {}, data })); };
-  if (url.pathname === '/api/integration') { if (${JSON.stringify(options.exitAfterIntegrations === true)}) setTimeout(() => process.exit(0), 50); return send([
+  if (url.pathname === '/api/integration') { if (${JSON.stringify(options.exitAfterIntegrations === true)}) setTimeout(() => process.exit(0), 50); return send(integrations ?? [
     { id: 'opencode', connections: process.env.OPENCODE_API_KEY ? [{ type: 'env', name: 'OPENCODE_API_KEY' }] : [] },
     { id: 'anthropic', connections: [] },
     { id: 'moonshot-cn', connections: [{ type: 'key' }] },
@@ -407,6 +422,7 @@ const server = createServer((request, response) => {
   if (url.pathname === '/api/model' && ${JSON.stringify(options.hangOnModels === true)}) return;
   if (url.pathname === '/api/model' && ${JSON.stringify(options.stallModelsBody === true)}) { response.writeHead(200, { 'content-type': 'application/json' }); response.write('{"location":{},'); return; }
   if (url.pathname === '/api/model') { reads += 1; return send(reads === 1 ? models.slice(0, 1) : reads === 2 ? models.slice(0, 2) : models); }
+  if (url.pathname === '/api/provider' && providersBody !== null) { response.writeHead(200, { 'content-type': 'application/json' }); response.end(providersBody); return; }
   if (url.pathname === '/api/provider') return send(providers);
   if (url.pathname === '/api/model/default') return send({ id: 'big-pickle', providerID: 'opencode' });
   response.writeHead(404).end();
@@ -414,7 +430,7 @@ const server = createServer((request, response) => {
 server.listen(0, '127.0.0.1', () => process.stdout.write(JSON.stringify({ url: ${JSON.stringify(options.names ?? null)} ?? 'http://127.0.0.1:' + server.address().port }) + '\\n'));
 // Gone when the test's end of stdin closes, however the test ended; a
 // server that ignores that is gone after 10 s all the same.
-if (!${JSON.stringify(options.stubborn === true)}) process.stdin.on('end', () => process.exit(0));
+if (!${JSON.stringify(options.stubborn === true || options.writesOnStop === true)}) process.stdin.on('end', () => process.exit(0));
 setTimeout(() => process.exit(0), 10_000).unref();
 process.stdin.resume();
 `,
@@ -505,6 +521,40 @@ process.stdin.resume();
     await vi.waitFor(() => expect(gone()).toBe(true), { timeout: 5_000, interval: 100 });
   });
 
+  it("removes its scratch home only once OpenCode has exited, so nothing OpenCode writes as it stops outlives the read", async () => {
+    const serve = fakeServe({ writesOnStop: true });
+    await serve.discover({});
+    const scratch = serve.read().find((entry) => typeof entry["directory"] === "string")!["directory"] as string;
+    // Past the moment the server wrote its database and exited.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(existsSync(scratch)).toBe(false);
+  });
+
+  it("reads the integration and provider lists entry by entry, leaving out an entry it does not know", async () => {
+    const serve = fakeServe({
+      integrations: [
+        { id: "opencode", connections: [] },
+        // No connections list, a number for an id, and not an object at all.
+        { id: "anthropic" },
+        { id: 7, connections: [{ type: "key" }] },
+        "moonshot-cn",
+        { id: "moonshot-cn", connections: [{ type: "key" }] },
+      ],
+      providers: [{ id: "opencode", integrationID: "opencode" }, { integrationID: "anthropic" }, null, { id: "moonshot", integrationID: "moonshot-cn" }],
+    });
+    const catalog = await serve.discover({});
+    expect(catalog.models.map((model) => model.id)).toEqual(["opencode/big-pickle", "moonshot/kimi-k3", "moonshot/kimi-unpriced"]);
+  });
+
+  it("says in one sentence that OpenCode answered with something it cannot read, rather than the parser's own words", async () => {
+    await expect(fakeServe({ providersBody: "<html>not json</html>" }).discover({})).rejects.toThrow(
+      /^OpenCode answered \/api\/provider with something Perbo cannot read\. Update it and refresh\.$/,
+    );
+    await expect(fakeServe({ providersBody: JSON.stringify({ location: {} }) }).discover({})).rejects.toThrow(
+      /^OpenCode answered \/api\/provider with something Perbo cannot read\. Update it and refresh\.$/,
+    );
+  });
+
   it("says in one sentence that OpenCode stopped where its server goes mid-read", async () => {
     await expect(fakeServe({ exitAfterIntegrations: true }).discover({})).rejects.toThrow(
       /^OpenCode stopped before it reported its models\. Update it and refresh\.$/,
@@ -520,5 +570,28 @@ process.stdin.resume();
       "OpenCode reports no model you can run now — none of its free models is listed and no provider is connected; " +
         "set OPENCODE_API_KEY in the app environment for OpenCode Zen and refresh.",
     );
+  });
+});
+
+describe("the first line OpenCode's server prints", () => {
+  it("is read, and nothing it prints after is kept: the reader lets go and the stream drains", async () => {
+    const stream = new PassThrough();
+    const read = firstLine(stream, 64);
+    stream.write('{"url":"http://127.0.0.1:4096"}\n');
+    await expect(read).resolves.toBe('{"url":"http://127.0.0.1:4096"}');
+    expect(stream.listenerCount("data")).toBe(0);
+    // A server that keeps printing: far past the limit, and nothing refuses or holds it.
+    for (let chunk = 0; chunk < 100; chunk += 1) stream.write("x".repeat(1_000));
+    expect(stream.readableFlowing).toBe(true);
+    await new Promise((settle) => setImmediate(settle));
+    expect(stream.readableLength).toBe(0);
+  });
+
+  it("refuses a first line past the limit, and lets go of the stream", async () => {
+    const stream = new PassThrough();
+    const read = firstLine(stream, 16);
+    stream.write("y".repeat(32));
+    await expect(read).rejects.toThrow("exceeded the output limit");
+    expect(stream.listenerCount("data")).toBe(0);
   });
 });

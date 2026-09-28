@@ -29,7 +29,7 @@ const ticket = (over: Partial<Ticket> = {}): Ticket =>
     key: "PRB-1",
     ticket_id: "ticket_1",
     state: "ready",
-    delivery: { pull_request_url: null },
+    delivery: { state: "none", pull_request_url: null, pull_request_number: null },
     ...over,
   }) as Ticket;
 function state(): ProfileState {
@@ -164,10 +164,28 @@ describe("discardTicket", () => {
     await expect(
       discardTicket(deps({ ticket: ticket({ state: "pr_open" }) }), repo, "PRB-1"),
     ).resolves.toBe(
-      "PRB-1 has a pull request open, and that is a record this machine does not own. Close " +
-        "or merge it on GitHub first, then delete the work.",
+      "PRB-1's pull request is open, and that is a record this machine does not own. Close or merge it " +
+        "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
     );
     expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
+  });
+
+  it("keeps work whose delivery records its pull request open at any other stage, as after an escalated run that published", async () => {
+    const repo = repository();
+    const escalated = ticket({ state: "changes_requested" });
+    const published = {
+      ...escalated,
+      delivery: { ...escalated.delivery, state: "open" as const, pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+    };
+    await expect(discardTicket(deps({ ticket: published }), repo, "PRB-1")).resolves.toBe(
+      "PRB-1's pull request #15 is open, and that is a record this machine does not own. Close or merge it " +
+        "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
+    );
+    expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
+    // Closed on GitHub, as `perbo sync` records it, and the work is the person's to delete.
+    const closed = { ...published, delivery: { ...published.delivery, state: "closed" as const } };
+    await expect(discardTicket(deps({ ticket: closed }), repo, "PRB-1")).resolves.toBeNull();
+    expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(false);
   });
 
   it("deletes work from every other stage, the loop included", async () => {

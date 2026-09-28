@@ -1,5 +1,10 @@
+import { realpathSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES, judgeCommand } from "./admission.js";
+import { codexCommandDecision } from "./codex/index.js";
+import { opencodeDecision } from "./opencode/index.js";
+import { judgePreToolCall, type PreToolGuardState } from "./pretool.js";
 import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "./profile.js";
 
 /**
@@ -204,13 +209,12 @@ describe("git's own environment variables", () => {
 });
 
 /**
- * Round 3: the assignment can stand in its own segment, introduced by
- * `export`, `declare -x` or `typeset -x` rather than by `env` or by standing
+ * The assignment can stand in its own segment, made by `export`, `declare`,
+ * `typeset`, `local` or `readonly` rather than handed to `env` or standing
  * bare in front of the command — `export GIT_SSH_COMMAND=…; git fetch` sets
- * the variable in one segment and runs git in the next, and the env reader
- * only knew to look past a leading `env`.
+ * the variable in one segment and runs git in the next.
  */
-describe("the same environment reached through export/declare -x/typeset -x", () => {
+describe("the same environment reached through export, declare and typeset", () => {
   it("refuses GIT_SSH_COMMAND exported in its own segment ahead of the git command", () => {
     const admission = judge("export GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch");
     expect(admission.decision).toBe("denied");
@@ -237,8 +241,16 @@ describe("the same environment reached through export/declare -x/typeset -x", ()
     expect(judge("export PAGER=cat; git log").decision).toBe("allowed");
   });
 
-  it("keeps a plain (non-exported) declare admitted", () => {
-    expect(judge("declare GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch").decision).toBe("allowed");
+  it("refuses a declare with no -x, as a bare assignment is refused", () => {
+    // A variable the environment already exports keeps its export when
+    // `declare` assigns it, so git sees the new value.
+    const admission = judge("declare GIT_SSH_COMMAND='ssh -i /tmp/k'; git fetch");
+    expect(admission.decision).toBe("denied");
+    expect(admission.rule).toBe(ADMISSION_RULES.git_credential_config);
+  });
+
+  it("keeps a declare of an unrelated variable admitted", () => {
+    expect(judge("declare -g FOO=1; git status").decision).toBe("allowed");
   });
 });
 
@@ -256,6 +268,130 @@ describe("the credential key however the line spells its place", () => {
       expect(admission.decision).toBe("denied");
       expect(admission.rule).toBe(ADMISSION_RULES.git_credential_config);
       expect(admission.target).toBe(key);
+    });
+  }
+});
+
+/**
+ * The same refusals on Claude Code's hook, Codex's approvals and OpenCode's
+ * permission requests, however the environment reaches git — past `env`'s
+ * own options, and through `GIT_CONFIG_PARAMETERS` in either of git's forms
+ * — and git's `--exec-path=<dir>`, which chooses the programs git runs as
+ * `GIT_EXEC_PATH` does.
+ */
+describe("on every executor, however the line reaches git", () => {
+  const ROOT = realpathSync(scratchDirectories("perbo-runner-")("perbo-git-credential-"));
+  const state: PreToolGuardState = {
+    root: ROOT,
+    cwd: ROOT,
+    tmpdir: null,
+    paths_allowed: ["**"],
+    paths_prohibited: [],
+    allow_list: [...DEFAULT_COMMAND_ALLOW_LIST],
+    deny_list: [...DEFAULT_COMMAND_DENY_LIST],
+  };
+  const claude = (line: string) =>
+    judgePreToolCall({ tool_name: "Bash", tool_use_id: "t", tool_input: { command: line } }, state, new Date(0))
+      .decision;
+  const codex = (line: string) => codexCommandDecision(line, ROOT, state);
+  const opencode = (line: string) =>
+    opencodeDecision({ toolCallId: "t", kind: "execute", rawInput: { command: line, cwd: ROOT } }, state);
+
+  const REFUSED: Array<[string, string]> = [
+    // Past `env`'s own options.
+    ["env -i GIT_CONFIG_PARAMETERS=\"'credential.helper=store'\" git fetch", "credential.helper"],
+    ["env -u X GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=store GIT_CONFIG_COUNT=1 git fetch", "credential.helper"],
+    ["env --unset=X GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0=x GIT_CONFIG_COUNT=1 git fetch", "core.sshCommand"],
+    ["env -i -u X GIT_SSH_COMMAND='ssh -i /tmp/k' git fetch", "GIT_SSH_COMMAND"],
+    ["env -i GIT_EXEC_PATH=/tmp/x git submodule status", "GIT_EXEC_PATH"],
+    // A cluster, read as getopt reads it: `-u` takes the next word where nothing follows it.
+    ["env -iu X GIT_CONFIG_PARAMETERS=\"'include.path=/tmp/c'\" git status", "include.path"],
+    ["env -iu X GIT_SSH_COMMAND=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    // An escaped quote opens nothing, so it hides no word after it.
+    ["X=\\' GIT_SSH_COMMAND=/tmp/x git fetch \\'", "GIT_SSH_COMMAND"],
+    // Made by the shell's own assigning commands, whatever their options.
+    ["declare -gx GIT_SSH_COMMAND=/tmp/x; git fetch", "GIT_SSH_COMMAND"],
+    ["export -- GIT_SSH_COMMAND=/tmp/x; git fetch", "GIT_SSH_COMMAND"],
+    ["typeset -x -- FOO=1 GIT_ASKPASS=/tmp/x; git fetch", "GIT_ASKPASS"],
+    // GIT_CONFIG_PARAMETERS in git's `'key'='value'` form, alone and among others.
+    ["GIT_CONFIG_PARAMETERS=\"'credential.helper'='store'\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'credential.helper'='store'\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"'color.ui=always' 'core.x=it'\\''s' 'credential.helper'='store'\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"'credential.helper'=\" git fetch", "credential.helper"],
+    ["GIT_CONFIG_PARAMETERS=\"' credential.helper =store'\" git fetch", "credential.helper"],
+    // The key as the shell hands it over.
+    ["GIT_CONFIG_KEY_0=cred\\ential.helper GIT_CONFIG_VALUE_0=store GIT_CONFIG_COUNT=1 git fetch", "credential.helper"],
+    ["GIT_CONFIG_KEY_0='credential'.helper GIT_CONFIG_VALUE_0=store GIT_CONFIG_COUNT=1 git fetch", "credential.helper"],
+    // git's own --exec-path, attached as git reads it.
+    ["git --exec-path=/tmp/x submodule status", "--exec-path"],
+    ['git "--exec-path=/tmp/x" submodule status', "--exec-path"],
+    ["git -C . --exec-path=/tmp/x bisect start", "--exec-path"],
+    ["env -i git --exec-path=/tmp/x submodule status", "--exec-path"],
+    // Past an option the global-option walk does not know, on the rest of the line.
+    ["git --weird --exec-path=/tmp/x status", "--exec-path"],
+    // A key as the shell hands it to git, its backslashes applied.
+    ["git -c cred\\ential.helper=/tmp/h fetch", "credential.helper"],
+    ["git config cred\\ential.helper /tmp/h", "credential.helper"],
+    // An escaped `=` ends no key: the shell hands git the word without its
+    // backslash, and git splits a `-c` at its first `=`.
+    ["git -c core.sshCommand\\=/tmp/evil fetch", "core.sshCommand"],
+    ["git -c url.https://evil.example/.insteadOf\\=https://github.com/ fetch", "url.https://evil.example/.insteadOf"],
+    // git splits a `--config-env` at its last `=`, since the variable's name holds none.
+    ["git --config-env 'url.https://e/?a=b.insteadOf=V' fetch", "url.https://e/?a=b.insteadOf"],
+    ["git --config-env='url.https://e/?a=b.insteadOf=V' fetch", "url.https://e/?a=b.insteadOf"],
+    // `env` and the assigning builtins are handed their words without quotes or backslashes.
+    ["env 'GIT_SSH_COMMAND=/tmp/x' git fetch", "GIT_SSH_COMMAND"],
+    ["env -i \"GIT_ASKPASS=/tmp/x\" git fetch", "GIT_ASKPASS"],
+    ["env GIT_\\SSH=/tmp/x git fetch", "GIT_SSH"],
+    ["export 'GIT_SSH_COMMAND=/tmp/x'; git fetch", "GIT_SSH_COMMAND"],
+    ["declare -x \"GIT_CONFIG_PARAMETERS='credential.helper=store'\"; git fetch", "credential.helper"],
+    // `env` reads every operand holding an `=` as an assignment, whatever its name.
+    ["env 1=2 GIT_SSH_COMMAND=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    ["env 'A B=1' GIT_SSH_COMMAND=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    // `NAME+=value` appends to NAME, in front of git and through a builtin.
+    ["GIT_SSH_COMMAND+=/tmp/x git fetch", "GIT_SSH_COMMAND"],
+    ["export GIT_ASKPASS+=/tmp/x; git fetch", "GIT_ASKPASS"],
+    ["declare -x 'GIT_EXEC_PATH+=/tmp/x'; git status", "GIT_EXEC_PATH"],
+  ];
+
+  for (const [line, target] of REFUSED) {
+    it(`refuses ${JSON.stringify(line)} as a credential refusal`, () => {
+      expect(claude(line), line).toMatchObject({
+        decision: "denied",
+        answer: "deny",
+        rule: ADMISSION_RULES.git_credential_config,
+        target,
+      });
+      expect(codex(line), line).toMatchObject({ decision: "denied", rule: ADMISSION_RULES.git_credential_config });
+      expect(opencode(line), line).toMatchObject({
+        decision: "denied",
+        rule: ADMISSION_RULES.git_credential_config,
+      });
+    });
+  }
+
+  it("names --exec-path as the program choice GIT_EXEC_PATH is", () => {
+    expect(claude("git --exec-path=/tmp/x submodule status").reason).toBe(
+      "--exec-path=/tmp/x chooses the programs git runs, as GIT_EXEC_PATH does, " +
+        "which the credential rule refuses regardless of how it is set",
+    );
+  });
+
+  for (const line of [
+    "env -i git status",
+    "git --exec-path",
+    "GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git status",
+    // An escaped blank in a value is part of it, and the key before the `=` is `user.name`.
+    "git -c user.name=a\\ b log",
+    // `env` sets `GIT_SSH_COMMAND+`, a variable git never reads.
+    "env GIT_SSH_COMMAND+=/tmp/x git fetch",
+    // A quoted name in front of a program is that program's name, not an assignment.
+    "'GIT_SSH_COMMAND=/tmp/x' git fetch",
+  ]) {
+    it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
+      expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });
+      expect(codex(line).rule, line).not.toBe(ADMISSION_RULES.git_credential_config);
+      expect(opencode(line), line).not.toMatchObject({ rule: ADMISSION_RULES.git_credential_config });
     });
   }
 });

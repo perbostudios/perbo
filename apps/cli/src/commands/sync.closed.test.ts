@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
+import { EXIT_CODES, gateClosedNote, transition, type Ticket } from "@perbo/contracts";
 import { pollPullRequest, type TicketDeliveryState } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
@@ -94,8 +94,11 @@ const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>
   return Promise.resolve(body());
 };
 
-/** A ticket sitting at `pr_open` behind a pull request the loop published. */
-function publishedTicket(name: string): { repo: string; dir: string; branch: string } {
+/**
+ * A ticket sitting at `pr_open` behind a pull request the loop published, or,
+ * `escalated`, at `changes_requested` behind the one an escalated run published (D-065).
+ */
+function publishedTicket(name: string, escalated = false): { repo: string; dir: string; branch: string } {
   const repo = join(scratch, name);
   emptyRepository(repo);
   runCommandLine(admitCommandLine, {
@@ -127,7 +130,9 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", at);
   ticket = transition(ticket, "independent_review", "reviewed independently", at);
   ticket = recordDelivery(ticket, { workspace: { branch }, pull_request: { url, number: PR } }, at);
-  ticket = transition(ticket, "pr_open", "approved; a human merges it", at);
+  ticket = escalated
+    ? transition(ticket, "changes_requested", gateClosedNote("escalated"), at)
+    : transition(ticket, "pr_open", "approved; a human merges it", at);
   writeTicket(dir, ticket);
   return { repo, dir, branch };
 }
@@ -225,6 +230,24 @@ describe("sync records a pull request GitHub closed without merging", () => {
     expect(ticket.state).toBe("closed");
     expect(ticket.delivery.state).toBe("closed");
     expect(streams.err()).not.toContain("is now changes_requested");
+  });
+
+  it("reads the pull request an escalated run published closed, and leaves the ticket where it waits (D-129)", async () => {
+    const { repo, dir } = publishedTicket("closed-escalated", true);
+    const before = readTicket(dir, "PRB-1");
+    expect(before.delivery.state).toBe("open");
+    const streams = recordStreams();
+
+    const code = await withGh(
+      fakeGh("closed-escalated", ghAnswer("MERGEABLE", "CLEAN", { state: "CLOSED", closedAt: "2026-09-03T04:00:00.000Z" })),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+    );
+
+    expect(code).toBe(EXIT_CODES.approve);
+    const ticket = readTicket(dir, "PRB-1");
+    expect([ticket.state, ticket.delivery.state]).toEqual(["changes_requested", "closed"]);
+    expect(ticket.history).toEqual(before.history);
+    expect(streams.err()).toContain(`pull request #${PR} closed without merging.`);
   });
 
   it("still says \"no longer mergeable\" for an open pull request that conflicts", async () => {

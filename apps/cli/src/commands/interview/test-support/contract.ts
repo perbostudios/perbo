@@ -50,10 +50,11 @@ export type ContractStep =
   /** One of the interview's own tools. */
   | { kind: "call"; tool: string; input: Record<string, unknown> }
   /**
-   * The session's turn ends here, and the person's next turn arrives saying
-   * this: the steps after it are what the session does with it.
+   * The session's turn ends here, and the next turn arrives saying this, with
+   * what the host marked it as doing to the questions waiting, if anything:
+   * the steps after it are what the session does with it.
    */
-  | { kind: "turn"; text: string };
+  | { kind: "turn"; text: string; asking?: "kept" | "ended" };
 
 /** What one decision the transport asked for was answered with. */
 export interface ContractDecision {
@@ -85,6 +86,8 @@ export interface InterviewHarness {
     sessionId?: string;
     /** The spec folder this interview writes. */
     spec?: string;
+    /** The turn that starts the session, where it is not the usual one. */
+    opening?: string;
   }): Promise<ContractRun>;
 }
 
@@ -223,7 +226,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
     const run = (
       repo: string,
       steps: readonly ContractStep[],
-      extra: { argv?: readonly string[]; sessionId?: string; spec?: string } = {},
+      extra: { argv?: readonly string[]; sessionId?: string; spec?: string; opening?: string } = {},
     ) => harness.run({ repo, steps, ...extra });
 
     describe("the write boundary (D-102)", () => {
@@ -1021,7 +1024,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           'Nothing was put to the person, since "How should it look?" and "Should it have sound?" are ' +
             'already asked and waiting on their answer and "Does it get harder as you go?" was already ' +
             'answered "Fixed difficulty"; wait for the answers still to come as their next turns, and ' +
-            "take the ones given from the conversation, rather than asking again.",
+            "take the ones given from the conversation rather than asking again.",
         );
         expect(asked(result)).toHaveLength(1);
       });
@@ -1037,6 +1040,79 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
             "this call; ask again with each question once.",
         );
         expect(asked(result)).toHaveLength(0);
+      });
+
+      it("refuses, in a session resumed by a new process, a question answered or still waiting from before", async () => {
+        const repo = repository(scratch());
+        await run(
+          repo,
+          [EVERYTHING, { kind: "turn", text: "a) Space, click or tap\nb) Best score for this page only" }],
+          { sessionId: "sess-ask" },
+        );
+        const recorded = JSON.parse(readFileSync(join(repo, SPEC_FOLDER, INTERVIEW_SESSION_FILE), "utf8")) as {
+          asking: { waiting: { title: string }[]; answered: { answer: string }[] };
+        };
+        expect(recorded.asking.waiting.map((group) => group.title)).toEqual(["Difficulty", "Look and sound"]);
+        expect(recorded.asking.answered.map((each) => each.answer)).toEqual([
+          "Space, click or tap",
+          "Best score for this page only",
+        ]);
+
+        // The next process, on the same session, opens on the answer to the
+        // group that was waiting when the last one ended.
+        const result = await run(
+          repo,
+          [ask({ title: "Controls", parts: [FLAP] }, { title: "Look and sound", parts: [LOOK, SOUND] })],
+          { argv: ["--session", "sess-ask"], sessionId: "sess-ask", opening: "Fixed difficulty" },
+        );
+        expect(result.decisions.map((each) => each.isError)).toEqual([true]);
+        expect(result.decisions[0]?.result).toBe(
+          'Nothing was put to the person, since "How should it look?" and "Should it have sound?" are ' +
+            'already asked and waiting on their answer and "What makes the bird flap?" was already ' +
+            'answered "Space, click or tap"; wait for the answers still to come as their next turns, and ' +
+            "take the ones given from the conversation rather than asking again.",
+        );
+        expect(asked(result)).toHaveLength(0);
+
+        // A new session in the same folder has asked nothing.
+        const fresh = await run(repo, [ask({ title: "Controls", parts: [FLAP] })], { sessionId: "sess-new" });
+        expect(fresh.decisions.map((each) => each.isError)).toEqual([false]);
+      });
+
+      it("leaves its questions waiting through a turn the host marks as kept, and ends them on one it marks as ended", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [
+          EVERYTHING,
+          // The host's own sentence, asking for words the chat could not hold.
+          {
+            kind: "turn",
+            text: "Perbo: the message is 14000 characters. Write it again, condensed to fit, and leave out nothing it says.",
+            asking: "kept",
+          },
+          // The person's answer to a problem of the host's standing in front.
+          { kind: "turn", text: "Keep the criterion as it is", asking: "kept" },
+          ask({ title: "Difficulty", parts: [HARDER] }),
+          // Their own words past the host's problem.
+          { kind: "turn", text: "a) Space, click or tap\nb) Best score for this page only", asking: "ended" },
+          ask({ title: "Difficulty", parts: [HARDER] }),
+        ]);
+        expect(result.decisions.map((each) => each.isError)).toEqual([false, true, false]);
+        expect(result.decisions[1]?.result).toBe(
+          'Nothing was put to the person, since "Does it get harder as you go?" is already asked and ' +
+            "waiting on their answer; wait for the answer to come as their next turn rather than asking again.",
+        );
+      });
+
+      it("does not take a lettered answer to a group waiting behind as the answer to the one in front", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [
+          ask({ title: "Controls and scoring", parts: [FLAP, BEST] }, { title: "Look and sound", parts: [LOOK, SOUND] }),
+          { kind: "turn", text: "a) Pixel-art sprites drawn in code\nb) Silent" },
+          // Neither recorded as answering the flap and the score, nor left
+          // waiting: the turn was not the answer to the group in front.
+          ask({ title: "Controls and scoring", parts: [FLAP, BEST] }, { title: "Look and sound", parts: [LOOK, SOUND] }),
+        ]);
+        expect(result.decisions.map((each) => each.isError)).toEqual([false, false]);
       });
 
       it("asks again what the person talked past, and asks what is new beside an answer given", async () => {

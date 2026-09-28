@@ -22,13 +22,18 @@ import { runCommandLine } from "../../../command-line/terminal.js";
 import { recordStreams } from "../../../test-support/streams.js";
 
 /**
- * The person's turns: the one that makes a session run at all, then one for
- * each `turn` step, in order. Each is handed over only when the transport asks
- * for the next, which is when the session has ended the turn before it.
+ * The turns: the one that makes a session run at all, then one for each
+ * `turn` step, in order. Each is handed over only when the transport asks for
+ * the next, which is when the session has ended the turn before it.
  */
-const turnsOf = async function* (steps: readonly ContractStep[]): AsyncGenerator<string> {
-  yield JSON.stringify({ type: "turn", text: "let us write the spec" });
-  for (const step of steps) if (step.kind === "turn") yield JSON.stringify({ type: "turn", text: step.text });
+const turnsOf = async function* (
+  steps: readonly ContractStep[],
+  opening = "let us write the spec",
+): AsyncGenerator<string> {
+  yield JSON.stringify({ type: "turn", text: opening });
+  for (const step of steps)
+    if (step.kind === "turn")
+      yield JSON.stringify({ type: "turn", text: step.text, ...(step.asking ? { asking: step.asking } : {}) });
 };
 
 /** The steps that ask the transport for an answer, in the order its answers are logged. */
@@ -79,7 +84,7 @@ export function claudeHarness(): InterviewHarness {
         cwd: input.repo,
         deps: {
           transport: claudeInterviewTransport(sdk, CLAUDE),
-          turns: turnsOf(input.steps),
+          turns: turnsOf(input.steps, input.opening),
         },
       });
       const decisions: ContractDecision[] = sdk.calls.map((call) => ({
@@ -133,7 +138,7 @@ export function codexHarness(scratch: () => string): InterviewHarness {
         cwd: input.repo,
         deps: {
           transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-          turns: turnsOf(input.steps),
+          turns: turnsOf(input.steps, input.opening),
         },
       });
       // A tool call the interview refused is answered with the refusal's own
@@ -199,8 +204,10 @@ export function openCodeHarness(scratch: () => string): InterviewHarness {
           transport: openCodeInterviewTransport({
             binary: fake.binary,
             dataDirectory: mkdtempSync(join(scratch(), "opencode-data-")),
+            // The fake's catalogue settles as soon as it is asked.
+            wait: async () => undefined,
           }),
-          turns: turnsOf(input.steps),
+          turns: turnsOf(input.steps, input.opening),
         },
       });
       // A tool call the interview refused is answered with the refusal's own

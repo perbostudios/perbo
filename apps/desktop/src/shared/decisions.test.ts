@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { FINDING_ROUTINGS, NOTHING_TRIED } from "@perbo/contracts";
-import { decisionQuestions, settledFindings } from "./decisions.js";
+import { FINDING_ROUTINGS, NOTHING_TRIED, gateClosedNote } from "@perbo/contracts";
+import { decisionQuestions, owedOnRecord, questionsOnRecord, settledFindings } from "./decisions.js";
 
 /**
  * Which findings reach the person, and which answers each takes.
@@ -140,7 +140,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     };
   };
   const answer = (finding_key: string, over: Record<string, unknown> = {}) => ({
-    review: { reference: "PRB-1" },
+    review: { ticket_id: "ticket_1", reference: "PRB-1" },
     finding_key,
     decision: "decide",
     choice: "ship_as_is",
@@ -149,7 +149,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
     ...over,
   });
   const settled = (attempts: unknown[], verdicts: unknown[]) =>
-    [...settledFindings({ ticket: { history: [] }, attempts: attempts as never, verdicts }).keys].sort();
+    [...settledFindings({ ticket: { ticket_id: "ticket_1", history: [] }, attempts: attempts as never, verdicts }).keys].sort();
 
   it("counts a standing answer that shipped it as it is, taken after the review", () => {
     expect(
@@ -170,10 +170,16 @@ describe("the findings a person's answers and the rounds since have settled", ()
       settled(
         [reviewed],
         [
-          answer("a", { review: { reference: "rev_0000000000000002" } }),
-          answer("b", { review: { reference: "rev_0000000000000001" } }),
+          answer("a", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000002" } }),
+          answer("b", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000001" } }),
         ],
       ),
+    ).toEqual(["a"]);
+  });
+
+  it("reads only the ticket's own answers, as perbo run reads them", () => {
+    expect(
+      settled([reviewed], [answer("a"), answer("b", { review: { ticket_id: "ticket_2", reference: "PRB-2" } })]),
     ).toEqual(["a"]);
   });
 
@@ -184,8 +190,8 @@ describe("the findings a person's answers and the rounds since have settled", ()
       settled(
         [{ ...reviewed, bundles: [another, own] }],
         [
-          answer("a", { review: { reference: "rev_0000000000000002" } }),
-          answer("b", { review: { reference: "rev_0000000000000001" }, decided_at: "2026-09-24T10:30:00.000Z" }),
+          answer("a", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000002" } }),
+          answer("b", { review: { ticket_id: "ticket_1", reference: "rev_0000000000000001" }, decided_at: "2026-09-24T10:30:00.000Z" }),
         ],
       ),
     ).toEqual([]);
@@ -207,6 +213,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
       keys: new Set(["a"]),
       refusal: null,
       loop: NOTHING_TRIED,
+      answers: new Map(),
     });
     expect(asked.map((question) => question.id)).toEqual(["b"]);
   });
@@ -217,7 +224,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
       "test/extra.test.ts were not in the change set it was asked to narrow. " +
       "The contract's writes are admitted only under: `src/**`.";
     const standing = settledFindings({
-      ticket: { history: [] },
+      ticket: { ticket_id: "ticket_1", history: [] },
       attempts: [reviewed, verified(["a", "b"], ["a", "b"], refusal)] as never,
       verdicts: [],
     });
@@ -240,7 +247,7 @@ describe("the findings a person's answers and the rounds since have settled", ()
 
   it("names no refusal where the last round's verification stopped on none", () => {
     const standing = settledFindings({
-      ticket: { history: [] },
+      ticket: { ticket_id: "ticket_1", history: [] },
       attempts: [reviewed, verified(["a"], ["a"], "scope: an earlier round's failure"), verified(["a"], ["a"], null)] as never,
       verdicts: [],
     });
@@ -248,5 +255,63 @@ describe("the findings a person's answers and the rounds since have settled", ()
     expect(decisionQuestions(review([finding({ key: "a" })]), standing)[0]?.context).toBe(
       "The suite was added by the same change.",
     );
+  });
+});
+
+/**
+ * D-132 beside D-065: after a refinement that stalled, the findings it left
+ * open are the person's, except one the executor declined, which a principle
+ * answers; and a run that would start with those unanswered and none handed
+ * on is not offered.
+ */
+describe("the questions a stalled refinement leaves, beside a declined finding", () => {
+  const remediable = (key: string) => finding({ key, routing: "remediable", closure: "executor" });
+  const reviewAttempt = {
+    review: { review_id: "rev_0000000000000003", decision: "remediable", findings: [remediable("x"), remediable("y")] },
+    verification: null,
+    bundles: [{ kind: "review", subject_id: "rev_0000000000000003", created_at: "2026-09-24T09:00:00.000Z", inputs: {} }],
+  };
+  const declinedRound = {
+    review: null,
+    verification: { open_keys: ["y"], per_finding: [{ finding_key: "y" }], deterministic_failure: null },
+    bundles: [
+      {
+        kind: "review",
+        subject_id: "cv_att_2",
+        created_at: "2026-09-24T09:10:00.000Z",
+        inputs: { findings_given: "y", findings_open: "y", findings_declined: "x" },
+      },
+    ],
+  };
+  const stalled = { at: "2026-09-24T09:20:00.000Z", note: gateClosedNote("remediation_stalled") };
+  const detail = (verdicts: unknown[], history: unknown[] = [stalled]) =>
+    ({ ticket: { ticket_id: "ticket_1", history }, attempts: [reviewAttempt, declinedRound], verdicts }) as never;
+  const answer = (finding_key: string, choice: string) => ({
+    review: { ticket_id: "ticket_1", reference: "PRB-1" },
+    finding_key,
+    decision: "decide",
+    choice,
+    decided_at: "2026-09-24T09:30:00.000Z",
+    superseded_at: null,
+  });
+
+  it("asks the finding left open with the three answers, and never the declined one", () => {
+    const asked = questionsOnRecord(detail([]));
+    expect(asked.map((question) => [question.id, question.choices])).toEqual([
+      ["y", ["approach", "let_it_decide", "ship_as_is"]],
+    ]);
+  });
+
+  it("owes the unanswered question where nothing is handed on, and nothing once one is or the loop is still trying", () => {
+    expect(owedOnRecord(detail([])).map((question) => question.id)).toEqual(["y"]);
+    expect(owedOnRecord(detail([answer("y", "approach")]))).toEqual([]);
+    expect(owedOnRecord(detail([answer("y", "ship_as_is")]))).toEqual([]);
+    expect(owedOnRecord(detail([], []))).toEqual([]);
+  });
+
+  it("never asks a declined finding, not even for a principle where the reviewer named a person its closer", () => {
+    const humanClosed = { ...reviewAttempt, review: { ...reviewAttempt.review, findings: [finding({ key: "x", routing: "remediable", closure: "human" }), remediable("y")] } };
+    const asked = questionsOnRecord({ ticket: { ticket_id: "ticket_1", history: [stalled] }, attempts: [humanClosed, declinedRound], verdicts: [] } as never);
+    expect(asked.map((question) => question.id)).toEqual(["y"]);
   });
 });

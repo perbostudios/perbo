@@ -8,6 +8,7 @@ import { bridge } from "../workspace/index.js";
 import { TaskPage } from "./TaskPage.js";
 import type { TaskView } from "../shell/route.js";
 import type { AttemptView, Detail, Job, Snapshot } from "../../shared/protocol.js";
+import { ANSWERS_OWED_NOTE } from "@perbo/contracts/browser";
 
 /**
  * The page a stopped run lands on (PRB-415, the sample the person stopped):
@@ -260,9 +261,150 @@ describe("the stopped page", () => {
     expect(behind()[0]).not.toMatch(/declined/);
   });
 
+  it("reads how the run ended past a later run the loop refused for owed answers, which started nothing", () => {
+    const run = closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]);
+    run.detail.ticket = {
+      ...run.detail.ticket,
+      history: [
+        ...run.detail.ticket.history,
+        { at: "2026-09-08T04:30:00.000Z", from: "changes_requested", to: "ready", note: "new attempt after changes_requested" },
+        { at: "2026-09-08T04:30:00.001Z", from: "ready", to: "provisioning", note: "run started against plan_1" },
+        { at: "2026-09-08T04:30:01.000Z", from: "provisioning", to: "changes_requested", note: ANSWERS_OWED_NOTE },
+      ],
+    };
+    mount(run);
+    expect(reasons()).toEqual(["The executor declined the findings left open, saying no practice determines them."]);
+  });
+
   it("says the review could not be read where no review is on record, rather than that nothing is asked", () => {
     mount(closedGate("remediation_stalled", null));
     expect(reasons()).toEqual(["The run's review could not be read, so nothing on it can be put to you."]);
+  });
+
+  /**
+   * The page's rule for its hovers: a hover, or the `i` behind a reason,
+   * names a button only where that button can be pressed. Read off the page
+   * as a person meets it, for every stop it can show.
+   */
+  const NAMED: ReadonlyArray<[RegExp, string]> = [
+    [/Continue the task/, "Continue the task"],
+    [/Plan it again/, "Plan it again"],
+    [/Delete this work|delete the work/i, "Delete this work"],
+    [/Refresh from GitHub/, "Refresh from GitHub"],
+  ];
+  const everyHoverNamesALiveButton = (): void => {
+    // A disabled button's own hover says why it is disabled: it names itself,
+    // and what it names besides is what this holds to the rule.
+    const hovers = [
+      ...[...page().querySelectorAll<HTMLElement>("[title]")].map((element) => ({
+        text: element.title,
+        own: element.textContent ?? "",
+      })),
+      ...behind().map((text) => ({ text, own: "" })),
+    ].filter(({ text }) => text.length > 0);
+    for (const { text, own } of hovers)
+      for (const [mention, name] of NAMED)
+        if (mention.test(text) && name !== own) {
+          const button = screen.queryByRole("button", { name }) as HTMLButtonElement | null;
+          expect(button, `"${text}" names ${name}`).not.toBeNull();
+          expect(button!.disabled, `"${text}" names ${name}, which is disabled`).toBe(false);
+        }
+  };
+  it.each([
+    ["the person's stop", () => stopped({ state: "cancelled" })],
+    ["Perbo closing", () => stopped({ state: "interrupted", error: "Perbo closed before the command reported an outcome." })],
+    ["a failure", () => stopped({ state: "failed", error: "the whole run log" }, { termination: "stalled", reviewDecision: null, review: null })],
+    [
+      "a limit refusal",
+      () =>
+        stopped(
+          {
+            state: "failed",
+            error:
+              "the run was refused by a limit: concurrent_local_attempts would reach 2, above the limit of 1. " +
+              "Raise limits.limits.concurrent_local_attempts in .perbo/config.json to allow it.",
+          },
+          { startedAt: "2026-09-08T04:00:00.000Z" },
+        ),
+    ],
+    ["a changes-requested stop with nothing to ask", () => closedGate("remediation_stalled", { decision: "remediable" })],
+    ["an escalation on the executor's declines", () => closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)])],
+    ["an unreadable review", () => closedGate("remediation_stalled", null)],
+    [
+      "a run whose record is gone",
+      () => {
+        const run = stopped({ state: "cancelled" });
+        run.workspace.jobs = [];
+        return run;
+      },
+    ],
+  ] as const)("names in its hovers only buttons that can be pressed, after %s", (_stop, run) => {
+    mount(run());
+    everyHoverNamesALiveButton();
+  });
+
+  it("offers Plan it again where the loop ended on a verdict nobody can answer, and Continue says why not", () => {
+    mount(closedGate("remediation_stalled", { decision: "remediable" }));
+    expect((screen.getByRole("button", { name: "Plan it again" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(carryOn().disabled).toBe(true);
+    expect(carryOn().title).toMatch(/Plan it again to change the spec or the plan and start the loop over\.$/);
+    // Not a pause: the loop it opens is not a paused one.
+    expect(screen.getByRole("button", { name: "View the loop" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "View the paused loop" })).toBeNull();
+  });
+
+  it("says a principle added for the executor's declines is read on the run Plan it again starts", () => {
+    mount(closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]));
+    expect(behind()[0]).toMatch(/Plan it again starts that run from the spec\.$/);
+  });
+
+  /** An escalated run that published (D-065): its pull request is open on GitHub. */
+  const published = () => {
+    const run = closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]);
+    run.detail.ticket = {
+      ...run.detail.ticket,
+      delivery: { ...run.detail.ticket.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+    };
+    return run;
+  };
+
+  it("offers neither Delete nor Plan it again while its pull request is open, and says why in one sentence naming it", () => {
+    mount(published());
+    expect(screen.queryByRole("button", { name: "Delete this work" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Plan it again" })).toBeNull();
+    expect(
+      within(page()).getAllByText(
+        "PRB-415's pull request #15 is open, and that is a record this machine does not own. Close or merge it " +
+          "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(behind()[0]).toMatch(/reads on the next run\.$/);
+    everyHoverNamesALiveButton();
+  });
+
+  it("offers Refresh from GitHub while the pull request reads open, and Delete and Plan it again once it reads closed", async () => {
+    const run = published();
+    mount(run);
+    const original = bridge.request.bind(bridge);
+    const sent = vi
+      .spyOn(bridge, "request")
+      .mockImplementation(((request: Parameters<typeof original>[0]) =>
+        request.kind === "sync" ? Promise.resolve(null as never) : original(request)) as typeof bridge.request);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh from GitHub" }));
+    await waitFor(() => expect(sent.mock.calls.some(([request]) => request.kind === "sync")).toBe(true));
+    expect(sent.mock.calls.map(([request]) => request).find((request) => request.kind === "sync")).toEqual({
+      kind: "sync",
+      repoId: sample.repoId,
+      key: "PRB-415",
+    });
+    cleanup();
+    // What the sync read: GitHub reports the pull request closed.
+    run.detail.ticket = { ...run.detail.ticket, delivery: { ...run.detail.ticket.delivery, state: "closed" } };
+    mount(run);
+    expect(screen.queryByRole("button", { name: "Refresh from GitHub" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Delete this work" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Plan it again" }) as HTMLButtonElement).disabled).toBe(false);
+    everyHoverNamesALiveButton();
   });
 
   it("has no way to the contract, and the paused loop beside Continue at the right", () => {

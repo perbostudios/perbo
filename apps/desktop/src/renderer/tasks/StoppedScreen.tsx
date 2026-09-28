@@ -9,6 +9,7 @@ import type { StopReason, TaskContext } from "./task-context.js";
 import { LoopStages, TaskHeader } from "./LoopScreen.js";
 import { ConfirmDelete, deletes, ticketSpec, useCreate, useDiscardTicket, useSettle } from "../shell/create.js";
 import { draftedLanding } from "../planning/panes.js";
+import { deletePullRequestOpen, pullRequestOpen } from "../../shared/discard.js";
 
 /**
  * The page a stopped run lands on.
@@ -32,7 +33,8 @@ import { draftedLanding } from "../planning/panes.js";
  * and what stays ({@link confirmPlanAgain}), and once confirmed opens the
  * planning over the plan it drafts by itself. Nothing here changes the
  * lifecycle — the ticket stays where the stop left it until one of the three
- * is taken. At the other end of the same row is the way to the paused loop,
+ * is taken. Where its pull request reads open, Refresh from GitHub stands in
+ * for Delete and Plan it again, and reads it again (D-129). At the other end of the same row is the way to the paused loop,
  * where the agents' recorded output is and the way back here, and the
  * highlighted Continue the task at the far right.
  */
@@ -81,15 +83,27 @@ export function StoppedScreen(context: TaskContext) {
   // A plan is drafted again only in place of a spent record: a stop inside
   // the executor's window seals the ticket at `failed`, a stop outside it
   // leaves the ticket saying the stage it reached, and a spec whose ticket is
-  // still live has its plan. A pull request open is not offered it at all,
-  // because a ticket with one is not deleted.
-  const spent = ticket.state === "failed" || ticket.state === "cancelled";
-  const replannable = spec !== null && ticket.state !== "pr_open";
+  // still live has its plan. A ticket in `changes_requested` that this page
+  // shows asks the person nothing (`ticketRun`): its loop ended on a verdict
+  // nobody can answer, so it is spent, and planning again is the way forward
+  // (D-132). A ticket whose pull request is open — at `pr_open`, or an
+  // escalated run's that published (D-065) — is offered neither this nor
+  // Delete, because a ticket with one is not deleted, and the page says so in
+  // one sentence naming it (D-129). Nothing else reads the delivery record of
+  // a ticket past `pr_open` again, so the page offers the sync that does:
+  // once it reads the pull request closed or merged, both return.
+  const spent =
+    ticket.state === "failed" || ticket.state === "cancelled" || (ticket.state === "changes_requested" && projection.recoverable);
+  const prOpen = pullRequestOpen(ticket);
+  const refreshable = prOpen && ticket.state !== "pr_open";
+  const replannable = spec !== null && !prOpen;
+  // Whether Plan it again can be pressed now, which is what a hover may point to.
+  const planAgainLive = replannable && spent;
   // Why the run stopped: the reasons of its last run, read as the loop page's
   // ended card reads them, or — a run that closed the gate with nothing left
   // to ask the person — the outcome its row records.
   const ending = runEnding(jobs.filter(isRun), latest);
-  const closedGate = ending === null ? gateClosedReasons(ticket.history, detail.attempts) : null;
+  const closedGate = ending === null ? gateClosedReasons(ticket.history, detail.attempts, replannable) : null;
   const reasons: StopReason[] = ending?.reasons ?? closedGate ?? [
     {
       text: "Perbo holds no record of how this run ended.",
@@ -101,9 +115,11 @@ export function StoppedScreen(context: TaskContext) {
   // Continue carries on only from the person's own stop or Perbo closing:
   // every other reason is one another attempt at the same plan meets again,
   // and where the record is gone nothing says which it was.
-  const onward = replannable
-    ? "Plan it again to change the spec or the plan and start the loop over."
-    : "Delete this work to start it over from a new plan.";
+  const onward = prOpen
+    ? deletePullRequestOpen(ticket)
+    : planAgainLive
+      ? "Plan it again to change the spec or the plan and start the loop over."
+      : "Delete this work to start it over from a new plan.";
   const why = projection.continuable
     ? undefined
     : ending === null && closedGate === null
@@ -184,24 +200,46 @@ export function StoppedScreen(context: TaskContext) {
             </li>
           ))}
         </ul>
+        {prOpen && <Notice tone="warning">{deletePullRequestOpen(ticket)}</Notice>}
         {error !== null && <Notice tone="danger">{error}</Notice>}
         {action.error && <Notice tone="danger">{errorMessage(action.error)}</Notice>}
       </div>
       <div className="approve-actions pane-confirm stopped-actions">
-        <Button disabled={held} onClick={() => setDeleting(true)}>
-          Delete this work
-        </Button>
+        {refreshable && (
+          <Button
+            disabled={busy || action.isPending}
+            onClick={() => {
+              setError(null);
+              action.mutate({ kind: "sync", repoId, key: ticket.key });
+            }}
+          >
+            Refresh from GitHub
+          </Button>
+        )}
+        {!prOpen && (
+          <Button disabled={held} onClick={() => setDeleting(true)}>
+            Delete this work
+          </Button>
+        )}
         {replannable && (
           <Button
             disabled={!spent || busy || drafting}
-            title={spent ? undefined : `Not yet: the record still says this run is at ${ticket.state.replace("_", " ")}, and one spec is one piece of work while its ticket is live. Continue the task, or delete the work.`}
+            title={
+              spent
+                ? undefined
+                : `Not yet: the record still says this run is at ${ticket.state.replace("_", " ")}, and one spec is one piece of work while its ticket is live. ${projection.continuable ? "Continue the task, or delete the work." : "Delete the work to start it over."}`
+            }
             onClick={() => setConfirming(true)}
           >
             {drafting ? "Drafting the plan…" : "Plan it again"}
           </Button>
         )}
         <span className="spacer" />
-        <Button onClick={() => show("loop")}>View the paused loop</Button>
+        {/* The loop is paused only where the person stopped it or Perbo closed:
+            there Continue carries on from it. Every other stop ended it. */}
+        <Button onClick={() => show("loop")}>
+          {projection.continuable ? "View the paused loop" : "View the loop"}
+        </Button>
         {/* The highlighted action at the far right. */}
         <Button
           variant="primary"

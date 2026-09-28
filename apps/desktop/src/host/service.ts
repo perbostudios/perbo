@@ -38,6 +38,7 @@ import {
 import { WorkspaceReads } from "./workspace-reads.js";
 import { Profile } from "./profile/store.js";
 import { Changes } from "./changes.js";
+import { resolveCommit } from "./repository/git.js";
 import { RepositoryRegistry } from "./repository/registry.js";
 import { createCli, type Cli } from "./cli.js";
 import { TicketReads } from "./tickets/reads.js";
@@ -193,7 +194,8 @@ export class DesktopService {
         architectTitled: (id, title) => this.editing.architectTitled(id, title),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
-        leaveAsking: (id) => this.editing.leaveAsking(id),
+        turnOnAsking: (id, text) => this.editing.turnOnAsking(id, text),
+        newInterview: (id) => this.editing.newInterview(id),
         countNodes: (id, nodes, digest, plan) => this.editing.countNodes(id, nodes, digest, plan),
         adopt: (id, detail, nodes) => this.editing.adopt(id, detail, nodes),
       },
@@ -246,6 +248,7 @@ export class DesktopService {
       cli: this.cli,
       registry: this.registry,
       settings: () => this.state.settings,
+      resolveCommit: (root, ref) => resolveCommit(this.execute, root, ref),
     });
     this.editing = new ContractEditing({
       records: () => this.state.editingSessions,

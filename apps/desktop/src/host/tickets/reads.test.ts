@@ -104,6 +104,7 @@ function reads(
       cli,
       registry,
       settings: () => SettingsSchema.parse({}),
+      resolveCommit: () => Promise.resolve(null),
     }),
   };
 }

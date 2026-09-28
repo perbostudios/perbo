@@ -129,6 +129,7 @@ export {
   CriterionIdSchema,
   RequirementIdSchema,
   ReviewIdSchema,
+  sameCommit,
   TicketIdSchema,
 } from "./ids.js";
 export type { NodeId } from "./ids.js";
@@ -141,6 +142,7 @@ export {
   INTERVIEW_SAID_MAX_CHARS,
   InterviewEventSchema,
   InterviewQuestionGroupSchema,
+  InterviewQuestionPartSchema,
   interviewSaidMessage,
   InterviewTurnSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
@@ -148,7 +150,13 @@ export {
   PART_LETTERS,
   sameQuestion,
 } from "./interview-protocol.js";
-export type { InterviewEvent, InterviewQuestionGroup, InterviewQuestionPart, QuestionPut } from "./interview-protocol.js";
+export type {
+  InterviewEvent,
+  InterviewQuestionGroup,
+  InterviewQuestionPart,
+  InterviewTurn,
+  QuestionPut,
+} from "./interview-protocol.js";
 export {
   assertProviderEnabled,
   assertWithinLimits,
@@ -310,10 +318,13 @@ export {
   decidable,
   decisionChoicesFor,
   FINISHED_TRYING,
+  judgedCommit,
+  leftToPrinciple,
   loopOnRecord,
   loopOnReview,
   NEVER_HANDED_FAMILIES,
   NOTHING_TRIED,
+  owedAnswers,
   routedToPerson,
 } from "./decision.js";
 export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
@@ -464,7 +475,15 @@ export type {
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
 export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
 export type { TicketTransition } from "./ticket-transitions.js";
-export { APPROVED_NOTE, gateClosedNote, incompleteNote, retainedBranch, runEndedOn } from "./retained.js";
+export {
+  ANSWERS_OWED_NOTE,
+  APPROVED_NOTE,
+  gateClosedNote,
+  incompleteNote,
+  retainedBranch,
+  runEndedOn,
+  settledRow,
+} from "./retained.js";
 export type { RetainedBranch } from "./retained.js";
 export {
   commitCarriesArm,

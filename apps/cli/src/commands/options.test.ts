@@ -219,7 +219,13 @@ function record(
  * verification that was given `given` and left `open` open, recorded under
  * the round's own attempt as the loop records it.
  */
-function verified(dir: string, round: number, given: readonly string[], open: readonly string[]): void {
+function verified(
+  dir: string,
+  round: number,
+  given: readonly string[],
+  open: readonly string[],
+  declined: readonly string[] = [],
+): void {
   const ticket_id = readTicket(dir, "PRB-1").ticket_id;
   const attempts = join(dir, "state", `${ticket_id}.attempts.json`);
   const prior = JSON.parse(readFileSync(attempts, "utf8")).attempts;
@@ -237,7 +243,12 @@ function verified(dir: string, round: number, given: readonly string[], open: re
     kind: "review",
     subject_id: `cv_${attempt.attempt_id}`,
     ticket_id,
-    inputs: { head_commit: "b2c3d4e", findings_given: given.join(","), findings_open: open.join(",") },
+    inputs: {
+      head_commit: "b2c3d4e",
+      findings_given: given.join(","),
+      findings_open: open.join(","),
+      ...(declined.length > 0 ? { findings_declined: declined.join(",") } : {}),
+    },
     context_manifest: [],
     versions: { code: "test", prompt: "closure_verify_v1", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
     usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
@@ -403,6 +414,18 @@ describe("perbo options", () => {
     const asked = await ask(repo, [DEAD_LETTER], scripted([submits({ answers: [{ finding: 1, options: offered }] })]));
     expect(asked.printed.findings).toEqual([{ finding_key: DEAD_LETTER, options: offered }]);
     await expect(ask(repo, [WHO_IS_TOLD], unreachable())).rejects.toThrow(/not a finding the review left for a person/);
+  });
+
+  it("refuses a finding the executor declined, naming perbo principle add, whoever the reviewer named its closer", async () => {
+    const declined = finding({ key: DEAD_LETTER, routing: "remediable", closure: "human", blocking: false });
+    const other = finding({ key: WHO_IS_TOLD, routing: "remediable", closure: "executor", blocking: false });
+    const { repo, dir } = await reviewed([declined, other], "rev_options0002", "remediable");
+    verified(dir, 2, [WHO_IS_TOLD], [WHO_IS_TOLD], [DEAD_LETTER]);
+    ended(dir, "remediation_stalled");
+    await expect(ask(repo, [DEAD_LETTER], unreachable())).rejects.toThrow(
+      `${DEAD_LETTER.slice(0, 12)} (${declined.rule_id}) is a finding the executor declined (D-065), and no choice ` +
+        "closes it: `perbo principle add` carries your answer to the executor",
+    );
   });
 
   it("says a ticket with no review has nothing to answer", async () => {

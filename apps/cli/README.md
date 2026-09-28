@@ -181,9 +181,12 @@ afterwards through the same validated path `edit --graph-edit` uses, recorded as
 undoable; `read_plan` reads it back; `ask_options` puts what it cannot settle itself to you as groups
 of questions with the answers to pick from, and returns rather than waiting, so your pick arrives as
 an ordinary turn in the option's own words; a call putting a question again, one still waiting on you
-or one you have answered, is refused with the answer you gave and asks you nothing. It cannot approve, publish or merge: there is no tool for
+or one you have answered, is refused with the answer you gave and asks you nothing, in this process or
+a later one resuming the session. It cannot approve, publish or merge: there is no tool for
 any of the three. Your turns arrive as JSON lines on stdin and every event leaves as one on stdout, so a
-host can relay it; the session id is printed and kept in `.interview.json` beside the spec, and
+host can relay it, and a host marks a turn of its own, or an answer to a question of its own, with
+`asking` so it is not read as your answer to the session's questions; the session id is printed and
+kept in `.interview.json` beside the spec, with what the session has asked and you answered, and
 `--session <id>` continues the conversation — the SDK's own session on Claude, the app server's
 thread resume on Codex, and ACP's `session/resume` on OpenCode, whose sessions are kept outside the
 checkout in `~/.perbo/opencode/`, a directory per repository the chat refuses to start in where it

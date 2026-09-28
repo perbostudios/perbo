@@ -1,27 +1,36 @@
+import { join } from "node:path";
 import {
   ExecutionAttemptSchema,
   NodeReviewsSchema,
   ReviewArtifactSchema,
   answersReview,
+  attemptsFileName,
   decidable,
   decisionChoicesFor,
+  judgedCommit,
+  leftToPrinciple,
   loopOnRecord,
+  owedAnswers,
   routedToPerson,
   type ExecutionAttempt,
   type Finding,
   type LoopOnReview,
   type NodeReview,
+  type PlanContract,
   type ReviewArtifact,
   type RunBundle,
   type HistoryRow,
+  sameCommit,
 } from "@perbo/contracts";
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
+import { git, ticketBranchStillAt } from "@perbo/workspace";
 import { z } from "zod";
-import type { AttemptsRecord } from "../../attempts.js";
+import { lastAttemptBranch, readAttemptsRecord, type AttemptsRecord } from "../../attempts.js";
 import { handsToExecutor, recordDecisions, type DecidedFinding } from "../../decisions.js";
-import type { BundleStore } from "../../bundle.js";
-import { sameCommit } from "../../resume.js";
+import { BundleStore } from "../../bundle.js";
+import type { Decline } from "../../declines.js";
 import { changedPathsBetween, commitsSince } from "../../seal.js";
+import type { TicketRunConfig } from "./config.js";
 import type { RoundState } from "./state.js";
 
 /**
@@ -53,7 +62,9 @@ import type { RoundState } from "./state.js";
  * stays with the person whatever they chose, and no answer to an `incomplete`
  * or `error` review hands anything on (`decisionsOn`). Once a run ended on
  * `FINISHED_TRYING`, every finding it left open is the person's, so a round
- * after it is the one their answers scope, and none where they gave none.
+ * after it is the one their answers scope, and none where they gave none
+ * (`answersOwed`). A finding left to a principle (`leftToPrinciple`) is never
+ * given again.
  */
 export function remediationToContinue(input: {
   bundles: BundleStore;
@@ -78,6 +89,7 @@ export function remediationToContinue(input: {
   const remediable = remediableFindings(review.findings)
     .filter((finding) => isRemediableFamily(finding.rule_id))
     .filter((finding) => openKeys === null || openKeys.has(finding.key))
+    .filter((finding) => !leftToPrinciple(finding, loop))
     .filter((finding) => !routedToPerson(finding, loop));
   const handed = review.findings.filter((finding) => {
     const decision = decisions.get(finding.key);
@@ -182,10 +194,8 @@ export function judgedOnRecord(input: {
             .filter((key) => !loop.closed.has(key)),
         );
 
-  const lastJudged = verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined);
-  const head =
-    lastJudged === undefined ? review.target.head_commit : (lastJudged.inputs["head_commit"] ?? null);
-  if (typeof head !== "string" || head.length === 0) return null;
+  const head = judgedCommit(review.target.head_commit, verifications);
+  if (head === null) return null;
   return { review, node_reviews, reviewed_at: last.created_at, openKeys, loop, head_commit: head };
 }
 
@@ -241,6 +251,8 @@ export interface DecidedDelivery {
   /** The commit the review, or the last verification after it, judged. */
   head_commit: string;
   decided: DecidedFinding[];
+  /** The review's open findings left to a principle (`leftToPrinciple`), which the delivery leaves for the person. */
+  declined: Finding[];
 }
 
 /**
@@ -261,6 +273,9 @@ export interface DecidedDelivery {
  * handed it on. One still open is the executor's
  * work, which `remediationToContinue` continues; a review that could not judge
  * every criterion, or did not complete, is answered by nothing (`decisionsOn`).
+ * A finding left to a principle (`leftToPrinciple`) does not hold the
+ * delivery back: it goes to the person with the delivery, which ends
+ * `escalated` (D-065).
  * A run that delivered and then stopped short of the pull request, where the
  * base would not merge, delivers again on the same answers.
  */
@@ -276,11 +291,12 @@ export function decidedDelivery(input: {
   if (judged === null) return null;
   const { review, loop } = judged;
   const decisions = decisionsOn(review, judged.reviewed_at, input.decided, loop);
-  const standing = review.findings.filter(
+  const open = review.findings.filter(
     (finding) =>
       finding.status === "open" &&
       (finding.blocking || routedToPerson(finding, loop) || finding.routing === "remediable"),
   );
+  const standing = open.filter((finding) => !leftToPrinciple(finding, loop));
   const answered = (finding: Finding): boolean =>
     (routedToPerson(finding, loop) && decisions.get(finding.key)?.choice === "ship_as_is") ||
     loop.closed.has(finding.key);
@@ -292,7 +308,128 @@ export function decidedDelivery(input: {
     node_reviews: judged.node_reviews,
     head_commit: judged.head_commit,
     decided: [...decided.values()],
+    declined: open.filter((finding) => leftToPrinciple(finding, loop)),
   };
+}
+
+/**
+ * The findings of the ticket's last review a run would start without an
+ * answer to (`owedAnswers`), with the commit the review, or the last
+ * verification after it, judged: a branch that has moved past it is reviewed
+ * afresh, and the caller asks the branch. Null where a run has what it needs.
+ */
+export function answersOwed(input: {
+  bundles: BundleStore;
+  ticket_id: string;
+  decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
+}): { findings: Finding[]; head_commit: string } | null {
+  const judged = judgedOnRecord(input);
+  if (judged === null) return null;
+  const { review, loop } = judged;
+  const decisions = decisionsOn(review, judged.reviewed_at, input.decided, loop);
+  const owed = new Set(
+    owedAnswers({
+      review,
+      loop,
+      answers: new Map([...decisions].map(([key, decision]) => [key, decision.choice])),
+    }),
+  );
+  const findings = review.findings.filter((finding) => owed.has(finding.key));
+  return findings.length === 0 ? null : { findings, head_commit: judged.head_commit };
+}
+
+/**
+ * A run refused because the person owes answers to findings its last review's
+ * loop finished trying (`answersOwed`). Raised before anything is provisioned,
+ * executed or paid for; its message is the one sentence the person reads.
+ */
+export class AnswersOwedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AnswersOwedError";
+  }
+}
+
+/**
+ * Refuse a run that owes a person's answers (`answersOwed`), with the sentence
+ * that says how to give them, before anything is provisioned: the command
+ * asks it before it moves the ticket, and the loop again under the run lock.
+ * The branch the ticket's records name is read in the checkout itself
+ * (`ticketBranchStillAt`, which the desktop's host reads too): one whose tip
+ * is no longer the commit the review, or the last verification after it,
+ * judged carries work nobody judged, and that run reviews it afresh. An
+ * explicit `--resume-from` names the attempt whose work the run carries on,
+ * which a fresh review then judges, and a re-level merges the base into an
+ * open pull request's branch: neither is refused here.
+ */
+export async function refuseOwedAnswers(input: {
+  config: Pick<
+    TicketRunConfig,
+    | "bundle_root"
+    | "retain_context"
+    | "state_root"
+    | "repository_root"
+    | "ticket_key"
+    | "delivery_branch"
+    | "resume_from"
+    | "relevel"
+  >;
+  contract: Pick<PlanContract, "ticket_id" | "outcome">;
+  decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
+}): Promise<void> {
+  const { config, contract } = input;
+  if (config.resume_from !== null || config.relevel) return;
+  const owed = answersOwed({
+    bundles: new BundleStore({ root: config.bundle_root, retainContext: config.retain_context }),
+    ticket_id: contract.ticket_id,
+    decided: input.decided,
+    history: input.history,
+  });
+  if (owed === null) return;
+  const attempts = readAttemptsRecord(join(config.state_root, attemptsFileName(contract.ticket_id)));
+  const judged = await ticketBranchStillAt({
+    resolveCommit: (ref) => git.resolveCommit(config.repository_root, ref),
+    recorded: { delivery: config.delivery_branch, attempt: lastAttemptBranch(attempts) },
+    ticket_key: config.ticket_key,
+    ticket_id: contract.ticket_id,
+    outcome: contract.outcome,
+    commit: owed.head_commit,
+  });
+  if (!judged) return;
+  throw new AnswersOwedError(answersOwedSentence(config.ticket_key, owed.findings));
+}
+
+/**
+ * The sentence a run owed answers is refused with: which ticket, which
+ * findings, and the commands that answer them.
+ */
+export function answersOwedSentence(ticket_key: string, findings: readonly Pick<Finding, "key">[]): string {
+  return (
+    `${ticket_key}'s last run finished trying and left ${findings.length} finding(s) for you to answer ` +
+    `(${findings.map((finding) => finding.key.slice(0, 12)).join(", ")}), none of them handed to the ` +
+    `executor, so this run does not start: answer each with \`perbo verdict ${ticket_key} --decide ` +
+    "<finding> --choice approach|let-it-decide|ship-as-is`, and `perbo options " +
+    `${ticket_key} --finding <finding>\` offers answers to pick`
+  );
+}
+
+/**
+ * The executor's declines on the ticket's record for the given findings, the
+ * last reason each was given: what a pull request lists for the person where
+ * the run that declined them is not the one delivering.
+ */
+export function declinesOnRecord(record: AttemptsRecord | null, keys: ReadonlySet<string>): Decline[] {
+  const reasons = new Map<string, string>();
+  for (const entry of record?.attempts ?? []) {
+    const parsed = ExecutionAttemptSchema.safeParse(entry);
+    if (!parsed.success) continue;
+    for (const decline of parsed.data.declines ?? []) {
+      if (keys.has(decline.finding_key)) reasons.set(decline.finding_key, decline.reason);
+    }
+  }
+  return [...reasons].map(([finding_key, reason]) => ({ finding_key, reason }));
 }
 
 /**
