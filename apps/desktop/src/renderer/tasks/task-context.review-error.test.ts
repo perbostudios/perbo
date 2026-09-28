@@ -45,6 +45,7 @@ const attempt = (reviewError: ReviewError): AttemptView =>
     ceilings: [],
     review: { decision: "error", findings: [], coverage: [], error: reviewError } as unknown as ReviewArtifact,
     reviewDecision: "error",
+    usageLimit: null,
   }) as unknown as AttemptView;
 
 describe("a run that ended on the reviewer's answer", () => {

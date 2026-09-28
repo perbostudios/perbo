@@ -1872,6 +1872,17 @@ textarea {
 .decision-intro .section-label {
   margin-bottom: 8px;
 }
+/* The executor's reason for declining a finding (D-065): its words, shown whole,
+   set apart from the question as data. */
+.decision-declined {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+.decision-declined p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .decision-question {
   font-size: calc(19px * var(--text-scale));
   font-weight: 600;
@@ -3017,6 +3028,19 @@ textarea {
   border-color: var(--amber);
   width: 8px;
   height: 8px;
+}
+/* The stage that asked a decision waits on the person, in the decision
+   colour; a stopped run's stage, in the stopped colour (D-129). */
+.stage-labels .current.is-decision {
+  color: var(--amber);
+}
+.stage-labels .current.is-stopped {
+  color: var(--red);
+}
+.stage-labels .current.is-stopped i,
+.loop-stages--stopped .progress-track > span {
+  background: var(--red);
+  border-color: var(--red);
 }
 .loop-body .section-label {
   margin-bottom: 9px;
@@ -6009,9 +6033,17 @@ select.add-chip {
   flex: none;
   align-self: center;
 }
+/* Where a usage limit ended the run and no other connection runs its role:
+   the one sentence that says so, read beside the reasons. */
+.stopped-limit {
+  margin: 0;
+  font-size: calc(13.5px * var(--text-scale));
+  color: var(--muted);
+}
 /* The footer every pane has, with the ways to delete or plan the work again
-   at the start of the row, and the way to the paused loop, then the
-   highlighted Continue the task, at its end. */
+   at the start of the row, and the way to the paused loop, then Continue the
+   task, and after a usage limit Continue on another model, the highlighted
+   one at its end. */
 .stopped-actions {
   justify-content: flex-start;
 }

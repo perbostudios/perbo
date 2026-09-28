@@ -8,6 +8,7 @@ import {
   ReviewArtifactSchema,
   RunBundleSchema,
   TicketSchema,
+  UsageLimitSchema,
   hasAcceptanceCriteria,
 } from "@perbo/contracts";
 import type { Ticket } from "@perbo/contracts";
@@ -93,7 +94,12 @@ export const ReportSchema = z
             .nullable(),
           checks: z.array(CheckSchema).nullable(),
           verification: z.unknown(),
-          declines: z.array(z.object({ finding_key: z.string() }).passthrough()).default([]),
+          declines: z.array(z.object({ finding_key: z.string(), reason: z.string() }).passthrough()).default([]),
+          record: z
+            .object({ declines: z.array(z.object({ finding_key: z.string(), reason: z.string() })).optional() })
+            .passthrough()
+            .optional(),
+          usage_limit: UsageLimitSchema.extend({ waited: z.boolean() }).nullable(),
           bundles: z.array(RunBundleSchema),
         })
         .passthrough(),
@@ -143,7 +149,10 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
         .join("\n\n"),
     })),
     verification: attempt.verification,
-    declines: attempt.declines.map((decline) => decline.finding_key),
+    // The attempt's own record of what it declined, as the loop reads it;
+    // the words `perbo inspect` read from its transcript where the record does not say.
+    declines: (attempt.record?.declines ?? attempt.declines).map(({ finding_key, reason }) => ({ finding_key, reason })),
+    usageLimit: attempt.usage_limit,
     bundles: attempt.bundles,
   }));
 }
@@ -274,6 +283,7 @@ export class TicketReads {
       ticket,
       objectsDirectory: objectsPath(repo),
       verdictsPath: verdictsPath(repo),
+      attemptsPath: attemptsPath(repo, ticket.ticket_id),
     });
     return { questions: asked?.length ?? 0 };
   }
@@ -293,6 +303,7 @@ export class TicketReads {
         ticket,
         objectsDirectory: objectsPath(repo),
         verdictsPath: verdictsPath(repo),
+        attemptsPath: attemptsPath(repo, ticket.ticket_id),
       }),
       ticket,
       contract,

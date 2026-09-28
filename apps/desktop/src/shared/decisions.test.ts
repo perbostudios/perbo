@@ -260,26 +260,31 @@ describe("the findings a person's answers and the rounds since have settled", ()
 
 /**
  * D-132 beside D-065: after a refinement that stalled, the findings it left
- * open are the person's, except one the executor declined, which a principle
- * answers; and a run that would start with those unanswered and none handed
+ * open are the person's, and so is one the executor declined, with the reason
+ * it gave; and a run that would start with those unanswered and none handed
  * on is not offered.
  */
 describe("the questions a stalled refinement leaves, beside a declined finding", () => {
+  const REASON = "Which page size is right is a product call.";
   const remediable = (key: string) => finding({ key, routing: "remediable", closure: "executor" });
   const reviewAttempt = {
+    startedAt: "2026-09-24T08:50:00.000Z",
     review: { review_id: "rev_0000000000000003", decision: "remediable", findings: [remediable("x"), remediable("y")] },
     verification: null,
+    declines: [],
     bundles: [{ kind: "review", subject_id: "rev_0000000000000003", created_at: "2026-09-24T09:00:00.000Z", inputs: {} }],
   };
   const declinedRound = {
+    startedAt: "2026-09-24T09:05:00.000Z",
     review: null,
     verification: { open_keys: ["y"], per_finding: [{ finding_key: "y" }], deterministic_failure: null },
+    declines: [{ finding_key: "x", reason: REASON }],
     bundles: [
       {
         kind: "review",
         subject_id: "cv_att_2",
         created_at: "2026-09-24T09:10:00.000Z",
-        inputs: { findings_given: "y", findings_open: "y", findings_declined: "x" },
+        inputs: { findings_given: "y", findings_open: "y" },
       },
     ],
   };
@@ -295,23 +300,32 @@ describe("the questions a stalled refinement leaves, beside a declined finding",
     superseded_at: null,
   });
 
-  it("asks the finding left open with the three answers, and never the declined one", () => {
+  it("asks the declined finding, with the executor's reason, and the one left open, each with the three answers", () => {
     const asked = questionsOnRecord(detail([]));
-    expect(asked.map((question) => [question.id, question.choices])).toEqual([
-      ["y", ["approach", "let_it_decide", "ship_as_is"]],
+    expect(asked.map((question) => [question.id, question.choices, question.declined])).toEqual([
+      ["x", ["approach", "let_it_decide", "ship_as_is"], [REASON]],
+      ["y", ["approach", "let_it_decide", "ship_as_is"], []],
     ]);
   });
 
-  it("owes the unanswered question where nothing is handed on, and nothing once one is or the loop is still trying", () => {
-    expect(owedOnRecord(detail([])).map((question) => question.id)).toEqual(["y"]);
-    expect(owedOnRecord(detail([answer("y", "approach")]))).toEqual([]);
-    expect(owedOnRecord(detail([answer("y", "ship_as_is")]))).toEqual([]);
+  it("owes the unanswered questions where nothing is handed on, and nothing once one is or the loop is still trying", () => {
+    expect(owedOnRecord(detail([])).map((question) => question.id)).toEqual(["x", "y"]);
+    expect(owedOnRecord(detail([answer("y", "ship_as_is")])).map((question) => question.id)).toEqual(["x"]);
+    expect(owedOnRecord(detail([answer("x", "approach")]))).toEqual([]);
+    expect(owedOnRecord(detail([answer("x", "ship_as_is"), answer("y", "ship_as_is")]))).toEqual([]);
+    // No run finished trying: the finding left open is still the executor's to close.
     expect(owedOnRecord(detail([], []))).toEqual([]);
   });
 
-  it("never asks a declined finding, not even for a principle where the reviewer named a person its closer", () => {
-    const humanClosed = { ...reviewAttempt, review: { ...reviewAttempt.review, findings: [finding({ key: "x", routing: "remediable", closure: "human" }), remediable("y")] } };
+  it("asks a declined finding with the three answers where the reviewer named a person its closer", () => {
+    const humanClosed = {
+      ...reviewAttempt,
+      review: { ...reviewAttempt.review, findings: [finding({ key: "x", routing: "remediable", closure: "human" }), remediable("y")] },
+    };
     const asked = questionsOnRecord({ ticket: { ticket_id: "ticket_1", history: [stalled] }, attempts: [humanClosed, declinedRound], verdicts: [] } as never);
-    expect(asked.map((question) => question.id)).toEqual(["y"]);
+    expect(asked.map((question) => [question.id, question.choices.length])).toEqual([
+      ["x", 3],
+      ["y", 3],
+    ]);
   });
 });

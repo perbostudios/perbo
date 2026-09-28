@@ -53,6 +53,8 @@ import {
   type SizeCount,
   type SizeEstimate,
   type TicketSource,
+  type UsageLimitStop,
+  usageLimitStop,
 } from "@perbo/contracts";
 import { attemptBundles, BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
 import { formatDuration, formatHumanElapsed } from "../duration.js";
@@ -77,6 +79,7 @@ import {
 } from "./run/local.js";
 import { WIDTH, clip, fitted, labelled, pad, painter, spread, wrap, type Paint } from "../text.js";
 import { specStaleness } from "../spec/staleness.js";
+import { usageLimitLines } from "./usage-limit.js";
 
 import type { Diagnostics } from "../diagnostics.js";
 import {
@@ -273,6 +276,12 @@ export interface AttemptReport {
    * from two the loop made back to back.
    */
   wait: AttemptWait | null;
+  /**
+   * The provider usage limit the run ended on after this attempt, and whose
+   * (`usageLimitStop`, D-NEW-pass-a-limited-loop-on), or null. The desktop's
+   * stopped page reads this.
+   */
+  usage_limit: UsageLimitStop | null;
   ended_at: string;
   outcome: string;
   termination: ExecutionAttempt["termination"];
@@ -789,6 +798,7 @@ export function reportAttempt(
     round: attempt.remediation_round,
     started_at: attempt.created_at,
     wait: attempt.wait,
+    usage_limit: usageLimitStop(attempt, review),
     ended_at: new Date(Date.parse(attempt.created_at) + attempt.usage.wall_clock_ms).toISOString(),
     outcome,
     termination: attempt.termination,
@@ -1536,7 +1546,18 @@ export function renderInspect(
     const retainedDiff = execution?.artifacts.some(
       (artifact) => artifact.name === "change.diff" && artifact.retained,
     );
-    if (stopped && retainedDiff) {
+    if (attempt.usage_limit !== null) {
+      // D-NEW-pass-a-limited-loop-on: the run ended on a connection's usage
+      // limit, and the command that carries the work on to another.
+      for (const line of usageLimitLines({
+        limit: attempt.usage_limit,
+        subject: resumeSubject(report),
+        bundleId: retainedDiff ? execution!.bundle_id : null,
+      })) {
+        // The limit's sentence wraps; the command stays whole, to be copied.
+        for (const wrapped of line.startsWith("limit ") ? wrap(line, 2) : [`  ${line}`]) lines.push(paint(wrapped, "mid"));
+      }
+    } else if (stopped && retainedDiff) {
       lines.push(
         paint(
           `  resume  perbo run ${resumeSubject(report)} --resume-from ${execution!.bundle_id}`,

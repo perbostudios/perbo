@@ -233,6 +233,7 @@ describe("delivery", () => {
       usage: { cost_micros: 250_000 },
     };
     const body = pullRequestBody({
+      attempt_list: [],
       contract: contract as never,
       attempt: attempt as never,
       review,
@@ -258,6 +259,7 @@ describe("delivery", () => {
     };
     const attempt = { attempt_id: "att_2", base_commit: "a", head_commit: "b", usage: { cost_micros: 0 } };
     const body = pullRequestBody({
+      attempt_list: [],
       contract: contract as never,
       attempt: attempt as never,
       review: stamped as never,

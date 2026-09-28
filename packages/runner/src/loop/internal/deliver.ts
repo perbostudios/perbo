@@ -16,6 +16,9 @@ import {
   type createPullRequest,
 } from "../../delivery.js";
 import { githubCredential } from "../../github-credential.js";
+import { attemptList } from "../../attempt-list.js";
+import type { StoredAttempt } from "../../attempts.js";
+import { BundleStore } from "../../bundle.js";
 import type { LoopMergeOutcome } from "../../merge.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
@@ -102,6 +105,12 @@ export async function publish(
      * the review judged (D-132).
      */
     attempts: readonly ExecutionAttempt[];
+    /**
+     * Every attempt on the ticket's record, oldest first over all its runs,
+     * this run's included: the body's list of attempts
+     * (D-NEW-pass-a-limited-loop-on).
+     */
+    ticketAttempts: readonly StoredAttempt[];
     /** What each closure verification of those attempts cost, which the body adds up. */
     verificationCosts: readonly VerificationCost[];
     /** D-065: the findings those attempts declined, which the body leaves for the person. */
@@ -136,6 +145,10 @@ export async function publish(
     // SCP-202: the closing line says which of the two merges this pull
     // request is waiting for, from the switch that decides it.
     merge: config.merge,
+    attempt_list: attemptList(
+      args.ticketAttempts,
+      new BundleStore({ root: config.bundle_root, retainContext: config.retain_context }).forTicket(contract.ticket_id),
+    ),
   });
   const pull_request = await args.open({
     worktree: state.workspace.path,

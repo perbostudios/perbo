@@ -55,6 +55,7 @@ const bodyWith = (findings: Finding[], declines?: { finding_key: string; reason:
     usage: { cost_micros: 0 },
   };
   return pullRequestBody({
+    attempt_list: [],
     contract: makeContract() as unknown as PlanContractWithCriteria,
     attempt: attempt as never,
     review: { ...review, findings } as unknown as ReviewArtifact,

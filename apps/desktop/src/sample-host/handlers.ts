@@ -942,6 +942,18 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         turnHoldsApproval(editingRecords(), request.repoId, request.key, isWorking))
       : null;
     if (held !== null) throw new Error(held);
+    // D-NEW-pass-a-limited-loop-on: a run carried on with other models, from
+    // the stopped attempt's work, as the host has it: the models become the
+    // ticket's, and the contract stays as it was approved.
+    if (request.models !== undefined) {
+      if (request.resumeFrom === null)
+        throw new Error("A run carried on with other models starts from the work of the attempt the usage limit stopped.");
+      snapshot.taskModels = {
+        ...snapshot.taskModels,
+        [request.repoId + ":" + request.key]: TaskModelsSchema.strip().parse(request.models),
+      };
+      emitPreferences();
+    }
     return startWork(request.kind, request.repoId, request.key, request.publish);
   },
   // D-137: the answer to the question a live run is

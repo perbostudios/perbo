@@ -14,6 +14,7 @@ import {
   lastAttemptBranch,
   lastAttemptId,
   lastExecutorAccount,
+  limitRoleOf,
   parkedWait,
   readAttemptsRecord,
   rootAttemptId as mintRootAttemptId,
@@ -215,7 +216,7 @@ export async function start(args: {
    * provisioned. A `--resume-from` that cannot be honoured stops the run here,
    * where it has cost nothing, rather than after a worktree and an install.
    */
-  const resumeSource: ResumeSource | null =
+  const resolved: ResumeSource | null =
     config.resume_from === null
       ? null
       : resolveResumeSource({
@@ -224,6 +225,10 @@ export async function start(args: {
           ticket_id: contract.ticket_id,
           base_commit: contract.base.base_commit,
         });
+  // And whose usage limit ended that attempt's run, which the ticket's record
+  // holds and the bundle cannot, so the brief says how it ended.
+  const resumeSource: ResumeSource | null =
+    resolved === null ? null : { ...resolved, limit: limitRoleOf(priorAttempts, resolved.attempt_id) };
 
   const checkout = resolve(config.repository_root);
   /**

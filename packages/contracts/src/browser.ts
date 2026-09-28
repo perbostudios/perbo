@@ -16,16 +16,16 @@ export {
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
+  declinesOnRecord,
   FINISHED_TRYING,
   judgedCommit,
-  leftToPrinciple,
   loopOnRecord,
   loopOnReview,
   NOTHING_TRIED,
   owedAnswers,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle, RecordedDecline } from "./decision.js";
 export { EgressQuestionKeySchema, egressSettledLine, readEgressQuestion, readEgressSettled } from "./egress.js";
 export type { EgressQuestion, EgressSettlement } from "./egress.js";
 export { EFFORT_LABELS, EFFORT_LEVELS, EffortLevelSchema } from "./effort.js";
@@ -35,6 +35,9 @@ export type { EffortLevel } from "./effort.js";
 export { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "./executor-skills.js";
 export type { ExecutorSkillId } from "./executor-skills.js";
 export { GraphEditSchema } from "./graph-edit.js";
+export { usageLimitHolds, usageLimitStop, UsageLimitSchema } from "./usage-limit.js";
+export { attemptEnding, connectionName, stoppedBy } from "./ending.js";
+export type { UsageLimit, UsageLimitRole, UsageLimitStop } from "./usage-limit.js";
 export type { GraphEdit } from "./graph-edit.js";
 export { CriterionIdSchema } from "./ids.js";
 export {

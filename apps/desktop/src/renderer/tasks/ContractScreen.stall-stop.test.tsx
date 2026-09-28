@@ -236,7 +236,7 @@ describe("the way on from an approved contract whose run owes the person's answe
 
   it("offers Answer, which opens the decisions, in place of Start the loop", async () => {
     const context = await approved([
-      { id: "a".repeat(64), title: "Which fixture loads?", context: "", choices: ["approach", "let_it_decide", "ship_as_is"] },
+      { id: "a".repeat(64), title: "Which fixture loads?", context: "", declined: [], choices: ["approach", "let_it_decide", "ship_as_is"] },
     ]);
     mount(<ContractScreen {...context} />);
     const answer = await screen.findByRole("button", { name: "Answer" });

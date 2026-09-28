@@ -348,6 +348,11 @@ describe("perbo run --publish-retained", () => {
     expect(create.slice(0, 6)).toEqual(["pr", "create", "--head", branch, "--base", "main"]);
     expect(create).toContain(`${at.key}: ${OUTCOME}`);
     expect(create.join("\n")).toContain("Verdict **approve**");
+    // The ticket's attempts, listed as a publishing run lists them. The log
+    // holds one line per line of an argument, so the body is read joined.
+    const body = create.join("\n");
+    expect(body).toContain("## Attempts\n| # | run | round | executor | ended | review |");
+    expect(body).toContain("\n| 1 | 1 | 0 | Claude Code · `double` | completed | stub · `stub`: approve |\n");
     const reported = JSON.parse(published.out) as { outcome: string; pull_request: { url: string; number: number } };
     expect(reported.outcome).toBe("approved");
     expect(reported.pull_request).toEqual({ url: PULL_REQUEST_URL, number: 8 });

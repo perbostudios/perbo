@@ -154,13 +154,14 @@ const READS = { read: "allow", glob: "allow", grep: "allow", list: "allow" } as 
  *
  * The reviewer holds no tool it can use, since what it reads comes through the
  * reviewer's own reader: it runs in an empty scratch directory, a read outside
- * it is denied, its transport refuses every command it asks about, and any
- * tool call at all fails the turn. A read and a shell tool are offered all
- * the same, because OpenCode Zen refuses its free models to a session that
- * offers neither ("provider authentication required", measured on 2.0.14).
+ * it is denied, and its transport refuses every read and every command it asks
+ * about, so none runs; the turn carries on without it. A read and a shell tool
+ * are offered all the same, because OpenCode Zen refuses its free models to a
+ * session that offers neither ("provider authentication required", measured
+ * on 2.0.14); both are asked about rather than allowed, which Zen accepts.
  */
 export function opencodePermissions(role: OpenCodeRole, tools: readonly string[] = []): Record<string, string> {
-  if (role === "reviewer") return { "*": "deny", read: "allow", bash: "ask", external_directory: "deny" };
+  if (role === "reviewer") return { "*": "deny", read: "ask", bash: "ask", external_directory: "deny" };
   return {
     "*": "deny",
     ...READS,
