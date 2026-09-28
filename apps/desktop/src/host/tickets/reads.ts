@@ -94,11 +94,9 @@ export const ReportSchema = z
             .nullable(),
           checks: z.array(CheckSchema).nullable(),
           verification: z.unknown(),
-          declines: z.array(z.object({ finding_key: z.string(), reason: z.string() }).passthrough()).default([]),
           record: z
             .object({ declines: z.array(z.object({ finding_key: z.string(), reason: z.string() })).optional() })
-            .passthrough()
-            .optional(),
+            .passthrough(),
           usage_limit: UsageLimitSchema.extend({ waited: z.boolean() }).nullable(),
           bundles: z.array(RunBundleSchema),
         })
@@ -149,9 +147,11 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
         .join("\n\n"),
     })),
     verification: attempt.verification,
-    // The attempt's own record of what it declined, as the loop reads it;
-    // the words `perbo inspect` read from its transcript where the record does not say.
-    declines: (attempt.record?.declines ?? attempt.declines).map(({ finding_key, reason }) => ({ finding_key, reason })),
+    // What the attempt declined, as its own record holds it and the loop and
+    // the CLI read it; absent where the record does not say.
+    ...(attempt.record.declines === undefined
+      ? {}
+      : { declines: attempt.record.declines.map(({ finding_key, reason }) => ({ finding_key, reason })) }),
     usageLimit: attempt.usage_limit,
     bundles: attempt.bundles,
   }));
