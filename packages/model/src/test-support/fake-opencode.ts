@@ -8,7 +8,11 @@ import { join } from "node:path";
  * message, the session's running dollars where `cost` is given, and how the
  * turn ended. A reply that asks for `permission` puts one to the client first;
  * one with `tool` announces a tool call. Every line it receives, and the argv,
- * environment and instructions it was started with, go to `log`.
+ * environment and instructions it was started with, go to `log`. With `exit`,
+ * the process ends with code 3 and a line on stderr at the `nth` request of
+ * `method`: before answering it, or just after where `answered`. Each
+ * `session/new` counted in `refuseSessions`, from 1, is refused as OpenCode
+ * refuses one asked for before its catalogue has arrived.
  */
 export interface FakeOpenCodeReply {
   text?: string;
@@ -21,7 +25,18 @@ export interface FakeOpenCodeReply {
 
 export function fakeOpenCodeReviewer(
   replies: readonly FakeOpenCodeReply[],
-  options: { modes?: readonly string[]; selects?: string } = {},
+  options: {
+    modes?: readonly string[];
+    selects?: string;
+    /**
+     * How many directories' catalogue snapshots lack every model but one, as a
+     * snapshot taken before OpenCode's plugins settle does; a model a
+     * directory's snapshot lacks is refused `model not found` there.
+     */
+    staleSnapshots?: number;
+    refuseSessions?: readonly number[];
+    exit?: { method: string; nth: number; answered: boolean };
+  } = {},
 ): { binary: string; log: string } {
   const dir = mkdtempSync(join(tmpdir(), "perbo-fake-opencode-"));
   const log = join(dir, "acp.log");
@@ -36,6 +51,11 @@ export function fakeOpenCodeReviewer(
       `const replies = ${JSON.stringify(replies)};`,
       `const modes = ${JSON.stringify(options.modes ?? ["build", "plan"])};`,
       `const selects = ${JSON.stringify(options.selects ?? null)};`,
+      `const staleSnapshots = ${JSON.stringify(options.staleSnapshots ?? 0)};`,
+      `const refuseSessions = ${JSON.stringify(options.refuseSessions ?? [])}; let sessionsAsked = 0;`,
+      "const snapshots = new Map(); const stale = new Map(); let sessions = 0;",
+      `const exit = ${JSON.stringify(options.exit ?? null)}; let asked = 0;`,
+      "const die = () => { process.stderr.write('opencode crashed\\n'); setTimeout(() => process.exit(3), 20); };",
       "const instructions = (() => { try { return require('node:fs').readFileSync(require('node:path').join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md'), 'utf8'); } catch { return null; } })();",
       "appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), instructions }) + '\\n');",
       "const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\\n');",
@@ -48,9 +68,21 @@ export function fakeOpenCodeReviewer(
       "readline.createInterface({ input: process.stdin }).on('line', (line) => {",
       "  appendFileSync(log, line + '\\n');",
       "  const m = JSON.parse(line);",
+      "  const ending = exit !== null && m.method === exit.method && ++asked === exit.nth;",
+      "  if (ending && !exit.answered) { die(); return; }",
+      "  if (ending) setTimeout(die, 20);",
       "  if (m.method === undefined && m.id === 'ask' && pendingPrompt) { const p = pendingPrompt; pendingPrompt = null; finish(p.id, { ...p.reply, stopReason: 'cancelled' }, p.sessionId); return; }",
       "  if (m.method === 'initialize') send({ id: m.id, result: { protocolVersion: 1 } });",
-      "  if (m.method === 'session/new') send({ id: m.id, result: { sessionId: 'ses_review', configOptions: [{ id: 'model', currentValue: 'opencode/default', options: [] }, { id: 'mode', options: modes.map((value) => ({ value, name: value })) }] } });",
+      "  if (m.method === 'session/new' && refuseSessions.includes(++sessionsAsked)) { send({ id: m.id, error: { code: -32603, message: 'Internal error: Internal service failure' } }); return; }",
+      "  if (m.method === 'session/new') {",
+      "    if (!snapshots.has(m.params.cwd)) snapshots.set(m.params.cwd, snapshots.size < staleSnapshots);",
+      "    const id = 'ses_review' + (sessions++ === 0 ? '' : '_' + sessions);",
+      "    stale.set(id, snapshots.get(m.params.cwd));",
+      "    const models = stale.get(id) ? ['opencode/stale-only'] : ['opencode/big-pickle', 'opencode/claude-opus-5', 'opencode/default'];",
+      "    send({ id: m.id, result: { sessionId: id, configOptions: [{ id: 'model', currentValue: models[0], options: models.map((value) => ({ value, name: value })) }, { id: 'mode', options: modes.map((value) => ({ value, name: value })) }] } });",
+      "  }",
+      "  if (m.method === 'session/delete') send({ id: m.id, result: {} });",
+      "  if (m.method === 'session/set_config_option' && stale.get(m.params.sessionId)) { send({ id: m.id, error: { code: -32602, message: 'Invalid params: model not found: ' + m.params.value } }); return; }",
       "  if (m.method === 'session/set_config_option') send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: selects ?? m.params.value }] } });",
       "  if (m.method === 'session/prompt') {",
       "    const reply = replies[turn++] ?? {};",

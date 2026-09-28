@@ -31,6 +31,14 @@ import { setPlatformForTests } from "../../shared/shortcuts.js";
 // there. Five seconds is what the explicit waits in this file already allow.
 configure({ asyncUtilTimeout: 5000 });
 
+
+/** Plan it again on the stopped page, and its confirmation's Plan it again. */
+async function planItAgain(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
+  const asking = await screen.findByRole("dialog", { name: "Plan it again" });
+  fireEvent.click(within(asking).getByRole("button", { name: "Plan it again" }));
+}
+
 let client: QueryClient;
 let decisionDetail: Detail;
 beforeAll(async () => {
@@ -2111,7 +2119,7 @@ describe("the stopped page", () => {
       location.hash = ["task", repoId, "PRB-415"].join("/");
       mountFresh();
       await screen.findByRole("heading", { name: "The run was stopped" });
-      fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
+      await planItAgain();
       await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/[a-z]+$/));
       const [, sessionId, pane] = location.hash.split("/");
       const drafted = (await host.request({ kind: "drafts" })).find((draft) => draft.id === sessionId)!;
@@ -2182,7 +2190,7 @@ describe("Plan it again on a stopped run (D-129)", () => {
     const rows = await screen.findAllByRole("row");
     fireEvent.click(rows.find((row) => row.textContent?.includes("#415"))!);
     await screen.findByRole("heading", { name: "The run was stopped" }, { timeout: 5000 });
-    fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
+    await planItAgain();
     await waitFor(() => expect(location.hash).toMatch(new RegExp(`^#planning/[^/]+/${pane}$`)), { timeout: 8000 });
     await screen.findByRole(pane === "graph" ? "heading" : "button", {
       name: pane === "graph" ? "Execution graph" : "Approve · start the loop",
@@ -2231,7 +2239,7 @@ describe("Plan it again on a stopped run (D-129)", () => {
     }
     mountFresh();
     fireEvent.click(await screen.findByRole("button", { name: "Retire the legacy CSV importer" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
+    await planItAgain();
     await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/contract$/), { timeout: 8000 });
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 8000 });
     const id = location.hash.split("/")[1]!;
@@ -2245,6 +2253,173 @@ describe("Plan it again on a stopped run (D-129)", () => {
     within(screen.getByRole("group", { name: "Planning panes" }))
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label") ?? "");
+
+  /** The sample's stopped spec shaped so the plan drafted from it is an epic, or flat. */
+  function shapeStoppedSpec(flat: boolean): void {
+    const held = localStorage.getItem("perbo:preview-specs");
+    onTestFinished(() => {
+      if (held !== null) localStorage.setItem("perbo:preview-specs", held);
+    });
+    const specs = JSON.parse(held ?? "{}") as Record<string, string>;
+    const slug = "retire-the-legacy-csv-importer";
+    let id = 0;
+    specs[slug] = flat
+      ? specs[slug]!.replace(/## Requirements[\s\S]*?(?=\n## )/, "## Requirements\n\n- R1: The legacy importer and its routes are removed.\n")
+      : specs[slug]!.replace(/^- (?!Nothing)/gm, () => `- R${++id}: `);
+    localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
+  }
+  /** Every create picker in the document. */
+  const pickers = (): NodeListOf<Element> =>
+    document.querySelectorAll('[role="dialog"][aria-label="Plan a piece of work"]');
+  const railButton = (name: string): HTMLElement =>
+    within(document.querySelector(".rail") as HTMLElement).getByRole("button", { name });
+
+  it.each([
+    ["an epic on its Graph", false, "graph", ["Spec", "Graph", "Explorer", "Impact", "Confirm contract"]],
+    ["a basic ticket on its contract", true, "contract", ["Spec", "Explorer", "Impact", "Confirm contract"]],
+  ] as const)("opens %s by itself once confirmed, with the rail of a plan ready to confirm", async (_, flat, pane, rail) => {
+    const { mount: mountFresh } = await freshApp();
+    shapeStoppedSpec(flat);
+    mountFresh();
+    fireEvent.click(await screen.findByRole("button", { name: "Retire the legacy CSV importer" }));
+    await planItAgain();
+    await waitFor(() => expect(location.hash).toMatch(new RegExp(`^#planning/[^/]+/${pane}$`)), { timeout: 8000 });
+    await screen.findByRole(pane === "graph" ? "heading" : "button", {
+      name: pane === "graph" ? "Execution graph" : "Approve · start the loop",
+    }, { timeout: 8000 });
+    // Opened by the flow itself, with no picker put up to find it in.
+    expect(pickers()).toHaveLength(0);
+    // Every pane a plan ready to confirm offers, the contract among them, on
+    // the pane it landed on; Problems is not there, since nothing is open.
+    await waitFor(() => expect(railTabs()).toEqual(rail), { timeout: 8000 });
+    const at = within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { current: "page" });
+    expect(at.getAttribute("aria-label")).toBe(pane === "graph" ? "Graph" : "Confirm contract");
+    // And it reopens there by the way back in from Home: the picker's one row for this work.
+    const id = location.hash.split("/")[1]!;
+    fireEvent.click(railButton("Home"));
+    await screen.findByRole("heading", { name: /Hi, / });
+    fireEvent.click(railButton("Create"));
+    const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    const rows = within(picker).getAllByRole("button", { name: /^Retire the legacy CSV importer/ });
+    expect(rows).toHaveLength(1);
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/${pane}`));
+    await waitFor(() => expect(railTabs()).toEqual(rail));
+  });
+
+  it("offers no second way into the work while its plan is drafted again, and one once it is", async () => {
+    const { host, mount: mountFresh } = await freshApp();
+    // The host's answer held, so the picker is read while the plan is drafted.
+    const original = host.request.bind(host);
+    let answer: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (answer = resolve));
+    vi.spyOn(host, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
+      request.kind === "replan" ? held.then(() => original(request)) : original(request)) as typeof host.request);
+    mountFresh();
+    fireEvent.click(await screen.findByRole("button", { name: "Retire the legacy CSV importer" }));
+    await planItAgain();
+    // Neither the ticket nor the spec it is drafted from: a planning opened
+    // over the spec now would be a second planning of the same work, on its Spec.
+    fireEvent.click(railButton("Create"));
+    const during = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    expect(within(during).queryAllByRole("button", { name: /Retire the legacy CSV importer/ })).toEqual([]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(pickers()).toHaveLength(0));
+    answer();
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\//), { timeout: 8000 });
+    // Once drafted, one picker, and one row for the work in it.
+    fireEvent.click(railButton("Create"));
+    const after = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    expect(pickers()).toHaveLength(1);
+    expect(within(after).getAllByRole("button", { name: /^Retire the legacy CSV importer/ })).toHaveLength(1);
+  });
+
+  it("keeps the stopped page saying the plan is being drafted while the host deletes the ticket and drafts", async () => {
+    const { host, mount: mountFresh } = await freshApp();
+    // The fresh sample's planning over the drafted plan held, so the page is
+    // read with the stopped ticket deleted and the plan not yet opened.
+    const { editing: freshEditing } = await import("../../sample-host/records.js");
+    const open = freshEditing.open.bind(freshEditing);
+    let answer: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (answer = resolve));
+    vi.spyOn(freshEditing, "open").mockImplementation(async (target, legacy) => {
+      if (target.kind === "planning") await held;
+      return open(target, legacy);
+    });
+    mountFresh();
+    fireEvent.click(await screen.findByRole("button", { name: "Retire the legacy CSV importer" }));
+    await screen.findByRole("heading", { name: "The run was stopped" });
+    const headings = new Set<string>();
+    const watcher = new MutationObserver(() => {
+      for (const heading of document.querySelectorAll("h1")) headings.add(heading.textContent ?? "");
+    });
+    watcher.observe(document.body, { childList: true, subtree: true, characterData: true });
+    try {
+      await planItAgain();
+      // Deleted at the host, the workspace read again without it, and the
+      // ticket's own read failing, which holds its repository as still being
+      // read.
+      await waitFor(async () =>
+        expect((await host.request({ kind: "snapshot" })).tasks.some((row) => row.ticket.key === "PRB-415")).toBe(false),
+      );
+      const repoId = (await host.request({ kind: "snapshot" })).repositories[0]!.id;
+      await waitFor(() => {
+        expect(client.getQueryData<Snapshot>(["workspace"])?.tasks.some((row) => row.ticket.key === "PRB-415")).toBe(false);
+        expect(client.getQueryState(["detail", repoId, "PRB-415"])?.status).toBe("error");
+      });
+      expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Drafting the plan…" }) as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      watcher.disconnect();
+    }
+    expect([...headings]).toEqual(["The run was stopped"]);
+    answer();
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\//), { timeout: 8000 });
+  });
+
+  it("asks first, saying what goes and what stays, and only its Plan it again sends anything", async () => {
+    const { host, mount: mountFresh } = await freshApp();
+    const repoId = (await host.request({ kind: "snapshot" })).repositories[0]!.id;
+    const original = host.request.bind(host);
+    const sent = vi.spyOn(host, "request");
+    const asked = (): string[] => sent.mock.calls.map(([request]) => request.kind);
+    mountFresh();
+    fireEvent.click(await screen.findByRole("button", { name: "Retire the legacy CSV importer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
+    const asking = await screen.findByRole("dialog", { name: "Plan it again" });
+    // The picker's own confirmation, naming the branch the run left.
+    await waitFor(() =>
+      expect(asking.querySelector("p")?.textContent).toBe(
+        "Plan “Retire the legacy CSV importer” again? The work its runs built will no longer be accessible " +
+          "in Perbo and remains only as the branch retry-activation-email in git. Its ticket, contract and " +
+          "plan, every attempt it recorded and the evidence those attempts sealed are discarded. The spec is " +
+          "kept and planned again, and nothing the runs built is carried into the new plan. Continue the " +
+          "task keeps that work instead.",
+      ),
+    );
+    // Keep it first, and the press that discards at the bottom right.
+    expect(
+      within(asking.querySelector(".dialog-actions") as HTMLElement).getAllByRole("button").map((button) => button.textContent),
+    ).toEqual(["Keep it", "Plan it again"]);
+    // Keep it, and Escape, which a modal dialog raises as its cancel, each
+    // leave the ticket as it was, with nothing sent.
+    fireEvent.click(within(asking).getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByRole("dialog", { name: "Plan it again" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
+    fireEvent(await screen.findByRole("dialog", { name: "Plan it again" }), new Event("cancel"));
+    expect(screen.queryByRole("dialog", { name: "Plan it again" })).toBeNull();
+    expect(asked()).not.toContain("replan");
+    expect(asked()).not.toContain("discard");
+    expect((await original({ kind: "snapshot" })).tasks.some((row) => row.ticket.key === "PRB-415")).toBe(true);
+    expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
+    // Confirmed: the one request Plan it again sends, once.
+    await planItAgain();
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\//), { timeout: 8000 });
+    expect(sent.mock.calls.filter(([request]) => request.kind === "replan").map(([request]) => request)).toEqual([
+      { kind: "replan", repoId, key: "PRB-415" },
+    ]);
+    expect(asked()).not.toContain("discard");
+  });
 
   it("confirms a basic plan drafted again unchanged straight away, with no reading", async () => {
     const { host, id, key, drifts } = await plannedAgainFlat();
@@ -2328,7 +2503,7 @@ describe("Plan it again on a stopped run (D-129)", () => {
     const card = await screen.findByRole("button", { name: title });
     expect(card.className).toContain("task-card--red");
     fireEvent.click(card);
-    fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
+    await planItAgain();
     // At once: the host still holds the ticket, and Home does not list it.
     expect((await original({ kind: "snapshot" })).tasks.some((task) => task.ticket.key === "PRB-415")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
@@ -2350,6 +2525,36 @@ describe("Plan it again on a stopped run (D-129)", () => {
     expect(within(picker).getByRole("button", { name: "Delete planning: " + title })).toBeTruthy();
   });
 
+  it("puts the spec back in the picker at a refusal that comes once the ticket is deleted, while the stopped page says so", async () => {
+    const { host, mount: mountFresh } = await freshApp();
+    // The host's delete, then a refusal from the admission after it, in the
+    // host's words for that.
+    const { discardTicket } = await import("../../sample-host/records.js");
+    const original = host.request.bind(host);
+    const refusal =
+      "PRB-415 was deleted and its plan could not be drafted again: the drafter could not be reached. " +
+      "Its spec is in Create's picker; draft the plan from there.";
+    vi.spyOn(host, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
+      request.kind === "replan"
+        ? Promise.resolve().then(() => {
+            expect(discardTicket(request.repoId, request.key)).toBeNull();
+            throw new Error(refusal);
+          })
+        : original(request)) as typeof host.request);
+    mountFresh();
+    fireEvent.click(await screen.findByRole("button", { name: "Retire the legacy CSV importer" }));
+    await planItAgain();
+    expect(await screen.findByText(refusal)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
+    // Where the refusal says it is.
+    fireEvent.click(railButton("Create"));
+    const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    expect(
+      await within(picker).findByRole("button", { name: /^Retire the legacy CSV importer.*spec written, no plan yet$/ }),
+    ).toBeTruthy();
+    expect(screen.getByText(refusal)).toBeTruthy();
+  });
+
   it("lists the ticket on Home again once the page a refusal was read on is left", async () => {
     const { host, mount: mountFresh } = await freshApp();
     const title = "Retire the legacy CSV importer";
@@ -2362,7 +2567,7 @@ describe("Plan it again on a stopped run (D-129)", () => {
     const card = await screen.findByRole("button", { name: title });
     expect(card.className).toContain("task-card--red");
     fireEvent.click(card);
-    fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
+    await planItAgain();
     // The reason stays on the page it was pressed on.
     expect(await screen.findByText(/was not drafted from a spec/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Home" }));

@@ -21,6 +21,7 @@ import {
   type Ticket,
 } from "./ticket.js";
 import { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
+import { ANSWERS_OWED_NOTE, gateClosedNote } from "./retained.js";
 
 const ticket = (overrides: Partial<Ticket> = {}): Ticket =>
   TicketSchema.parse({
@@ -720,6 +721,29 @@ describe("a delivery a person's decisions took (D-132)", () => {
     expect(() => transition(provisioning, "pr_open", "a pull request is open")).toThrow(IllegalTransitionError);
     // The row is from provisioning only: nothing else reaches pr_open on that note.
     expect(() => transition(ticket({ state: "executing" }), "pr_open", DECIDED_DELIVERY_NOTE)).toThrow(
+      IllegalTransitionError,
+    );
+  });
+
+  it("moves provisioning to changes_requested on the row an escalated run writes, and on no other", () => {
+    const provisioning = ticket({ state: "provisioning" });
+    const moved = transition(provisioning, "changes_requested", gateClosedNote("escalated"));
+    expect(moved.history.at(-1)).toMatchObject({ from: "provisioning", to: "changes_requested" });
+    for (const outcome of ["changes_requested", "remediation_stalled", "remediation_exhausted"]) {
+      expect(() => transition(provisioning, "changes_requested", gateClosedNote(outcome)), outcome).toThrow(
+        IllegalTransitionError,
+      );
+    }
+  });
+
+  it("moves provisioning back to changes_requested on the row a run the loop refused for owed answers writes", () => {
+    const provisioning = ticket({ state: "provisioning" });
+    const back = transition(provisioning, "changes_requested", ANSWERS_OWED_NOTE);
+    expect(back.history.at(-1)).toMatchObject({ from: "provisioning", to: "changes_requested", note: ANSWERS_OWED_NOTE });
+    // Appended to, never rewritten: every row before it stands.
+    expect(back.history.slice(0, -1)).toEqual(provisioning.history);
+    // The row is from provisioning only.
+    expect(() => transition(ticket({ state: "executing" }), "changes_requested", ANSWERS_OWED_NOTE)).toThrow(
       IllegalTransitionError,
     );
   });

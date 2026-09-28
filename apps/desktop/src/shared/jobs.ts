@@ -174,14 +174,20 @@ export const isRun = (job: Pick<Job, "kind">): boolean => job.kind === "run" || 
  * A run that completed on a verdict for the person (`outcome`) paused the
  * loop for them instead: the CLI writes the ticket's state only as it ends, so
  * until the records are read again the ticket still says the stage the run
- * started at, and that is the pause catching up, never a stop. A run still
- * going that waits on the person's answer about a host off the allow-list
- * (D-137) is `asking`: paused for them the same way,
- * until the answer is printed or the run is stopped.
+ * started at, and that is the pause catching up, never a stop. A ticket in
+ * `changes_requested` is paused for them too. Either is paused only where the
+ * record puts a question to them (`TaskRow.questions`, the decision card's
+ * count): one with none to ask has stopped short, and its stopped page says
+ * why, because a pause with nothing to answer is one nobody can end. Where the
+ * count is not read — a ticket the records have not caught up with — the
+ * pause stands until they are. A run still going that waits on the person's
+ * answer about a host off the allow-list (D-137) is
+ * `asking`: paused for them the same way, until the answer is printed or the
+ * run is stopped.
  */
 export function ticketRun(
   workspace: Pick<Snapshot, "jobs">,
-  row: { repoId: string; ticket: { key: string; state: string } },
+  row: { repoId: string; ticket: { key: string; state: string }; questions?: number },
 ) {
   const { ticket, repoId } = row;
   const jobs = workspace.jobs.filter(
@@ -190,14 +196,15 @@ export function ticketRun(
   // The loop is what a ticket's screens watch and stop, so it wins over planning running beside it.
   const active = exclusiveJob(jobs) ?? jobs.find(isLive);
   const last = jobs.filter(isRun).at(-1);
+  const endedOnVerdict =
+    last?.state === "completed" && last.outcome !== undefined && IN_PROGRESS_STATES.includes(ticket.state);
   const paused =
-    !active &&
-    last?.state === "completed" &&
-    last.outcome !== undefined &&
-    (ticket.state === "changes_requested" || IN_PROGRESS_STATES.includes(ticket.state));
+    !active && row.questions !== 0 && (ticket.state === "changes_requested" || endedOnVerdict);
   const asking = active !== undefined && active.state === "running" && isRun(active) && pendingEgressQuestion(active.log) !== null;
   const stoppedShort =
-    !active && !paused && (IN_PROGRESS_STATES.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state));
+    !active &&
+    !paused &&
+    (IN_PROGRESS_STATES.includes(ticket.state) || ["failed", "cancelled", "changes_requested"].includes(ticket.state));
   return { jobs, active, stoppedShort, paused, asking };
 }
 

@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -21,6 +21,7 @@ import {
   encodeInterviewEvent,
   type InterviewEvent,
   type InterviewQuestionGroup,
+  type InterviewTurn,
 } from "@perbo/contracts";
 import {
   ADMISSION_RULES,
@@ -49,6 +50,13 @@ import {
   type Grammar,
 } from "../../command-line/grammar.js";
 import { edit, type EditInput } from "../edit/index.js";
+import {
+  AskingStateSchema,
+  NOTHING_ASKED,
+  askingRecord,
+  type AskingRecord,
+  type AskingState,
+} from "./asking.js";
 import { withoutNextStep } from "../../next-step.js";
 import { carryDrift, driftKeyFor, type DriftKey } from "../../store/drift.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
@@ -195,6 +203,12 @@ export const INTERVIEW_TOOL_NAMES = [
  * nothing but the listed read-only shapes runs, and that what this reading
  * cannot vouch for does not run.
  *
+ * `git branch` lists branches and, given other words, changes one; the
+ * runner's guard, which judges every command before this list is read,
+ * refuses each form that changes a branch (`git_branch_write`), so what this
+ * entry admits is the listing — `git branch -a -v`, `--list <pattern>`,
+ * `--show-current`.
+ *
  * The runner's own list is wider — it belongs to an executor that has to build
  * and test what it wrote — and the deny-list below is shared with it, because
  * the acts it refuses are refused here for the same reasons.
@@ -217,6 +231,7 @@ export const INTERVIEW_READ_ONLY_COMMANDS = [
   "Bash(git show:*)",
   "Bash(git ls-files:*)",
   "Bash(git blame:*)",
+  "Bash(git branch:*)",
 ] as const;
 
 /**
@@ -1315,6 +1330,8 @@ export interface InterviewContext {
    */
   beforePlanEdit: () => void;
   planMoved: () => void;
+  /** What this session has put to the person and what they answered, so a question is put once. */
+  asking: AskingRecord;
 }
 
 export interface InterviewTool<Input extends z.ZodType = z.ZodType> {
@@ -1712,7 +1729,8 @@ const askOptions = tool({
     "group at a time. Every part needs at least two options, and one of them may be marked as your " +
     "recommendation. They can always answer in their own words instead, or leave the choice to you. " +
     "Their answers come back as their next turn, in the options' own words. This asks and returns: " +
-    "it does not wait.",
+    "it does not wait. Put each question once: a call repeating one still waiting on an answer, or " +
+    "one already answered, is refused and asks nothing.",
   // The bound belongs in the shape as well as in `input`: on Codex the shape is
   // the whole of what the model is told, and a schema saying the array is
   // unbounded asks it to spend a turn being refused.
@@ -1720,7 +1738,10 @@ const askOptions = tool({
   input: z.strictObject({
     groups: z.array(InterviewQuestionGroupSchema).min(1).max(MAX_QUESTION_GROUPS),
   }),
-  run: async (input) => {
+  run: async (input, context) => {
+    const repeated = context.asking.repeats(input.groups);
+    if (repeated !== null) return said(repeated, true);
+    context.asking.asked(input.groups);
     const parts = input.groups.reduce((count, group) => count + group.parts.length, 0);
     return {
       ...said(
@@ -1866,6 +1887,11 @@ interface InterviewSessionRecord {
   model: string | null;
   /** The provider whose id this is: the two keep separate namespaces. */
   provider: InterviewProvider;
+  /**
+   * What the session has put to the person and what they answered, kept as
+   * it changes so a resumed session refuses a question it asked before (D-117).
+   */
+  asking: AskingState;
 }
 
 /**
@@ -2039,6 +2065,20 @@ export async function interview(
   let carry: Carry | null = null;
   /** A tool that may write was admitted since the pair was last looked at. */
   let written = false;
+  /** The folder the spec is in, where the session's record is kept beside it. */
+  const specFolderPath = join(repositoryRoot, dirname(spec));
+  /** The session's record once it has an id, kept beside the spec as it changes. */
+  let sessionRecord: InterviewSessionRecord | null = null;
+  /** Write the session's record, or say why it was not written. */
+  const keepSession = (record: InterviewSessionRecord): void => {
+    const unrecorded = recordSession(repositoryRoot, specFolderPath, record);
+    if (unrecorded !== null) {
+      streams.stderr(
+        `this session was not recorded beside its spec, so --session ${record.session_id} will not ` +
+          `find it or what it asked: ${unrecorded}\n`,
+      );
+    }
+  };
   const toolContext: InterviewContext = {
     cwd: context.cwd,
     repo: args.repo,
@@ -2048,6 +2088,14 @@ export async function interview(
     spec,
     specWrittenThisTurn: permission.specWrittenThisTurn,
     beforePlanEdit: () => look(),
+    asking: askingRecord(
+      args.session === null ? NOTHING_ASKED : recordedAsking(specFolderPath, args.session, streams),
+      (asking) => {
+        if (sessionRecord === null) return;
+        sessionRecord = { ...sessionRecord, asking };
+        keepSession(sessionRecord);
+      },
+    ),
     planMoved: () => {
       if (carry === null) return;
       carry.moved = true;
@@ -2146,18 +2194,15 @@ export async function interview(
       `interview ${id} in ${repositoryRoot}, writing ${spec}, CONTEXT.md and ${adr}; anything else ` +
         "is refused rather than asked, and it cannot approve, publish or merge\n",
     );
-    const unrecorded = recordSession(repositoryRoot, join(repositoryRoot, dirname(spec)), {
+    sessionRecord = {
       session_id: id,
       spec,
       started_at: context.now.toISOString(),
       model: args.model,
       provider: args.provider,
-    });
-    if (unrecorded !== null) {
-      streams.stderr(
-        `this session was not recorded beside its spec, so --session ${id} will not find it: ${unrecorded}\n`,
-      );
-    }
+      asking: toolContext.asking.state(),
+    };
+    keepSession(sessionRecord);
   };
 
   const transport =
@@ -2190,7 +2235,10 @@ export async function interview(
       }
       return decided;
     },
-    turns: answering(turnsAsText(context.turns), () => {
+    turns: answering(turnsOf(context.turns), (turn) => {
+      // Read against what was asked before the session has it, so a question
+      // it puts again while it reads the answer is known to be answered.
+      toolContext.asking.heard(turn);
       // The spec as this turn found it, which is what an edit made during the
       // turn is measured against. Taken as the turn is pulled, and again when
       // a turn ends (below), because a queued turn is pulled while the one
@@ -2392,7 +2440,19 @@ function recordSession(
     if (isSymlink(file)) {
       return `${file} is a symlink, and this is the repository's own record`;
     }
-    writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+    // Whole or not at all: the record is written again at every change to
+    // the asking, and one torn by a kill mid-write is a record `--session`
+    // cannot find and whose asking is lost. So it is written beside itself,
+    // under a name nothing else holds (`wx` refuses one that is there, a
+    // symlink included), and renamed over the record in one step.
+    const written = join(landed, `${INTERVIEW_SESSION_FILE}.${process.pid}.${randomUUID()}`);
+    try {
+      writeFileSync(written, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
+      renameSync(written, file);
+    } catch (error) {
+      rmSync(written, { force: true });
+      throw error;
+    }
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -2409,27 +2469,56 @@ function isSymlink(path: string): boolean {
 }
 
 /**
- * The person's turns, with `began` run before each is handed on, so the
- * readings the turn's own writes are measured against are taken before it can
- * make them.
+ * The turns' text, with `began` run on each turn before it is handed on, so
+ * the readings the turn's own writes are measured against are taken before it
+ * can make them.
  */
 async function* answering(
-  turns: AsyncGenerator<string>,
-  began: () => void,
+  turns: AsyncGenerator<InterviewTurn>,
+  began: (turn: InterviewTurn) => void,
 ): AsyncGenerator<string> {
   for await (const turn of turns) {
-    began();
-    yield turn;
+    began(turn);
+    yield turn.text;
   }
 }
 
-/** The person's turns, as text, one line of stdin each. */
-async function* turnsAsText(turns: AsyncIterable<string> | undefined): AsyncGenerator<string> {
+/** The turns, one line of stdin each. */
+async function* turnsOf(turns: AsyncIterable<string> | undefined): AsyncGenerator<InterviewTurn> {
   for await (const line of turns ?? linesOfStdin()) {
     const turn = decodeInterviewTurn(line);
-    if (turn === null) continue;
-    yield turn.text;
+    if (turn !== null) yield turn;
   }
+}
+
+/**
+ * What the session resumed asked before, from its record beside the spec, or
+ * nothing where there is no record or it is another session's. A record that
+ * cannot be read, or one of this session's whose asking cannot be, is said,
+ * and read as nothing asked: the session goes on, and may ask again what it
+ * asked before.
+ */
+function recordedAsking(folder: string, session: string, streams: Streams): AskingState {
+  const unread = (): AskingState => {
+    streams.stderr(
+      `what the session ${session} asked could not be read from ${INTERVIEW_SESSION_FILE} beside its spec, ` +
+        "so a question it asked before is not refused if it asks it again\n",
+    );
+    return NOTHING_ASKED;
+  };
+  const path = join(folder, INTERVIEW_SESSION_FILE);
+  if (!existsSync(path)) return NOTHING_ASKED;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return unread();
+  }
+  const found = FoundSessionSchema.safeParse(raw);
+  if (!found.success) return unread();
+  if (found.data.session_id !== session) return NOTHING_ASKED;
+  const asking = AskingStateSchema.safeParse((raw as { asking?: unknown }).asking);
+  return asking.success ? asking.data : unread();
 }
 
 /** stdin, one line at a time. */

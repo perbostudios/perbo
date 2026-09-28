@@ -21,10 +21,24 @@ import { scriptedSdk, type ScriptStep } from "./fake-sdk.js";
 import { runCommandLine } from "../../../command-line/terminal.js";
 import { recordStreams } from "../../../test-support/streams.js";
 
-/** One turn from the person, which is what makes a session run at all. */
-const oneTurn = async function* (): AsyncGenerator<string> {
-  yield JSON.stringify({ type: "turn", text: "let us write the spec" });
+/**
+ * The turns: the one that makes a session run at all, then one for each
+ * `turn` step, in order. Each is handed over only when the transport asks for
+ * the next, which is when the session has ended the turn before it.
+ */
+const turnsOf = async function* (
+  steps: readonly ContractStep[],
+  opening = "let us write the spec",
+): AsyncGenerator<string> {
+  yield JSON.stringify({ type: "turn", text: opening });
+  for (const step of steps)
+    if (step.kind === "turn")
+      yield JSON.stringify({ type: "turn", text: step.text, ...(step.asking ? { asking: step.asking } : {}) });
 };
+
+/** The steps that ask the transport for an answer, in the order its answers are logged. */
+const asking = (steps: readonly ContractStep[]): ContractStep[] =>
+  steps.filter((step) => step.kind !== "say" && step.kind !== "turn");
 
 /** What a step looks like to the Claude Agent SDK. */
 function asSdkStep(step: ContractStep): ScriptStep {
@@ -43,6 +57,8 @@ function asSdkStep(step: ContractStep): ScriptStep {
       return { kind: "tool", tool: "Bash", input: { command: step.command } };
     case "call":
       return { kind: "call", tool: step.tool, input: step.input };
+    case "turn":
+      return { kind: "await" };
   }
 }
 
@@ -68,7 +84,7 @@ export function claudeHarness(): InterviewHarness {
         cwd: input.repo,
         deps: {
           transport: claudeInterviewTransport(sdk, CLAUDE),
-          turns: oneTurn(),
+          turns: turnsOf(input.steps, input.opening),
         },
       });
       const decisions: ContractDecision[] = sdk.calls.map((call) => ({
@@ -93,6 +109,8 @@ function asServerStep(step: ContractStep): ServerStep {
       return { kind: "command", command: step.command };
     case "call":
       return { kind: "tool", tool: step.tool, arguments: step.input };
+    case "turn":
+      return { kind: "await" };
   }
 }
 
@@ -120,7 +138,7 @@ export function codexHarness(scratch: () => string): InterviewHarness {
         cwd: input.repo,
         deps: {
           transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-          turns: oneTurn(),
+          turns: turnsOf(input.steps, input.opening),
         },
       });
       // A tool call the interview refused is answered with the refusal's own
@@ -129,8 +147,9 @@ export function codexHarness(scratch: () => string): InterviewHarness {
       const refused = new Set(
         refusals(streams).map((event) => event.tool),
       );
+      const asked = asking(input.steps);
       const decisions: ContractDecision[] = server.answers().map((answer, at) => {
-        const step = input.steps[at];
+        const step = asked[at];
         const tool =
           step?.kind === "call" ? step.tool : step?.kind === "command" ? "Bash" : "Write";
         const behavior: "allow" | "deny" =
@@ -166,7 +185,7 @@ export function openCodeHarness(scratch: () => string): InterviewHarness {
       const streams = recordStreams();
       const fake = fakeOpenCode({
         root: mkdtempSync(join(scratch(), "opencode-")),
-        steps: input.steps as readonly OpenCodeStep[],
+        steps: input.steps.map((step): OpenCodeStep => (step.kind === "turn" ? { kind: "await" } : step)),
         sessionId: input.sessionId ?? "ses-0001",
       });
       const code = await runCommandLine(interviewCommandLine, {
@@ -185,15 +204,17 @@ export function openCodeHarness(scratch: () => string): InterviewHarness {
           transport: openCodeInterviewTransport({
             binary: fake.binary,
             dataDirectory: mkdtempSync(join(scratch(), "opencode-data-")),
+            // The fake's catalogue settles as soon as it is asked.
+            wait: async () => undefined,
           }),
-          turns: oneTurn(),
+          turns: turnsOf(input.steps, input.opening),
         },
       });
       // A tool call the interview refused is answered with the refusal's own
       // words, as on the other transports, so what says it was refused is the
       // `refused` event the protocol carries it on.
       const refused = new Set(refusals(streams).map((event) => event.tool));
-      const asked = input.steps.filter((step) => step.kind !== "say");
+      const asked = asking(input.steps);
       const decisions: ContractDecision[] = fake.answers().map((answer, at) => {
         const step = asked[at];
         const tool = step?.kind === "call" ? step.tool : step?.kind === "command" ? "Bash" : "Write";

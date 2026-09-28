@@ -9,7 +9,9 @@ import {
   EXIT_CODES,
   ReviewArtifactSchema,
   SecretIndex,
+  TicketSchema,
   findingKey,
+  gateClosedNote,
   reconcileStopVerdicts,
   type Finding,
   type PlanContractWithCriteria,
@@ -125,7 +127,10 @@ const KEYS = FINDINGS.map((finding) =>
 );
 const [STOP_ONE, STOP_TWO, STOP_THREE, ADVISORY] = KEYS;
 
-function reviewArtifact(decision: ReviewArtifact["decision"] = "changes_requested"): ReviewArtifact {
+function reviewArtifact(
+  decision: ReviewArtifact["decision"] = "changes_requested",
+  routedTo: "as_listed" | "executor" = "as_listed",
+): ReviewArtifact {
   const base = makeReview({
     review_id: "rev_verdict0001",
     changeset_id: "cs_verdict0001",
@@ -143,8 +148,8 @@ function reviewArtifact(decision: ReviewArtifact["decision"] = "changes_requeste
       file: finding.file,
       line: 3,
       symbol: null,
-      routing: finding.routing,
-      blocking: finding.blocking,
+      routing: routedTo === "executor" && finding.routing !== "advisory" ? "remediable" : finding.routing,
+      blocking: routedTo === "executor" ? false : finding.blocking,
       // Every one names a person as its closer, the advisory one too: only the
       // routing makes a finding a person's to answer (`routedToPerson`).
       closure: "human",
@@ -239,6 +244,8 @@ function storeWith(
     bundles?: boolean;
     securityFinding?: boolean;
     decision?: ReviewArtifact["decision"];
+    /** Every finding that stops anything routed to the executor instead. */
+    toExecutor?: boolean;
   } = {},
 ): {
   repo: string;
@@ -294,7 +301,7 @@ function storeWith(
         body: JSON.stringify(
           options.securityFinding
             ? withSecurityFinding(reviewArtifact(options.decision))
-            : reviewArtifact(options.decision),
+            : reviewArtifact(options.decision, options.toExecutor ? "executor" : "as_listed"),
         ),
       },
     ]);
@@ -307,6 +314,78 @@ function storeWith(
     );
   }
   return { repo, store };
+}
+
+/**
+ * AYO-7 as PRB-15 left it: a review that routed its three findings to the
+ * executor, a remediation round that closed STOP_THREE, a second that closed
+ * nothing, and — where `outcome` is given — the row the run wrote as it ended.
+ * With `declined`, the second round's executor declined STOP_ONE (D-065)
+ * rather than being given it to close.
+ */
+function stalledStore(name: string, outcome: string | null, declined = false): { repo: string; store: string } {
+  const made = storeWith(name, { decision: "remediable", toExecutor: true });
+  const bundles = new BundleStore({ root: join(made.store, "bundles"), retainContext: true });
+  const attempts = join(made.store, "state", `${TICKET_ID}.attempts.json`);
+  const rounds = [
+    { round: 1, given: [STOP_ONE!, STOP_TWO!, STOP_THREE!], open: [STOP_ONE!, STOP_TWO!], declines: [] as string[] },
+    declined
+      ? { round: 2, given: [STOP_TWO!], open: [STOP_TWO!], declines: [STOP_ONE!] }
+      : { round: 2, given: [STOP_ONE!, STOP_TWO!], open: [STOP_ONE!, STOP_TWO!], declines: [] as string[] },
+  ];
+  const recorded = [attempt];
+  for (const { round, given, open, declines } of rounds) {
+    const recordedAttempt = makeAttempt({
+      attempt_id: `att_verdict0000000${round + 1}`,
+      ticket_id: TICKET_ID,
+      created_at: `2026-09-03T12:${round}0:00.000Z`,
+      termination: { reason: "completed", detail: "" },
+      usage: { cost_basis: "unavailable" },
+      changeset_id: "cs_verdict0001",
+      head_commit: "b2c3d4e",
+    });
+    const remediation = {
+      ...recordedAttempt,
+      declines: declines.map((finding_key) => ({ finding_key, reason: "which page size is right is a product call" })),
+    };
+    recorded.push(remediation);
+    bundles.write({
+      kind: "review",
+      subject_id: `cv_${remediation.attempt_id}`,
+      ticket_id: TICKET_ID,
+      inputs: {
+        head_commit: "b2c3d4e",
+        findings_given: given.join(","),
+        findings_open: open.join(","),
+        findings_declined: declines.join(","),
+      },
+      context_manifest: [],
+      versions: { code: "stage-3", prompt: "closure_verify_v1", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
+      usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
+      artifacts: [],
+      errors: [],
+      transitions: [],
+      retention: { class: "raw_transcript", expires_at: null },
+      secrets: new SecretIndex(),
+      excluded_paths: [],
+      deterministic: false,
+      model_version_pinned: true,
+      now: new Date(`2026-09-03T12:${round}5:00.000Z`),
+    });
+  }
+  writeFileSync(attempts, `${JSON.stringify({ ticket_id: TICKET_ID, attempts: recorded }, null, 2)}\n`);
+  if (outcome !== null) {
+    const path = join(made.store, "tickets", "AYO-7.json");
+    const ticket = TicketSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+    ticket.history.push({
+      at: "2026-09-03T12:30:00.000Z",
+      from: "independent_review",
+      to: "changes_requested",
+      note: gateClosedNote(outcome),
+    });
+    writeFileSync(path, JSON.stringify(ticket));
+  }
+  return made;
 }
 
 const readVerdicts = (store: string) =>
@@ -1386,6 +1465,41 @@ describe("perbo verdict --decide records a person's answer that closes the findi
           new RegExp(`ended ${decision}: it did not judge the whole change`),
         );
       }
+      expect(existsSync(join(store, "verdicts.json"))).toBe(false);
+    }
+  });
+
+  it("answers what a stalled or exhausted refinement left open, and still refuses what a round closed", async () => {
+    for (const outcome of ["remediation_stalled", "remediation_exhausted"]) {
+      const { repo, store } = stalledStore(`decide-${outcome}`, outcome);
+      expect(await decide(repo, STOP_ONE!, null, ["--choice", "ship-as-is"], LATER)).toBe(0);
+      expect(await decide(repo, STOP_TWO!, "Assert the page size with a real query.", [], LATER)).toBe(0);
+      expect(() => decide(repo, STOP_THREE!, null, ["--choice", "ship-as-is"], LATER)).toThrow(/routed to a person/);
+      expect(
+        decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => [row.finding_key, row.choice]),
+      ).toEqual([
+        [STOP_ONE, "ship_as_is"],
+        [STOP_TWO, "approach"],
+      ]);
+    }
+  });
+
+  it("refuses an answer to a finding the executor declined before the stall, and takes one to the finding beside it", async () => {
+    const { repo, store } = stalledStore("decide-declined", "remediation_stalled", true);
+    for (const choice of ["approach", "let-it-decide", "ship-as-is"]) {
+      expect(() => decide(repo, STOP_ONE!, "Use fifty.", ["--choice", choice], LATER), choice).toThrow(
+        /is a finding the executor declined \(D-065\), and no choice closes it: `perbo principle add` carries your answer/,
+      );
+    }
+    expect(existsSync(join(store, "verdicts.json"))).toBe(false);
+    expect(await decide(repo, STOP_TWO!, null, ["--choice", "ship-as-is"], LATER)).toBe(0);
+    expect(decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => row.finding_key)).toEqual([STOP_TWO]);
+  });
+
+  it("refuses an answer to a finding routed to the executor while the loop is still trying it", async () => {
+    for (const outcome of [null, "changes_requested"]) {
+      const { repo, store } = stalledStore(`decide-still-trying-${outcome}`, outcome);
+      expect(() => decide(repo, STOP_ONE!, null, ["--choice", "ship-as-is"], LATER)).toThrow(/routed to a person/);
       expect(existsSync(join(store, "verdicts.json"))).toBe(false);
     }
   });

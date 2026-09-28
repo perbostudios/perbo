@@ -10,6 +10,7 @@ import {
   OPENCODE_BUILTIN_MODES,
   OPENCODE_SESSION_ATTEMPTS,
   OPENCODE_SESSION_RETRY_MS,
+  awaitOpenCodeModel,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -111,6 +112,10 @@ class OpenCodeAcp {
   private nextId = 1;
   private stderr = "";
   private closed = false;
+  /** Why the process ended, once it has: every request from then on is refused with it at once. */
+  private stopped: Error | null = null;
+  /** The rejections that are OpenCode's own answer refusing a request, rather than the transport failing. */
+  private readonly openCodeRefusals = new WeakSet<Error>();
   /** The message the turn in flight is saying, by its id, the last one kept. */
   private message: { id: string | null; text: string } | null = null;
   /** OpenCode's running total for the session, in dollars, as its last usage update said. */
@@ -150,18 +155,22 @@ class OpenCodeAcp {
     );
     this.lines = readline.createInterface({ input: this.process.stdout });
     this.lines.on("line", (line) => this.handleLine(line));
+    // A write to a process that has gone fails here; the exit says why it went.
+    this.process.stdin.on("error", () => undefined);
     this.process.stderr.on("data", (chunk: Buffer) => {
       this.stderr = (this.stderr + chunk.toString("utf8")).slice(-16_384);
     });
-    this.process.on("error", (error) => this.failAll(error));
+    this.process.on("error", (error) => {
+      this.stopped = error;
+      this.failAll(error);
+    });
     this.process.on("exit", (code, signal) => {
-      if (!this.closed)
-        this.failAll(
-          new Error(
-            `OpenCode exited before the review completed (${signal ?? code ?? "unknown"})` +
-              (this.stderr.trim() ? `: ${this.stderr.trim()}` : ""),
-          ),
-        );
+      if (this.closed) return;
+      this.stopped = new Error(
+        `OpenCode exited before the review completed (${signal ?? code ?? "unknown"})` +
+          (this.stderr.trim() ? `: ${this.stderr.trim()}` : ""),
+      );
+      this.failAll(this.stopped);
     });
   }
 
@@ -171,6 +180,14 @@ class OpenCodeAcp {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: "perbo_reviewer", version: "0.1.0" },
+    });
+    // The scratch session's catalogue snapshot settles on `modelId` before the
+    // review's own session is opened (`awaitOpenCodeModel`).
+    await awaitOpenCodeModel({
+      model: modelId,
+      scratch: () => mkdtempSync(join(this.root, "catalogue-")),
+      request: (method, params) => this.request(method, params),
+      refused: (error) => this.refused(error),
     });
     const opened = await this.openSession();
     const sessionId = opened?.sessionId;
@@ -204,7 +221,8 @@ class OpenCodeAcp {
   /**
    * `session/new` in the scratch directory, with no tool server. OpenCode
    * refuses a session asked for before its model catalogue has arrived; it is
-   * asked again (`OPENCODE_SESSION_ATTEMPTS`, `OPENCODE_SESSION_RETRY_MS` apart).
+   * asked again (`OPENCODE_SESSION_ATTEMPTS`, `OPENCODE_SESSION_RETRY_MS`
+   * apart). Any other failure is thrown at once.
    */
   private async openSession(): Promise<{ sessionId?: string; configOptions?: ConfigOption[] } | null> {
     for (let attempt = 0; ; attempt += 1) {
@@ -214,10 +232,15 @@ class OpenCodeAcp {
           configOptions?: ConfigOption[];
         } | null;
       } catch (error) {
-        if (attempt + 1 >= OPENCODE_SESSION_ATTEMPTS) throw error;
+        if (!this.refused(error) || attempt + 1 >= OPENCODE_SESSION_ATTEMPTS) throw error;
         await new Promise((resolve) => setTimeout(resolve, OPENCODE_SESSION_RETRY_MS));
       }
     }
+  }
+
+  /** Whether a request's rejection is OpenCode's own answer refusing it. */
+  private refused(error: unknown): boolean {
+    return error instanceof Error && this.openCodeRefusals.has(error);
   }
 
   /** What the turn in flight has said last. */
@@ -252,6 +275,7 @@ class OpenCodeAcp {
 
   private request(method: string, params: unknown): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error("OpenCode is closed"));
+    if (this.stopped !== null) return Promise.reject(this.stopped);
     const id = this.nextId;
     this.nextId += 1;
     return new Promise((resolve, reject) => {
@@ -291,17 +315,17 @@ class OpenCodeAcp {
       if (!pending) return;
       this.pending.delete(message.id as number);
       clearTimeout(pending.timer);
-      if (message.error)
-        pending.reject(
-          new ProviderError(
-            `OpenCode request failed: ${message.error.message ?? "unknown"}`,
-            1,
-            /usage.?limit|budget|quota|insufficient|credit/i.test(message.error.message ?? "")
-              ? "budget_exhausted"
-              : "provider_unavailable",
-          ),
+      if (message.error) {
+        const refusal = new ProviderError(
+          `OpenCode request failed: ${message.error.message ?? "unknown"}`,
+          1,
+          /usage.?limit|budget|quota|insufficient|credit/i.test(message.error.message ?? "")
+            ? "budget_exhausted"
+            : "provider_unavailable",
         );
-      else pending.resolve(message.result);
+        this.openCodeRefusals.add(refusal);
+        pending.reject(refusal);
+      } else pending.resolve(message.result);
       return;
     }
     if (message.method !== "session/update") return;

@@ -4,6 +4,7 @@ import {
   configPath,
   egressQuestionsFileName,
   limitFor,
+  leftToPrinciple,
   limitsForCredential,
   STORE_DIRNAME,
   type GithubCredential,
@@ -11,6 +12,7 @@ import {
   type NodeReview,
   type PlanContract,
   type ReviewArtifact,
+  type HistoryRow,
 } from "@perbo/contracts";
 import { cleanup, type Workspace } from "@perbo/workspace";
 import { PROMPT_VERSION } from "@perbo/review";
@@ -30,7 +32,9 @@ import {
   branchStillAt,
   confirmContinuation,
   decidedDelivery,
+  declinesOnRecord,
   decisionsOn,
+  refuseOwedAnswers,
   remediationToContinue,
   stillWithPerson,
 } from "./internal/continuation.js";
@@ -101,6 +105,7 @@ import { verifyRound } from "./internal/verify.js";
  */
 
 export { resolvePorts, type LoopPorts, type RunLimits } from "./internal/context.js";
+export { AnswersOwedError, refuseOwedAnswers } from "./internal/continuation.js";
 export { incompleteReviewCauses } from "./internal/review.js";
 export { type DecidedFinding } from "../decisions.js";
 export { type RoundKind, type RoundRecord, type RunOutcome } from "./internal/state.js";
@@ -210,6 +215,12 @@ export interface TicketRunRequest {
    * was taken after; none reaches the executor or the reviewer.
    */
   decided?: readonly DecidedFinding[];
+  /**
+   * The ticket's rows, which say whether a run since its last review ended on
+   * `FINISHED_TRYING` and so put every finding it left open to the person
+   * (`loopOnReview`). None for a run with no ticket.
+   */
+  history?: readonly HistoryRow[];
   /** Injected by tests: a stand-in for the agent, the checks and the reviewer. */
   hooks?: Partial<LoopPorts>;
 }
@@ -289,6 +300,12 @@ async function runLockedTicket(
     progress,
   });
   const { contract, bundles, resumeSource, manifest, verifyMeasures } = started;
+  const decided = args.decided ?? [];
+  const history = args.history ?? [];
+  // D-132: a ticket whose last run finished trying, with the findings it left
+  // open unanswered and none handed on, is refused before anything is
+  // provisioned (`refuseOwedAnswers`).
+  await refuseOwedAnswers({ config, contract, decided, history });
   const {
     attemptsPath,
     prior: priorAttempts,
@@ -340,8 +357,13 @@ async function runLockedTicket(
 
   let outcome: TicketRunResult["outcome"] = "terminated";
   let detail = "";
-  const decided = args.decided ?? [];
   let decidedOn: DecidedFinding[] = [];
+  /**
+   * The findings of the review on record the executor declined in an earlier
+   * run (D-065), which this run leaves for the person: its outcome is
+   * `escalated`, and the pull request lists them with the reasons given.
+   */
+  let declinedBefore: string[] = [];
 
   // D-132: a delivery on a person's
   // answers (`decidedDelivery`), taken only while the branch is the commit that
@@ -354,6 +376,7 @@ async function runLockedTicket(
           ticket_id: contract.ticket_id,
           repository_id: contract.scope.repository_id,
           decided,
+          history,
         });
   const delivering =
     decidedNow !== null &&
@@ -382,7 +405,7 @@ async function runLockedTicket(
   const continuing =
     resumeSource !== null || config.relevel || delivering !== null
       ? null
-      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided });
+      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided, history });
   if (continuing !== null) {
     progress(
       `${config.ticket_key}'s last review left ${continuing.findings.length} finding(s) open on ` +
@@ -401,13 +424,15 @@ async function runLockedTicket(
   let state = initialRoundState(workspace, continuing);
   if (delivering !== null) {
     decidedOn = delivering.decided;
+    declinedBefore = delivering.declined.map((finding) => finding.key);
     state = { ...state, finalReview: delivering.review, nodeReviews: delivering.node_reviews };
-    outcome = "approved";
+    outcome = declinedBefore.length === 0 ? "approved" : "escalated";
     detail =
       `every finding the review routed to a person is decided (${delivering.decided
         .map((row) => row.finding_key.slice(0, 12))
         .join(", ")}), and the branch is still at ${delivering.head_commit}, the commit that ` +
-      "review judged: nothing was executed or reviewed again";
+      "review judged: nothing was executed or reviewed again" +
+      declinedForPerson(declinedBefore);
     progress(detail);
   }
 
@@ -785,14 +810,21 @@ async function runLockedTicket(
     // as closed only where the run's verification closed it, which is an
     // approval; anything short of that leaves it open on the review.
     if (continuing !== null && state.finalReview === continuing.review) {
-      const decisions = decisionsOn(continuing.review, continuing.reviewed_at, decided);
+      const decisions = decisionsOn(continuing.review, continuing.reviewed_at, decided, continuing.loop);
       const handed = new Set(continuing.directions.map((direction) => direction.finding_key));
-      const owed = stillWithPerson(continuing.review, decisions, handed);
+      const owed = stillWithPerson(continuing.review, decisions, handed, continuing.loop);
       if (outcome === "approved" && owed.length > 0) {
         outcome = "escalated";
         detail =
           `${detail}; ${owed.length} finding(s) the review routed to a person are still theirs: ` +
           `${owed.map((finding) => finding.key).join(", ")}`;
+      }
+      declinedBefore = continuing.review.findings
+        .filter((finding) => leftToPrinciple(finding, continuing.loop))
+        .map((finding) => finding.key);
+      if (outcome === "approved" && declinedBefore.length > 0) {
+        outcome = "escalated";
+        detail = `${detail}${declinedForPerson(declinedBefore)}`;
       }
       const recorded = new Map(
         [...decisions].filter(
@@ -863,7 +895,13 @@ async function runLockedTicket(
         state,
         attempts: delivered,
         verificationCosts: ledger.verificationCosts,
-        declines: ledger.declines,
+        declines: [
+          ...ledger.declines,
+          ...declinesOnRecord(
+            priorAttempts,
+            new Set(declinedBefore.filter((key) => !ledger.declines.some((decline) => decline.finding_key === key))),
+          ),
+        ],
         rootAttemptId: deliveredUnder,
         finalReview: state.finalReview,
         detail,
@@ -936,6 +974,14 @@ async function runLockedTicket(
       outcome: outcome === "approved" ? "success" : "failure",
     }).catch(() => undefined);
   }
+}
+
+/** What a run's end says of the findings the executor declined in an earlier run, which stay the person's (D-065). */
+function declinedForPerson(keys: readonly string[]): string {
+  return keys.length === 0
+    ? ""
+    : `; ${keys.length} finding(s) the executor declined are yours to decide, and \`perbo principle add\` ` +
+        `is the answer: ${keys.join(", ")}`;
 }
 
 export { PROMPT_VERSION as REVIEWER_PROMPT_VERSION };

@@ -51,4 +51,19 @@ describe("the retained transcript", () => {
     expect(entries.map((entry) => entry.text)).toEqual(["Splitting the work.", "Both halves are in."]);
     expect(terminal).toBe("$ pnpm test\nok");
   });
+
+  it("keeps each message OpenCode's session finished, and no row for its tool calls", () => {
+    const record = [
+      { sessionUpdate: "agent_message", text: "Reading the mailer first.\nThen its tests." },
+      { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed", title: "pnpm test", rawInput: { command: "pnpm test" } },
+      { sessionUpdate: "agent_message", text: "  " },
+      { sessionUpdate: "agent_message", text: "\nThe retry is in.\n" },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+    expect(retainedOutput(record).entries).toEqual([
+      { author: "Executor", label: "message", text: "Reading the mailer first.\nThen its tests." },
+      { author: "Executor", label: "message", text: "The retry is in." },
+    ]);
+  });
 });

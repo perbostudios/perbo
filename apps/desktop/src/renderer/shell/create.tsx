@@ -298,7 +298,7 @@ type SpecTicket = { repoId: string; ticket: { key: string; admission?: { spec?: 
  * in whatever folder this repository keeps specs in, so the slug is the folder
  * the path names, which is the last but one.
  */
-const ticketSpec = (row: SpecTicket): string[] => {
+export const ticketSpec = (row: SpecTicket): string[] => {
   const slug = row.ticket.admission?.spec?.path?.split("/").at(-2);
   return slug ? [row.repoId + "/" + slug] : [];
 };

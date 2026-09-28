@@ -26,7 +26,9 @@ const request = {
 };
 
 function normalise(text: string): string {
-  return text.replace(/"[^"]*perbo-opencode-review-[A-Za-z0-9]+([^"]*)"/g, '"<root>$1"');
+  return text
+    .replace(/"[^"]*perbo-opencode-review-[A-Za-z0-9]+([^"]*)"/g, '"<root>$1"')
+    .replace(/catalogue-[A-Za-z0-9]+/g, "catalogue-<scratch>");
 }
 
 describe("the requests the opencode-cli transport sends", () => {

@@ -429,6 +429,47 @@ describe("shutdown", () => {
   });
 });
 
+describe("an ended run's log", () => {
+  /** What a long run printed on stderr as it went: the agents' words among its stages. */
+  const progress = [
+    "  worktree /w/att_1 on prb/x at abc1234",
+    "  executing",
+    `  ${spokenLine("executor", "Reading the mailer first.")}`,
+    "  Codex pnpm test",
+    "  review round 0",
+    `  ${spokenLine("reviewer", "The cap has no test of its own.")}`,
+  ].join("\n");
+  /** The result `perbo run --json` prints on stdout as it ends: longer than the whole of a log's tail. */
+  const result = JSON.stringify(
+    { outcome: "escalated", attempts: Array.from({ length: LOG_TAIL_CHARS / 20 }, (_, at) => ({ attempt: at })) },
+    null,
+    2,
+  );
+
+  it("keeps what the run printed as it went, and reads its result into the job's own field", async () => {
+    const w = runner({ code: 2, stdout: result, stderr: progress, cancelled: false }, [progress]);
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "--ticket", "PRB-1", "--json"], { verdict: true, progressLog: true });
+    });
+    await quiet(w.jobs);
+    expect(job).toMatchObject({ state: "completed", outcome: "escalated", log: progress });
+    expect(spokenWords(job.log).map(({ words }) => words)).toEqual(["Reading the mailer first.", "The cap has no test of its own."]);
+    expect(job.result).toEqual(JSON.parse(result));
+  });
+
+  it("keeps another command's stdout after its stderr, each cut to its own tail", async () => {
+    const said = Array.from({ length: LOG_TAIL_CHARS / 10 }, (_, at) => `synced line ${at}`).join("\n");
+    const w = runner({ code: 0, stdout: `${said}\nthe pull request is open`, stderr: progress, cancelled: false });
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "sync", label: "Refresh from GitHub" }, async (_job, context) => {
+      await context.invoke(["sync", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    expect(job.log.length).toBeLessThanOrEqual(LOG_TAIL_CHARS);
+    expect(job.log.startsWith(progress + "\n")).toBe(true);
+    expect(job.log.endsWith("\nthe pull request is open")).toBe(true);
+  });
+});
+
 /**
  * `perbo run` exits 2 on a verdict for the person — the review asked for
  * changes or put a decision to them, or refinement ran out or closed nothing —

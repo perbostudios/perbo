@@ -1,9 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
-import { decidable, type LimitsTableSchema, type PlanContract } from "@perbo/contracts";
-import type { Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
-import { decisionQuestions } from "../../shared/decisions.js";
+import type { LimitsTableSchema, PlanContract } from "@perbo/contracts";
+import type { DecisionQuestion, Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
+import { decisionQuestions, type SettledFindings } from "../../shared/decisions.js";
 import type { FindingsOnRecord } from "../records.js";
 
 /**
@@ -252,21 +252,23 @@ export function assertResumable(detail: Detail, bundleId: string): void {
 
 /**
  * Every answer is one the loop acts on, checked against the review it reads
- * before any is recorded, so a refused one leaves nothing written: a finding
- * that review routed to a person, on a review that judged the whole change,
- * answered with a choice it takes
- * (D-132).
+ * before any is recorded, so a refused one leaves nothing written: a question
+ * the decision card asks of that review (`decisionQuestions`, over what is
+ * settled on it), answered with a choice it takes (D-132).
  */
 export function assertDecidable(
-  review: FindingsOnRecord | null,
+  onRecord: { review: FindingsOnRecord; settled: SettledFindings } | null,
   decisions: RequestOf<"decide">["decisions"],
 ): void {
-  const asked = new Map(decisionQuestions(review).map((question) => [question.id, question]));
+  const review = onRecord?.review ?? null;
+  const asked = new Map(
+    decisionQuestions(review, onRecord?.settled).map((question) => [question.id, question]),
+  );
   for (const decision of decisions) {
     const question = asked.get(decision.findingKey);
     if (question === undefined || question.choices.length === 0)
       throw new Error(
-        review !== null && !decidable(review)
+        review !== null && (review.decision === "incomplete" || review.decision === "error")
           ? `The review ended ${review.decision}: it did not judge the whole change, so an answer would settle a finding on a change nobody finished judging, and it takes none.`
           : `Finding ${decision.findingKey.slice(0, 12)} is not one the review routed to you, so it takes no answer.`,
       );
@@ -275,6 +277,20 @@ export function assertDecidable(
         `Finding ${decision.findingKey.slice(0, 12)} is never handed to the executor, so its only answer is Ship as it is.`,
       );
   }
+}
+
+/**
+ * A run of a ticket whose last run finished trying, with the questions it left
+ * the person unanswered, none handed to the executor and its branch still at
+ * the commit judged (`owedOnBranch`), is refused before the CLI is started, as
+ * the CLI and the loop refuse it (D-132).
+ */
+export function assertNothingOwed(owed: readonly DecisionQuestion[], key: string): void {
+  if (owed.length > 0)
+    throw new Error(
+      `${key}'s last run finished trying and left ${owed.length} ${owed.length === 1 ? "question" : "questions"} ` +
+        "for you to answer, none of them handed to the executor, so the loop does not start: answer them on its decision card.",
+    );
 }
 
 /**

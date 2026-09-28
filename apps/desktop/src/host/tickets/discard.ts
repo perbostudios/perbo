@@ -5,6 +5,7 @@ import {
   DELETE_TICKET_GONE,
   DELETE_WAITS_FOR_TICKET_COMMAND,
   deletePullRequestOpen,
+  pullRequestOpen,
 } from "../../shared/discard.js";
 import { listBundles } from "../records.js";
 import { attemptsPath, bundleManifestPath, bundlesPath, ticketPath } from "../repository/layout.js";
@@ -38,8 +39,8 @@ export interface DiscardDeps {
  * A command running for this ticket holds it, because that command writes
  * what the delete removes; a command running for another ticket in the same
  * repository does not, since it writes none of this one's records. One stage
- * holds: a ticket at `pr_open` has a pull request on GitHub, which
- * is a record this machine does not own. Deleting the ticket would leave it
+ * holds: a ticket whose pull request is open (`pullRequestOpen`) has a record
+ * on GitHub this machine does not own. Deleting the ticket would leave it
  * standing with nothing here to read it against, so the pull request is closed
  * or merged first and the delete is offered again after that.
  *
@@ -58,8 +59,9 @@ export async function discardTicket(
   if (!ticket) return DELETE_TICKET_GONE;
   // The one stage a delete does not reach: the pull request is on GitHub and
   // this machine does not own it, so taking the ticket would leave it open
-  // with nothing here to read it against.
-  if (ticket.state === "pr_open") return deletePullRequestOpen(key);
+  // with nothing here to read it against — at `pr_open`, and wherever the
+  // delivery record says it is open, as after an escalated run that published.
+  if (pullRequestOpen(ticket)) return deletePullRequestOpen(ticket);
   // A planning discarded here takes its chat with it (D-102), and nothing is
   // removed until that chat has gone: a turn in flight finishes after its
   // stdin closes, writing the spec back and running `perbo edit` against this

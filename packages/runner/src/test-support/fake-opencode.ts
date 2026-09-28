@@ -37,6 +37,19 @@ export type FakeOpenCodeStep =
 export interface FakeOpenCodeScript {
   /** The modes `session/new` reports; OpenCode's own two where omitted. */
   modes?: readonly string[];
+  /**
+   * How many directories' catalogue snapshots lack the model, as a snapshot
+   * taken before OpenCode's plugins settle does. OpenCode takes one snapshot a
+   * directory, at its first session, and keeps it: a model its snapshot lacks
+   * is refused `model not found` there however often it is asked for.
+   */
+  staleSnapshots?: number;
+  /** The `session/new`, counted from 1, at which the process ends with code 3 and a line on stderr, unanswered. */
+  exitAtSession?: number;
+  /** The `session/new`, counted from 1, just after answering which the process ends the same way. */
+  exitAfterSession?: number;
+  /** Each `session/new`, counted from 1, refused as OpenCode refuses one asked for before its catalogue has arrived. */
+  refuseSessions?: readonly number[];
   /** Each turn's steps, and how it ends where nothing refused it. */
   turns: ReadonlyArray<{ steps: readonly FakeOpenCodeStep[]; stop?: string; usage?: Record<string, number> }>;
 }
@@ -67,6 +80,8 @@ let next = 1000;
 const waiting = new Map();
 const ask = (params) => new Promise((resolve) => { const id = next++; waiting.set(id, resolve); send({ id, method: 'session/request_permission', params }); });
 let turn = 0; let cwd = '';
+const snapshots = new Map(); const stale = new Map(); let sessions = 0; let asked = 0;
+const crash = () => { process.stderr.write('opencode crashed\n'); setTimeout(() => process.exit(3), 20); };
 async function play(id, sessionId) {
   const entry = script.turns[turn++] ?? { steps: [] };
   for (const step of entry.steps) {
@@ -95,9 +110,23 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   if (m.method === undefined && waiting.has(m.id)) { const resolve = waiting.get(m.id); waiting.delete(m.id); resolve(m.result); return; }
   if (m.method === 'initialize') send({ id: m.id, result: { protocolVersion: 1, agentCapabilities: {} } });
-  if (m.method === 'session/new') cwd = m.params.cwd;
-  if (m.method === 'session/new') send({ id: m.id, result: { sessionId: 'ses_fake', configOptions: [{ id: 'model', currentValue: 'opencode/default', options: [] }, { id: 'mode', currentValue: 'build', options: (script.modes ?? ['build', 'plan']).map((value) => ({ value, name: value })) }] } });
-  if (m.method === 'session/set_config_option') send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: m.params.value }] } });
+  if (m.method === 'session/new') asked += 1;
+  if (m.method === 'session/new' && asked === script.exitAfterSession) crash();
+  if (m.method === 'session/new' && asked === script.exitAtSession) { crash(); return; }
+  if (m.method === 'session/new' && (script.refuseSessions ?? []).includes(asked)) { send({ id: m.id, error: { code: -32603, message: 'Internal error: Internal service failure' } }); return; }
+  if (m.method === 'session/new') {
+    cwd = m.params.cwd;
+    if (!snapshots.has(cwd)) snapshots.set(cwd, snapshots.size < (script.staleSnapshots ?? 0) ? 'stale' : 'settled');
+    const id = 'ses_' + (++sessions);
+    stale.set(id, snapshots.get(cwd) === 'stale');
+    const models = stale.get(id) ? ['opencode/stale-only'] : ['opencode/big-pickle', 'opencode/claude-opus-5'];
+    send({ id: m.id, result: { sessionId: id, configOptions: [{ id: 'model', currentValue: models[0], options: models.map((value) => ({ value, name: value })) }, { id: 'mode', currentValue: 'build', options: (script.modes ?? ['build', 'plan']).map((value) => ({ value, name: value })) }] } });
+  }
+  if (m.method === 'session/delete') send({ id: m.id, result: {} });
+  if (m.method === 'session/set_config_option') {
+    if (stale.get(m.params.sessionId)) send({ id: m.id, error: { code: -32602, message: 'Invalid params: model not found: ' + m.params.value } });
+    else send({ id: m.id, result: { configOptions: [{ id: 'model', currentValue: m.params.value }] } });
+  }
   if (m.method === 'session/prompt') void play(m.id, m.params.sessionId);
 });
 `,

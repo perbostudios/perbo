@@ -7,6 +7,8 @@ import {
   type PlanContract,
   type RetainedBranch,
   type ReviewArtifact,
+  type HistoryRow,
+  sameCommit,
 } from "@perbo/contracts";
 import { git, isAttemptBranch } from "@perbo/workspace";
 import { readAttemptsRecord, sealedByAttempt } from "../../attempts.js";
@@ -16,7 +18,6 @@ import type { DeliveredChecksReading } from "../../delivery.js";
 import { acquireRunLock } from "../../lock.js";
 import type { LoopMergeOutcome } from "../../merge.js";
 import { RunRefusedError } from "../../refusal.js";
-import { sameCommit } from "../../resume.js";
 import type { TicketRunConfig } from "./config.js";
 import { resolvePorts, type LoopPorts } from "./context.js";
 import { attemptsThatSealed, judgedOnRecord, retainedReview } from "./continuation.js";
@@ -51,6 +52,8 @@ export interface RetainedPublishRequest {
   retained: () => RetainedBranch;
   /** The person's answers on record, which the review is published with. */
   decided?: readonly DecidedFinding[];
+  /** The ticket's rows, which say whether the loop finished trying on its review (`loopOnReview`). */
+  history?: readonly HistoryRow[];
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   onProgress?: (message: string) => void;
@@ -132,7 +135,7 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
   const bundles = new BundleStore({ root: config.bundle_root, retainContext: config.retain_context });
   const attemptsPath = join(config.state_root, attemptsFileName(contract.ticket_id));
   const prior = readAttemptsRecord(attemptsPath);
-  const judged = judgedOnRecord({ bundles, ticket_id: contract.ticket_id });
+  const judged = judgedOnRecord({ bundles, ticket_id: contract.ticket_id, history: args.history ?? [] });
   if (judged === null) refuse(`no review of ${key} is on record, so there is nothing to publish its branch under`);
   const { head_commit } = judged!;
   const attempts = attemptsThatSealed(prior, head_commit);

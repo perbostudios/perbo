@@ -52,10 +52,13 @@ measurement, not an edit.
 
 `decision.ts` is the single home for a person's answer to a finding the review routed to them
 ([D-132](../../docs/11-open-decisions.md)): the three
-choices and the words each carries where the person typed none, `routedToPerson`, which says which
-findings take one, `decidable`, which says only a review that judged the whole change and stopped
-for a person takes any, `answersReview`, which says which review an answer answers, and
-`decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
+choices and the words each carries where the person typed none, `loopOnRecord`, which reads what the
+loop has done on a review — whether a run since it ended stalled or exhausted, what each
+finding's last closure verification left open, and what the executor declined — `routedToPerson`, which says which findings take
+one, `leftToPrinciple`, which says which a principle answers, `decidable`, which says only a review that judged the whole change and stopped for a person, or
+one the loop has finished trying, takes any, `answersReview`, which says which review an answer
+answers, `owedAnswers`, which says which a run would start without,
+`judgedCommit`, which says which commit the branch has to be at for a run to act on that record, and `decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
 
@@ -87,14 +90,18 @@ It imports nothing, so the renderer takes it, and `costOf` and `rollCosts` besid
 ([D-136](../../docs/11-open-decisions.md)): `retainedBranch`
 reads it from the ticket alone, as the branch and the outcome the ticket records for that run or the
 refusal that says why there is none, and `gateClosedNote` is the row an escalated run writes that
-it reads back. `perbo run --publish-retained` refuses with that refusal, and the desktop's merge
+it reads back. `ANSWERS_OWED_NOTE` is the row a run the loop refused for owed answers appends to
+return the ticket where the command found it, and `settledRow` passes over it to the row that left
+the ticket where it is, which is how the last run ended (D-132). `perbo run --publish-retained` refuses with that refusal, and the desktop's merge
 screen says it; it imports only the ticket's types, so the renderer takes it from
 `@perbo/contracts/browser`.
 
 `ticket-transitions.ts` is the single home for the ticket lifecycle's rows, `TICKET_TRANSITIONS`:
 `transition` in `ticket.ts` refuses a move with no row, `perbo run` walks and reopens a ticket along
 them, and the desktop's sample host moves its tickets by the same rows. It imports only the ticket's
-types, so the renderer takes it from `@perbo/contracts/browser`.
+types, `gateClosedNote`, the note an escalated run's row is guarded on, and `ANSWERS_OWED_NOTE`,
+the note the same row takes back a ticket the loop refused on, so the renderer takes it
+from `@perbo/contracts/browser`.
 
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays

@@ -5,10 +5,10 @@ import { DECISION_CHOICES, DECISION_WORDS, type DecisionChoice } from "@perbo/co
 import { Button, InfoHint, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { inTheWay, isRun } from "../../shared/jobs.js";
-import { decisionQuestions, settledFindings } from "../../shared/decisions.js";
+import { questionsOnRecord } from "../../shared/decisions.js";
 import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
-import { displayKey, stageName, stageOf } from "./ticket-workspace.js";
+import { displayKey, stageName } from "./ticket-workspace.js";
 import { WHEEL_STEPS } from "../../shared/runner-progress.js";
 import { loopSteps, loopTally, runEnding, StageLog, taskRecords } from "./task-context.js";
 import type { RunEnding, TaskContext } from "./task-context.js";
@@ -78,7 +78,6 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     criteria,
     active,
     latest,
-    review,
     jobs,
     busy,
     recoverable,
@@ -95,16 +94,27 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   const acknowledged =
     ending !== null && (ending.byPerson || confirmed.has(ending.job.id) || endingConfirmed(ending.job.id));
   const whyLabel = ending?.title === "The run ended" ? "Why the run ended" : "Why it failed";
-  const questions: DecisionQuestion[] = decisionQuestions(review, settledFindings(detail));
+  // The questions the record puts to the person: the card asks these, and the
+  // projection pauses the loop only where there is one (`ticketRun`).
+  const questions: DecisionQuestion[] = questionsOnRecord(detail);
   const observed = projection.observed;
-  const paused = ticket.state === "changes_requested" && !active && questions.length > 0,
-    stage = paused
-      ? stageOf("changes_requested")
-      : projection.stage;
+  const paused = projection.paused,
+    stage = projection.stage;
   // A run that ended on a verdict for the person is paused for them from the
   // moment it ends, before the records it wrote are read, and a run waiting on
   // the person's answer about a host is paused for them until they give it.
-  const waiting = paused || projection.asking || (projection.paused && ticket.state !== "changes_requested");
+  const waiting = paused || projection.asking;
+  // The decision card is up: paused with a question on the record, and no
+  // ended card in front of it.
+  const answering = paused && questions.length > 0 && !(ending !== null && !acknowledged);
+  const page = useRef<HTMLElement>(null);
+  const reviewResult = !active &&
+    !recoverable &&
+    !["executing", "verifying", "provisioning"].includes(ticket.state) && (
+      <Button disabled={busy} onClick={() => show("review")}>
+        Review the result
+      </Button>
+    );
   const title = recoverable
     ? "Ready to recover this task"
     : waiting
@@ -120,7 +130,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           merged: "Merged",
           closed: "Closed without merge",
           failed: "The loop stopped",
-          changes_requested: "Refinement needs attention",
+          changes_requested: "The run stopped short of the merge",
           cancelled: "The loop was stopped",
         } as Record<string, string>
       )[ticket.state] ??
@@ -181,7 +191,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
       />
     );
   return (
-    <section className="screen screen--loop" data-screen="s12">
+    <section ref={page} className="screen screen--loop" data-screen="s12">
       <TaskHeader {...context} />
       <div className="loop-body">
         <div className="loop-heading">
@@ -201,6 +211,8 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
                 ? "This desktop session has no running command for the task. The run was stopped, and its work and evidence have been retained."
                 : waiting
                 ? "The loop stops here until you answer. Nothing is spending while it waits."
+                : !active && ticket.state === "changes_requested"
+                ? "The run has ended. Its work and evidence are kept."
                 : "The agent owns the approach. You will only be interrupted if it reaches a real choice."}
             </p>
           </div>
@@ -314,16 +326,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
               Back to the stopped loop
             </Button>
           )}
-          {!active &&
-            !recoverable &&
-            !questions.length &&
-            !["executing", "verifying", "provisioning"].includes(
-              ticket.state,
-            ) && (
-              <Button disabled={busy} onClick={() => show("review")}>
-                Review the result
-              </Button>
-            )}
+          {!answering && reviewResult}
           <Button
             onClick={() =>
               action.mutate({ kind: "openWorktree", repoId, key: ticket.key })
@@ -337,10 +340,22 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           >
             Stop the loop
           </Button>
-          <Button variant="primary" onClick={() => show("output")}>
+          <Button {...(answering ? {} : { variant: "primary" as const })} onClick={() => show("output")}>
             <InkIcon name="dots" size={15} />
             Watch what the agents are doing
           </Button>
+          {/* A pause for the person: the decision is what the page is for, so
+              it is the primary, rightmost, with the result beside it, and
+              takes them to the card. */}
+          {answering && reviewResult}
+          {answering && (
+            <Button
+              variant="primary"
+              onClick={() => page.current?.querySelector<HTMLElement>(".decision-overlay .decision-card")?.focus()}
+            >
+              Answer
+            </Button>
+          )}
         </div>
         {action.error && (
           <Notice tone="danger">{errorMessage(action.error)}</Notice>
@@ -356,8 +371,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           }}
         />
       ) : (
-        paused &&
-        questions.length > 0 && <DecisionOverlay {...context} questions={questions} />
+        answering && <DecisionOverlay {...context} questions={questions} />
       )}
       {asking !== null && (
         <EgressCard

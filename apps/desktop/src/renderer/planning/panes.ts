@@ -1,6 +1,6 @@
 import type { InkIconName } from "../ui/index.js";
 import type { OpenDraft, PlanningPane, Snapshot } from "../../shared/protocol.js";
-import { fingerprint } from "../../shared/contract-editing.js";
+import { contractStateOf, draftedPane } from "../../shared/contract-editing.js";
 import type { Route } from "../shell/route.js";
 
 /**
@@ -51,11 +51,8 @@ export function shapeOf(draft: Pick<OpenDraft, "key" | "nodes"> | undefined): Pl
 }
 
 /**
- * The state a person reaches a planning's contract at: the spec's sections,
- * as the host fingerprints them, the plan as its ticket last moved, and the
- * scope the planning holds. While it is the state recorded as they last
- * reached the contract, nothing has changed since and the contract is still
- * a tab to go back to (D-138).
+ * The state a person reaches a planning's contract at ({@link contractStateOf}),
+ * with the plan's ticket as the workspace lists it.
  */
 export function contractState(
   workspace: Pick<Snapshot, "drafts" | "tasks">,
@@ -64,14 +61,7 @@ export function contractState(
   const ticket = workspace.tasks.find(
     (row) => row.repoId === draft.repoId && row.ticket.key === draft.key,
   )?.ticket;
-  return fingerprint(
-    JSON.stringify([
-      draft.spec,
-      ticket?.updated_at ?? null,
-      [...draft.scope.paths].sort(),
-      [...draft.scope.prohibited].sort(),
-    ]),
-  );
+  return contractStateOf(draft, ticket?.updated_at ?? null);
 }
 
 /** What planning mode offers a planning. */
@@ -195,10 +185,11 @@ export function reopenPane(workspace: Pick<Snapshot, "drafts" | "tasks">, sessio
  * Where a plan drafted again from a stopped run's spec lands
  * (D-138, D-129): an
  * epic on its Graph, and a basic ticket on its contract, the page its
- * criteria are read and changed on, both inside the planning over it.
+ * criteria are read and changed on, both inside the planning over it, which
+ * the host records as where the planning reopens ({@link draftedPane}).
  */
 export function draftedLanding(plan: { sessionId: string; nodes: number }): Route {
-  return { page: "planning", sessionId: plan.sessionId, pane: plan.nodes > 0 ? "graph" : "contract" };
+  return { page: "planning", sessionId: plan.sessionId, pane: draftedPane(plan.nodes) };
 }
 
 /**

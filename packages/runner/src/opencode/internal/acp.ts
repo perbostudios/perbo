@@ -10,6 +10,7 @@ import {
   OPENCODE_API_KEY_ENV,
   OPENCODE_SESSION_ATTEMPTS,
   OPENCODE_SESSION_RETRY_MS,
+  awaitOpenCodeModel,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -124,6 +125,8 @@ export class OpenCodeExecutorSession {
   private readonly ended: Promise<void>;
   private nextId = 1;
   private failure: Error | null = null;
+  /** The rejections that are OpenCode's own answer refusing a request, rather than the transport failing. */
+  private readonly openCodeRefusals = new WeakSet<Error>();
   private closed = false;
   private stderr = "";
   private buffer = "";
@@ -231,8 +234,11 @@ export class OpenCodeExecutorSession {
       const waiter = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
       if (!waiter) return;
       this.pending.delete(message.id as number);
-      if (message.error) waiter.reject(new Error(message.error.message ?? "OpenCode request failed"));
-      else waiter.resolve(message.result);
+      if (message.error) {
+        const refusal = new Error(message.error.message ?? "OpenCode request failed");
+        this.openCodeRefusals.add(refusal);
+        waiter.reject(refusal);
+      } else waiter.resolve(message.result);
       return;
     }
     if (message.method === "session/update") {
@@ -296,7 +302,11 @@ export class OpenCodeExecutorSession {
    *
    * OpenCode loads its model catalogue as it starts, and a session asked for
    * before the catalogue has arrived is refused; it is asked again
-   * (`OPENCODE_SESSION_ATTEMPTS`, `OPENCODE_SESSION_RETRY_MS` apart).
+   * (`OPENCODE_SESSION_ATTEMPTS`, `OPENCODE_SESSION_RETRY_MS` apart), and any
+   * other failure is thrown at once. And the
+   * catalogue a directory's first session sees is the one every later session
+   * there sees, so the worktree's session is opened only once a session in a
+   * directory of this process's own offers `model` (`awaitOpenCodeModel`).
    */
   async open(cwd: string, model: string): Promise<OpenedSession> {
     await this.request("initialize", {
@@ -304,13 +314,25 @@ export class OpenCodeExecutorSession {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: "perbo_executor", version: "0.1.0" },
     });
+    await awaitOpenCodeModel({
+      model,
+      // The root goes once the child has, so a child gone during the wait
+      // between snapshots is answered with why it went.
+      scratch: () => {
+        if (this.failure) throw this.failure;
+        return mkdtempSync(join(this.root, "catalogue-"));
+      },
+      request: (method, params) => this.request(method, params),
+      refused: (error) => error instanceof Error && this.openCodeRefusals.has(error),
+    });
     let opened: unknown;
     for (let attempt = 0; ; attempt += 1) {
       try {
         opened = await this.request("session/new", { cwd, mcpServers: [] });
         break;
       } catch (error) {
-        if (attempt + 1 >= OPENCODE_SESSION_ATTEMPTS || this.closed) throw error;
+        const refused = error instanceof Error && this.openCodeRefusals.has(error);
+        if (!refused || attempt + 1 >= OPENCODE_SESSION_ATTEMPTS || this.closed) throw error;
         await new Promise((resolve) => setTimeout(resolve, OPENCODE_SESSION_RETRY_MS));
       }
     }

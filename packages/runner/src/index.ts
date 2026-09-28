@@ -39,8 +39,10 @@ export type { RecordLock } from "./record-lock.js";
 export {
   AGENT_DEFAULTS,
   AGENT_PROVIDERS,
+  AnswersOwedError,
   BaseSourceSchema,
   publishRetained,
+  refuseOwedAnswers,
   runTicket,
   TicketRunConfigSchema,
 } from "./loop/index.js";

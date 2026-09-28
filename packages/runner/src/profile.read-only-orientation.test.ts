@@ -88,7 +88,7 @@ describe("the read-only orientation commands", () => {
 });
 
 describe("what stays as it was", () => {
-  for (const line of ["git branch -D main", "git push origin HEAD", 'echo "$(git push origin HEAD)"']) {
+  for (const line of ["git remote add x y", "git push origin HEAD", 'echo "$(git push origin HEAD)"']) {
     it(`refuses ${line} by the deny list`, () => {
       expect(claude(line)).toMatchObject({ answer: "deny", rule: "command_deny_list" });
       expect(codex(line)).toBe("denied");
@@ -106,7 +106,7 @@ describe("what stays as it was", () => {
   });
 
   it("refuses a denied command inside an orientation command's line", () => {
-    for (const line of ["git diff $(git branch --show-current)", "git rev-parse HEAD && git push"]) {
+    for (const line of ["git diff --end-of-options $(git remote get-url origin)", "git rev-parse HEAD && git push"]) {
       expect(claude(line), line).toMatchObject({ answer: "deny", rule: "command_deny_list" });
       expect(codex(line), line).toBe("denied");
     }

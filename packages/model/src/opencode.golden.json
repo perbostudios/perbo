@@ -46,26 +46,43 @@
     "id": 2,
     "method": "session/new",
     "params": {
-      "cwd": "<root>/scratch",
+      "cwd": "<root>/catalogue-<scratch>",
       "mcpServers": []
     }
   },
   {
     "jsonrpc": "2.0",
     "id": 3,
+    "method": "session/delete",
+    "params": {
+      "sessionId": "ses_review"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "session/new",
+    "params": {
+      "cwd": "<root>/scratch",
+      "mcpServers": []
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 5,
     "method": "session/set_config_option",
     "params": {
-      "sessionId": "ses_review",
+      "sessionId": "ses_review_2",
       "configId": "model",
       "value": "opencode/claude-opus-5"
     }
   },
   {
     "jsonrpc": "2.0",
-    "id": 4,
+    "id": 6,
     "method": "session/prompt",
     "params": {
-      "sessionId": "ses_review",
+      "sessionId": "ses_review_2",
       "prompt": [
         {
           "type": "text",
@@ -76,10 +93,10 @@
   },
   {
     "jsonrpc": "2.0",
-    "id": 5,
+    "id": 7,
     "method": "session/prompt",
     "params": {
-      "sessionId": "ses_review",
+      "sessionId": "ses_review_2",
       "prompt": [
         {
           "type": "text",

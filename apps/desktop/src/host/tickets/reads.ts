@@ -16,16 +16,24 @@ import { specFindings } from "../../shared/contract-editing.js";
 import { judgingChecks } from "../../shared/checks.js";
 import { DELETE_TICKET_GONE } from "../../shared/discard.js";
 import { redact, requireSuccess } from "../process.js";
-import { listBundles, readAttempts, readDraftEditRecordsOrNone, summariseTicket } from "../records.js";
+import {
+  listBundles,
+  owedOnBranch,
+  questionsOnFiles,
+  readAttempts,
+  readDraftEditRecordsOrNone,
+  reviewOnRecord,
+  summariseTicket,
+} from "../records.js";
 import type { BundleManifest } from "../records.js";
 import { effectiveLimits } from "../repository/config.js";
-import { attemptsPath, bundlesPath, objectsPath, principlesPath, ticketPath } from "../repository/layout.js";
+import { attemptsPath, bundlesPath, objectsPath, principlesPath, ticketPath, verdictsPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
 import type { Cli } from "../cli.js";
 import type { RepositoryRegistry } from "../repository/registry.js";
 import type { WorkspaceReads } from "../workspace-reads.js";
 import type { RegisteredRepository } from "../profile/store.js";
-import type { Detail, ReplyMap, Settings, TaskSummary } from "../../shared/protocol.js";
+import type { DecisionQuestion, Detail, ReplyMap, Settings, TaskSummary } from "../../shared/protocol.js";
 
 const ListSchema = z.object({ tickets: z.array(TicketSchema) });
 const CheckSchema = z
@@ -85,6 +93,7 @@ export const ReportSchema = z
             .nullable(),
           checks: z.array(CheckSchema).nullable(),
           verification: z.unknown(),
+          declines: z.array(z.object({ finding_key: z.string() }).passthrough()).default([]),
           bundles: z.array(RunBundleSchema),
         })
         .passthrough(),
@@ -134,6 +143,7 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
         .join("\n\n"),
     })),
     verification: attempt.verification,
+    declines: attempt.declines.map((decline) => decline.finding_key),
     bundles: attempt.bundles,
   }));
 }
@@ -143,6 +153,8 @@ export interface TicketReadsDeps {
   cli: Cli;
   registry: RepositoryRegistry;
   settings(): Settings;
+  /** The commit a ref names in the checkout at `root`, or null where it names none. */
+  resolveCommit(root: string, ref: string): Promise<string | null>;
 }
 
 /**
@@ -226,12 +238,18 @@ export class TicketReads {
         if (repository.error) throw new Error(repository.error);
         if (listing.status === "rejected") throw listing.reason;
         const list = listing.value;
+        // What a ticket waiting on the person asks them, as its decision card
+        // asks it, so Home is yellow only where there is a question.
+        const bundles = list.tickets.some((ticket) => ticket.state === "changes_requested")
+          ? await this.bundles(repo)
+          : [];
         return {
           repository,
           tasks: list.tickets.map((ticket) => ({
             repoId,
             repository: repo.name,
             ticket,
+            ...(ticket.state === "changes_requested" ? this.questionsOf(repo, ticket, bundles) : {}),
           })),
           errors: [],
         };
@@ -242,6 +260,44 @@ export class TicketReads {
           errors: [`${repo.name}: ${redact(String(error))}`],
         };
       }
+    });
+  }
+
+  /**
+   * How many questions a ticket's record puts to the person
+   * (`TaskRow.questions`): none where its review cannot be read, since nothing
+   * on the record can then be put to them, as the ticket's own page reads it.
+   */
+  private questionsOf(repo: RegisteredRepository, ticket: Ticket, bundles: readonly BundleManifest[]): { questions: number } {
+    const asked = questionsOnFiles({
+      bundles,
+      ticket,
+      objectsDirectory: objectsPath(repo),
+      verdictsPath: verdictsPath(repo),
+    });
+    return { questions: asked?.length ?? 0 };
+  }
+
+  /**
+   * The questions a run of this ticket would be refused for (`owedOnBranch`):
+   * owed on its record while its branch is still at the commit judged. What
+   * the contract page offers Answer on (`Detail.owed`) and what the host
+   * refuses a run on (D-132). None for a ticket not yet approved, which no run
+   * has tried.
+   */
+  async owed(repo: RegisteredRepository, ticket: Ticket, contract: Detail["contract"]): Promise<DecisionQuestion[]> {
+    if (ticket.approved_at === null) return [];
+    return owedOnBranch({
+      onRecord: reviewOnRecord({
+        bundles: await this.bundles(repo),
+        ticket,
+        objectsDirectory: objectsPath(repo),
+        verdictsPath: verdictsPath(repo),
+      }),
+      ticket,
+      contract,
+      attemptsPath: attemptsPath(repo, ticket.ticket_id),
+      resolveCommit: (ref) => this.deps.resolveCommit(repo.path, ref),
     });
   }
 
@@ -282,6 +338,7 @@ export class TicketReads {
         ? readFileSync(principles, "utf8").slice(0, 100_000)
         : "",
       verdicts: report.verdicts,
+      owed: await this.owed(repo, ticket, held.contract),
       effective: {
         stallMinutes: limits["attempt_stall_ms"]! / 60_000,
         ticketDollars: limits["ticket_cost_micros"]! / 1_000_000,

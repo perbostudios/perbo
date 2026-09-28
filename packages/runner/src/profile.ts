@@ -72,6 +72,10 @@ export const READ_ONLY_ORIENTATION = [
  * Command patterns the agent may run. Read-only Git is permitted so it can
  * orient; every mutating Git verb is absent, because the runner performs the
  * commit, the push and the pull request itself and the agent never sees a token.
+ * `git branch` is here for its listing forms — `-a -v`, `--list <pattern>`,
+ * `--show-current` — and the guard refuses every form of it that changes a
+ * branch, by the words it is given (`admission.ts`, `git_branch_write`), before
+ * the agent's own layer reads this entry.
  */
 export const DEFAULT_COMMAND_ALLOW_LIST = [
   "Read",
@@ -90,6 +94,7 @@ export const DEFAULT_COMMAND_ALLOW_LIST = [
   "Bash(git diff:*)",
   "Bash(git log:*)",
   "Bash(git show:*)",
+  "Bash(git branch:*)",
   ...READ_ONLY_ORIENTATION,
   "Bash(node:*)",
   "Bash(pnpm test:*)",
@@ -142,7 +147,9 @@ export const DEFAULT_COMMAND_DENY_LIST = [
   "Bash(git commit:*)",
   "Bash(git reset:*)",
   "Bash(git rebase:*)",
-  "Bash(git branch:*)",
+  // `git branch` is not here: a prefix names the verb, and listing branches is
+  // a read the executor needs. The guard refuses each of its forms that
+  // changes a branch instead (`admission.ts`, `git_branch_write`).
   "Bash(git remote:*)",
   "Bash(git tag:*)",
   // SCP-200: the machine's `gh` credential, named ahead of the blanket entry

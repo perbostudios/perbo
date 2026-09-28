@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createScratch } from "@perbo/test-support";
 import { Notices } from "./notifications.js";
-import { attemptsPath } from "./repository/layout.js";
+import { attemptsPath, objectsPath } from "./repository/layout.js";
 import { SettingsSchema } from "../shared/protocol.js";
 import type { HostIO } from "./service.js";
 import type { Job, Settings } from "../shared/protocol.js";
 import type { RegisteredRepository } from "./profile/store.js";
+import type { BundleManifest } from "./records.js";
 import type { Ticket } from "@perbo/contracts";
 
 const scratchDirectory = createScratch("perbo-notices-");
@@ -46,9 +48,37 @@ const job = (over: Partial<Job> = {}): Job =>
     result: null,
     ...over,
   }) as Job;
+/**
+ * The ticket's last review on record, as the loop seals it: one finding the
+ * review escalated to the person, open, or none — and the manifest that names it.
+ */
+function reviewed(repo: RegisteredRepository, findings: "one open" | "none"): BundleManifest[] {
+  const body = JSON.stringify({
+    review_id: "rev_0000000000000001",
+    decision: findings === "one open" ? "escalate" : "remediable",
+    findings:
+      findings === "one open"
+        ? [{ key: "a".repeat(64), rule_id: "product.preference", status: "open", routing: "escalates", closure: "human", statement: "Round half-up or half-even?", blocking_reason: "" }]
+        : [],
+  });
+  const sha256 = createHash("sha256").update(body).digest("hex");
+  mkdirSync(objectsPath(repo), { recursive: true });
+  writeFileSync(join(objectsPath(repo), sha256), body);
+  return [
+    {
+      bundle_id: "bundle_1",
+      kind: "review",
+      subject_id: "rev_0000000000000001",
+      ticket_id: "ticket_1",
+      created_at: "2026-09-19T09:04:00.000Z",
+      inputs: {},
+      artifacts: [{ name: "review.json", sha256, bytes: Buffer.byteLength(body), retained: true }],
+    } as BundleManifest,
+  ];
+}
 function notices(
   repo: RegisteredRepository,
-  over: { settings?: Settings; ticket?: Ticket } = {},
+  over: { settings?: Settings; ticket?: Ticket; bundles?: BundleManifest[] } = {},
 ) {
   const shown: { title: string; body: string; silent: boolean | undefined }[] = [];
   const io = {
@@ -62,7 +92,10 @@ function notices(
       io,
       settings: () => over.settings ?? settings,
       repositories: () => [repo],
-      tickets: { list: () => Promise.resolve({ tickets: [over.ticket ?? ticket()] }) },
+      tickets: {
+        list: () => Promise.resolve({ tickets: [over.ticket ?? ticket()] }),
+        bundles: () => Promise.resolve(over.bundles ?? []),
+      },
     }),
   };
 }
@@ -140,10 +173,24 @@ describe("the outcome", () => {
     attempts(repo, null);
     const w = notices(repo, {
       settings: on({ decision: true }),
-      ticket: ticket({ state: "changes_requested" }),
+      ticket: ticket({ state: "changes_requested", history: [] }),
+      bundles: reviewed(repo, "one open"),
     });
     await w.notices.outcome(job());
     expect(w.shown[0]?.title).toContain("needs a decision");
+  });
+
+  it("says the loop stopped, and never that it needs a decision, where the record asks the person nothing", async () => {
+    const repo = repository();
+    attempts(repo, null);
+    const w = notices(repo, {
+      settings: on({ decision: true, review: true }),
+      ticket: ticket({ state: "changes_requested", history: [] }),
+      bundles: reviewed(repo, "none"),
+    });
+    await w.notices.outcome(job());
+    expect(w.shown.map((shown) => shown.title)).toEqual(["PRB-1 · the loop stopped"]);
+    expect(w.shown[0]?.body).toBe("Nothing is left for you to answer. Open the task to see why it stopped.");
   });
 
   it("says the review finished, and whether the pull request is open", async () => {

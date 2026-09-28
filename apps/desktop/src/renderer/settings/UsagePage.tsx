@@ -113,7 +113,11 @@ export function UsagePage({ navigate }: PageProps) {
             {report.providers.map((provider) => (
               <section className="outlined-card usage-provider" key={provider.id}>
                 <div className="card-heading">
-                  <span className={"connection-dot" + (provider.connected ? "" : " disconnected")} />
+                  {/* A CLI's sign-in is probed and the dot says whether it
+                      answered; nothing probes an API key, so an API row has none. */}
+                  {provider.connection === "cli" && (
+                    <span className={"connection-dot" + (provider.connected ? "" : " disconnected")} />
+                  )}
                   <strong>
                     {provider.name}
                     {provider.plan ? ` · ${provider.plan}` : ""}
@@ -143,6 +147,7 @@ export function UsagePage({ navigate }: PageProps) {
                     ))}
                   </div>
                 ) : null}
+                {provider.about !== null && <p className="small">{provider.about}</p>}
                 <p className="small muted" style={{ marginTop: provider.windows?.length ? 10 : 0 }}>
                   {provider.detail}
                 </p>

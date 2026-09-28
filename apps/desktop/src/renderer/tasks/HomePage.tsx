@@ -20,6 +20,7 @@ import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
 import { ARCHIVE_SEARCH_MAX_CHARS, type Snapshot, type TaskRow, type TaskSummary } from "../../shared/protocol.js";
 import { archiveRows, isArchivable, isFiled, isMergeDecided } from "../../shared/archive.js";
+import { pullRequestOpen } from "../../shared/discard.js";
 import { HOME_TONES, HOME_TONE_LABELS, JOURNEY_END, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
@@ -296,7 +297,7 @@ function ArchiveRow({
           ticket is filed with its pull request still open, and the delete is
           offered again once that pull request is merged or closed. */}
       <span role="cell" className="archive-actions">
-        {row.ticket.state !== "pr_open" && (
+        {!pullRequestOpen(row.ticket) && (
           <button
             className="text-button small muted archive-delete"
             aria-label={`Delete ticket: ${title}`}

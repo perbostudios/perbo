@@ -9,7 +9,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, delimiter, join } from "node:path";
 import { createScratch } from "@perbo/test-support";
-import { discoverModels } from "./model-catalog.js";
+import { discoverModels, firstLine } from "./model-catalog.js";
+import { PassThrough } from "node:stream";
 import { RequestSchema } from "../shared/protocol.js";
 
 const scratchDirectory = createScratch("perbo-catalog-test-");
@@ -334,40 +335,263 @@ describe("each model's name and effort levels, as its provider reports them", ()
 });
 
 describe("OpenCode's catalog (D-134)", () => {
-  it("opens one session under a home of its own, asks again while OpenCode has no catalogue yet, and lists what the session offers", async () => {
-    const test = fixture(`
-      if (message.method === 'initialize') reply({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } });
-      if (message.method === 'session/new' && message.id === 2) reply({ jsonrpc: '2.0', id: 2, error: { code: -32603, message: 'Internal error: Internal service failure' } });
-      if (message.method === 'session/new' && message.id === 3) {
-        trace({ opencode: { project: process.env.OPENCODE_DISABLE_PROJECT_CONFIG, config: process.env.XDG_CONFIG_HOME, key: process.env.OPENCODE_API_KEY ?? null } });
-        reply({ jsonrpc: '2.0', id: 3, result: { sessionId: 's', configOptions: [
-          { id: 'model', currentValue: 'opencode/big-pickle', options: [
-            { value: 'opencode/big-pickle', name: 'opencode/Big Pickle' },
-            { value: 'opencode/claude-opus-5', name: 'opencode/Claude Opus 5' },
-          ] },
-          { id: 'mode', currentValue: 'build', options: [{ value: 'build', name: 'build' }] },
-        ] } });
-      }`);
-    const result = await discoverModels("opencode-cli", {
-      ...test.options,
-      binaries: { ...test.options.binaries, opencode: test.options.binaries.claude },
-      env: { ...test.options.env, OPENCODE_API_KEY: "zen-key" },
-      timeoutMs: 10_000,
+  /**
+   * A stand-in for `opencode serve --stdio --port 0`: it names its loopback
+   * server on its first line, answers only a request carrying the password it
+   * was given, and reports what OpenCode 2.0.14 was measured to report — a
+   * Zen catalogue with free and priced models, a provider nothing connects,
+   * and the Zen integration connected where OPENCODE_API_KEY is set. Its
+   * first two model lists are read before its providers have settled, as
+   * OpenCode says one may be, each longer than the last. Every request and
+   * its environment go to `trace`.
+   */
+  function fakeServe(
+    options: {
+      models?: unknown[];
+      providers?: unknown[];
+      /** The address the server names in place of its own loopback one. */
+      names?: string;
+      /** Exit once the integration list has been answered, as a server that dies mid-read does. */
+      exitAfterIntegrations?: boolean;
+      /** Never answer the model list, as a server that hangs does. */
+      hangOnModels?: boolean;
+      /** Send the model list's headers and never its body, as a server that stalls mid-answer does. */
+      stallModelsBody?: boolean;
+      /** Ignore SIGTERM and its stdin closing, as a server that will not stop does. */
+      stubborn?: boolean;
+      /** On SIGTERM, write its database under its data directory a moment later and then exit, as OpenCode's does. */
+      writesOnStop?: boolean;
+      /** The integration list in place of the measured one. */
+      integrations?: unknown[];
+      /** The provider list's body, verbatim, in place of the JSON one. */
+      providersBody?: string;
+    } = {},
+  ) {
+    const root = scratchDirectory();
+    const binary = join(root, "opencode");
+    const trace = join(root, "trace.jsonl");
+    const zen = (id: string, input: number) => ({ id, providerID: "opencode", name: id, cost: [{ input, output: input * 5, cache: { read: 0, write: 0 } }] });
+    const models = options.models ?? [
+      zen("big-pickle", 0),
+      // Free to send, priced to read: not free.
+      { id: "half-free", providerID: "opencode", name: "half-free", cost: [{ input: 0, output: 2 }] },
+      zen("claude-opus-5", 5),
+      { id: "claude-sonnet-5", providerID: "anthropic", name: "Claude Sonnet 5", cost: [{ input: 3, output: 15 }] },
+      // No price reported: never counted free, and no parse failure of the list.
+      { id: "unpriced", providerID: "anthropic", name: "Unpriced", cost: null },
+      { id: "kimi-k3", providerID: "moonshot", name: "Kimi K3", cost: [{ input: 1, output: 4 }] },
+      { id: "kimi-unpriced", providerID: "moonshot", name: "Kimi unpriced" },
+      // A shape this reader does not know: left out, not a failure of the list.
+      { id: 42, providerID: "moonshot" },
+    ];
+    const providers = options.providers ?? [
+      { id: "opencode", integrationID: "opencode" },
+      { id: "anthropic" },
+      { id: "moonshot", integrationID: "moonshot-cn" },
+    ];
+    writeFileSync(
+      binary,
+      `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { join } from 'node:path';
+const trace = (value) => appendFileSync(${JSON.stringify(trace)}, JSON.stringify(value) + '\\n');
+if (${JSON.stringify(options.stubborn === true)}) process.on('SIGTERM', () => undefined);
+if (${JSON.stringify(options.writesOnStop === true)}) process.on('SIGTERM', () => setTimeout(() => {
+  mkdirSync(join(process.env.XDG_DATA_HOME, 'opencode'), { recursive: true });
+  writeFileSync(join(process.env.XDG_DATA_HOME, 'opencode', 'opencode.db-wal'), 'checkpoint');
+  process.exit(0);
+}, 300));
+trace({ pid: process.pid, args: process.argv.slice(2), key: process.env.OPENCODE_API_KEY ?? null, anthropic: process.env.ANTHROPIC_API_KEY ?? null, project: process.env.OPENCODE_DISABLE_PROJECT_CONFIG });
+const models = ${JSON.stringify(models)};
+const providers = ${JSON.stringify(providers)};
+const integrations = ${JSON.stringify(options.integrations ?? null)};
+const providersBody = ${JSON.stringify(options.providersBody ?? null)};
+const expected = 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_PASSWORD).toString('base64');
+let reads = 0;
+const server = createServer((request, response) => {
+  const url = new URL(request.url, 'http://x');
+  trace({ path: url.pathname, directory: url.searchParams.get('directory'), authorized: request.headers.authorization === expected });
+  if (request.headers.authorization !== expected) { response.writeHead(401).end(); return; }
+  const send = (data) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ location: {}, data })); };
+  if (url.pathname === '/api/integration') { if (${JSON.stringify(options.exitAfterIntegrations === true)}) setTimeout(() => process.exit(0), 50); return send(integrations ?? [
+    { id: 'opencode', connections: process.env.OPENCODE_API_KEY ? [{ type: 'env', name: 'OPENCODE_API_KEY' }] : [] },
+    { id: 'anthropic', connections: [] },
+    { id: 'moonshot-cn', connections: [{ type: 'key' }] },
+  ]); }
+  if (url.pathname === '/api/model' && ${JSON.stringify(options.hangOnModels === true)}) return;
+  if (url.pathname === '/api/model' && ${JSON.stringify(options.stallModelsBody === true)}) { response.writeHead(200, { 'content-type': 'application/json' }); response.write('{"location":{},'); return; }
+  if (url.pathname === '/api/model') { reads += 1; return send(reads === 1 ? models.slice(0, 1) : reads === 2 ? models.slice(0, 2) : models); }
+  if (url.pathname === '/api/provider' && providersBody !== null) { response.writeHead(200, { 'content-type': 'application/json' }); response.end(providersBody); return; }
+  if (url.pathname === '/api/provider') return send(providers);
+  if (url.pathname === '/api/model/default') return send({ id: 'big-pickle', providerID: 'opencode' });
+  response.writeHead(404).end();
+});
+server.listen(0, '127.0.0.1', () => process.stdout.write(JSON.stringify({ url: ${JSON.stringify(options.names ?? null)} ?? 'http://127.0.0.1:' + server.address().port }) + '\\n'));
+// Gone when the test's end of stdin closes, however the test ended; a
+// server that ignores that is gone after 10 s all the same.
+if (!${JSON.stringify(options.stubborn === true || options.writesOnStop === true)}) process.stdin.on('end', () => process.exit(0));
+setTimeout(() => process.exit(0), 10_000).unref();
+process.stdin.resume();
+`,
+      { mode: 0o755 },
+    );
+    const read = () =>
+      readFileSync(trace, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    return {
+      discover: (env: NodeJS.ProcessEnv, timeoutMs = 10_000) =>
+        discoverModels("opencode-cli", {
+          binaries: { claude: "absent", codex: "absent", opencode: binary },
+          env: { HOME: homedir(), PATH: [dirname(process.execPath), process.env.PATH].join(delimiter), ...env },
+          timeoutMs,
+        }),
+      read,
+    };
+  }
+
+  it("lists OpenCode's free models and a connected provider's, and not an unconnected provider's or a priced Zen model without a key", async () => {
+    const serve = fakeServe();
+    const catalog = await serve.discover({ ANTHROPIC_API_KEY: "sk-ant-not-passed" });
+    expect(catalog).toMatchObject({ provider: "opencode-cli", source: "opencode" });
+    expect(catalog.models.map((model) => [model.id, model.isDefault])).toEqual([
+      ["opencode/big-pickle", true],
+      ["moonshot/kimi-k3", false],
+      ["moonshot/kimi-unpriced", false],
+    ]);
+    const trace = serve.read();
+    expect(trace[0]).toMatchObject({ args: ["serve", "--stdio", "--port", "0"], key: null, anthropic: null, project: "1" });
+    // Every request carried the password, and only reads were made.
+    expect(trace.slice(1).every((entry) => entry["authorized"] === true)).toBe(true);
+    expect(new Set(trace.slice(1).map((entry) => entry["path"]))).toEqual(
+      new Set(["/api/integration", "/api/model", "/api/provider", "/api/model/default"]),
+    );
+  });
+
+  it("lists the priced Zen models where OPENCODE_API_KEY is set, since OpenCode then reports Zen connected", async () => {
+    const catalog = await fakeServe().discover({ OPENCODE_API_KEY: "zen-key" });
+    expect(catalog.models.map((model) => model.id)).toEqual([
+      "opencode/big-pickle",
+      "opencode/half-free",
+      "opencode/claude-opus-5",
+      "moonshot/kimi-k3",
+      "moonshot/kimi-unpriced",
+    ]);
+  });
+
+  it("settles an empty list at once into the one sentence, rather than waiting out the timeout", async () => {
+    const started = Date.now();
+    await expect(fakeServe({ models: [], providers: [] }).discover({})).rejects.toThrow("OpenCode reports no model you can run now");
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("sends the password to no address but the loopback one", async () => {
+    const serve = fakeServe({ names: "http://models.example.test:4096" });
+    await expect(serve.discover({})).rejects.toThrow("OpenCode named a server that is not on this machine.");
+    // Nothing was asked of the server, the named address or the loopback one.
+    expect(serve.read().filter((entry) => "path" in entry)).toEqual([]);
+  });
+
+  it("says in one sentence that OpenCode did not answer in time, rather than the fetch's own words", async () => {
+    await expect(fakeServe({ hangOnModels: true }).discover({}, 4_000)).rejects.toThrow(
+      /^OpenCode did not report its models in time\. Refresh to ask again\.$/,
+    );
+  });
+
+  it("says the same sentence where the model list's body stalls after its headers", async () => {
+    await expect(fakeServe({ stallModelsBody: true }).discover({}, 4_000)).rejects.toThrow(
+      /^OpenCode did not report its models in time\. Refresh to ask again\.$/,
+    );
+  });
+
+  it("kills a server that will not stop on SIGTERM", async () => {
+    const serve = fakeServe({ stubborn: true });
+    await serve.discover({});
+    const pid = serve.read()[0]!["pid"] as number;
+    const gone = () => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    await vi.waitFor(() => expect(gone()).toBe(true), { timeout: 5_000, interval: 100 });
+  });
+
+  it("removes its scratch home only once OpenCode has exited, so nothing OpenCode writes as it stops outlives the read", async () => {
+    const serve = fakeServe({ writesOnStop: true });
+    await serve.discover({});
+    const scratch = serve.read().find((entry) => typeof entry["directory"] === "string")!["directory"] as string;
+    // Past the moment the server wrote its database and exited.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(existsSync(scratch)).toBe(false);
+  });
+
+  it("reads the integration and provider lists entry by entry, leaving out an entry it does not know", async () => {
+    const serve = fakeServe({
+      integrations: [
+        { id: "opencode", connections: [] },
+        // No connections list, a number for an id, and not an object at all.
+        { id: "anthropic" },
+        { id: 7, connections: [{ type: "key" }] },
+        "moonshot-cn",
+        { id: "moonshot-cn", connections: [{ type: "key" }] },
+      ],
+      providers: [{ id: "opencode", integrationID: "opencode" }, { integrationID: "anthropic" }, null, { id: "moonshot", integrationID: "moonshot-cn" }],
     });
-    expect(result.provider).toBe("opencode-cli");
-    expect(result.source).toBe("opencode");
-    expect(result.models).toEqual([
-      { id: "opencode/big-pickle", label: "Big Pickle", description: "opencode/big-pickle", isDefault: true, efforts: [] },
-      { id: "opencode/claude-opus-5", label: "Claude Opus 5", description: "opencode/claude-opus-5", isDefault: false, efforts: [] },
-    ]);
-    const trace = test.trace();
-    expect(trace[0]).toMatchObject({ args: ["acp"], leaked: false });
-    // No turn is started: the handshake and the session, asked twice, and nothing else.
-    expect(trace.flatMap((entry) => (typeof entry["method"] === "string" ? [entry["method"]] : []))).toEqual([
-      "initialize",
-      "session/new",
-      "session/new",
-    ]);
-    expect(trace.find((entry) => "opencode" in entry)?.["opencode"]).toMatchObject({ project: "1", key: "zen-key" });
-  }, 20_000);
+    const catalog = await serve.discover({});
+    expect(catalog.models.map((model) => model.id)).toEqual(["opencode/big-pickle", "moonshot/kimi-k3", "moonshot/kimi-unpriced"]);
+  });
+
+  it("says in one sentence that OpenCode answered with something it cannot read, rather than the parser's own words", async () => {
+    await expect(fakeServe({ providersBody: "<html>not json</html>" }).discover({})).rejects.toThrow(
+      /^OpenCode answered \/api\/provider with something Perbo cannot read\. Update it and refresh\.$/,
+    );
+    await expect(fakeServe({ providersBody: JSON.stringify({ location: {} }) }).discover({})).rejects.toThrow(
+      /^OpenCode answered \/api\/provider with something Perbo cannot read\. Update it and refresh\.$/,
+    );
+  });
+
+  it("says in one sentence that OpenCode stopped where its server goes mid-read", async () => {
+    await expect(fakeServe({ exitAfterIntegrations: true }).discover({})).rejects.toThrow(
+      /^OpenCode stopped before it reported its models\. Update it and refresh\.$/,
+    );
+  });
+
+  it("says in one sentence that nothing can run where OpenCode reports no free model and no connection", async () => {
+    const serve = fakeServe({
+      models: [{ id: "claude-opus-5", providerID: "opencode", name: "Claude Opus 5", cost: [{ input: 5, output: 25 }] }],
+      providers: [{ id: "opencode", integrationID: "opencode" }],
+    });
+    await expect(serve.discover({})).rejects.toThrow(
+      "OpenCode reports no model you can run now — none of its free models is listed and no provider is connected; " +
+        "set OPENCODE_API_KEY in the app environment for OpenCode Zen and refresh.",
+    );
+  });
+});
+
+describe("the first line OpenCode's server prints", () => {
+  it("is read, and nothing it prints after is kept: the reader lets go and the stream drains", async () => {
+    const stream = new PassThrough();
+    const read = firstLine(stream, 64);
+    stream.write('{"url":"http://127.0.0.1:4096"}\n');
+    await expect(read).resolves.toBe('{"url":"http://127.0.0.1:4096"}');
+    expect(stream.listenerCount("data")).toBe(0);
+    // A server that keeps printing: far past the limit, and nothing refuses or holds it.
+    for (let chunk = 0; chunk < 100; chunk += 1) stream.write("x".repeat(1_000));
+    expect(stream.readableFlowing).toBe(true);
+    await new Promise((settle) => setImmediate(settle));
+    expect(stream.readableLength).toBe(0);
+  });
+
+  it("refuses a first line past the limit, and lets go of the stream", async () => {
+    const stream = new PassThrough();
+    const read = firstLine(stream, 16);
+    stream.write("y".repeat(32));
+    await expect(read).rejects.toThrow("exceeded the output limit");
+    expect(stream.listenerCount("data")).toBe(0);
+  });
 });

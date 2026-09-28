@@ -491,3 +491,27 @@ describe("a word a wrapper supplies where a verb writes through an option", () =
     expect(sentence("xargs -I{} rg foo {}")).toContain("put -- before it, or a prefix such as ./{}");
   });
 });
+
+/**
+ * The command behind the assignments in front of it: the shell's `NAME=…`
+ * and `NAME+=…`, which appends, and every operand `env` is given that holds
+ * an `=`, which `env` reads as an assignment whatever the name before it is.
+ * Read as the program instead, each hides the writer behind it.
+ */
+describe("a writer behind the assignments in front of it", () => {
+  for (const command of [
+    "A+=1 rm -rf /tmp/x",
+    "env A+=1 rm -rf /tmp/x",
+    "env 'A B=1' rm -rf /tmp/x",
+    "env 1=2 rm -rf /tmp/x",
+    "env -i 1=2 A=1 rm -rf /tmp/x",
+  ]) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+    });
+  }
+
+  it("allows the same writer inside the worktree", () => {
+    expect(decision("env 1=2 A+=1 rm -rf src/x")).toBe("allowed");
+  });
+});

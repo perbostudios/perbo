@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { gateClosedNote, retainedBranch } from "./retained.js";
+import {
+  ANSWERS_OWED_NOTE,
+  APPROVED_NOTE,
+  gateClosedNote,
+  incompleteNote,
+  retainedBranch,
+  runEndedOn,
+  settledRow,
+} from "./retained.js";
 import type { Ticket } from "./ticket.js";
 
 /**
@@ -45,6 +53,21 @@ describe("a retained branch to publish", () => {
     expect(retainedBranch(ended("changes_requested", gateClosedNote("escalated"))).outcome).toBe("escalated");
   });
 
+  it("is still an escalated run's after a run the loop refused for owed answers returned the ticket there", () => {
+    const escalated = ended("changes_requested", gateClosedNote("escalated"));
+    const refusedSince = {
+      ...escalated,
+      history: [
+        ...escalated.history,
+        { at: "2026-09-24T21:10:00.000Z", from: "changes_requested", to: "ready", note: "new attempt after changes_requested" },
+        { at: "2026-09-24T21:10:00.001Z", from: "ready", to: "provisioning", note: "run started against plan_1" },
+        { at: "2026-09-24T21:10:01.000Z", from: "provisioning", to: "changes_requested", note: ANSWERS_OWED_NOTE },
+      ],
+    } satisfies Parameters<typeof retainedBranch>[0];
+    expect(retainedBranch(refusedSince)).toEqual({ branch: BRANCH, outcome: "escalated", refusal: null });
+    expect(settledRow(refusedSince.history)?.note).toBe(gateClosedNote("escalated"));
+  });
+
   it("is refused where the run ended anything but approved or escalated", () => {
     expect(retainedBranch(ended("changes_requested", gateClosedNote("remediation_exhausted"))).refusal).toBe(
       "PRB-8 is changes_requested, and its last run ended the gate closed: remediation_exhausted: only a run " +
@@ -77,5 +100,16 @@ describe("a retained branch to publish", () => {
     expect(retainedBranch(ended("pr_open", "approved", { branch: null })).refusal).toBe(
       "PRB-8 records no branch, so its run retained nothing to publish",
     );
+  });
+});
+
+describe("the outcome a ticket's row records its run ending on", () => {
+  it("reads each run-ending row the CLI writes, and nothing else", () => {
+    expect(runEndedOn(APPROVED_NOTE)).toBe("approved");
+    expect(runEndedOn(gateClosedNote("remediation_stalled"))).toBe("remediation_stalled");
+    expect(runEndedOn(incompleteNote("no_changes"))).toBe("no_changes");
+    expect(runEndedOn("run started against plan_0e106f5ed0ddb333")).toBeNull();
+    expect(runEndedOn(incompleteNote("the review did not complete"))).toBeNull();
+    expect(runEndedOn(ANSWERS_OWED_NOTE)).toBeNull();
   });
 });

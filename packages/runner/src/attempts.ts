@@ -8,9 +8,9 @@ import {
   type AttemptWait,
   type ExecutionAttempt,
   type VerifiedCommit,
+  sameCommit,
 } from "@perbo/contracts";
 import { replaceFile } from "@perbo/workspace";
-import { sameCommit } from "./resume.js";
 
 /**
  * The ticket's attempts record: one file per ticket, **appended to** by every

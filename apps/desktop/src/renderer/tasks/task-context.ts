@@ -1,7 +1,7 @@
-import { costOf, formatUsd, rollCosts, type Cost } from "@perbo/contracts/browser";
+import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, settledRow, type Cost } from "@perbo/contracts/browser";
 import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
-import { runnerStages, runnerTally, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
+import { ATTEMPT_STARTS, runnerStages, runnerTally, spokenByAttempt, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
 import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
@@ -164,49 +164,123 @@ export interface AttemptTranscript {
 
 /**
  * What the Watch page's transcript lists: the executor's and the reviewer's
- * own words, oldest first so the latest is at the bottom, and never a row for
- * a tool call.
+ * own words over every run of the ticket, oldest first so the latest is at the
+ * bottom, and never a row for a tool call.
  *
- * While a run is live they are read from its log as the CLI prints them, each
- * turn as it arrives. Once none is, they are rebuilt from the records of each
- * attempt of the latest run, in order: each turn its retained transcript holds
+ * Each attempt is read from one source, never both. The last run's are read
+ * from its log, each turn as the CLI printed it, while the run goes and once
+ * it has ended alike: the log is what the run printed as it went and never its
+ * result, so an ended run lists the words it listed while it went. Every other
+ * attempt is read from its records — each turn its retained transcript holds
  * of the executor's own session, then each finding the reviewer filed that the
- * review of that attempt left open, in its own words — the lines the run
- * printed for them as it went. A finding the runner states itself, such as a
- * flaky check, is the runner's line and not the reviewer's words, so it is not
- * listed. The last run's log stands in until every attempt's transcript is
- * read, and where no attempt retained the executor's words while the log holds
- * some; the records stand where the log holds nothing.
+ * review of that attempt left open, in its own words — and so is an attempt of
+ * the last run whose start the log's tail cut or whose stretch of the log
+ * holds no turn. A finding the runner states itself, such as a flaky check, is
+ * the runner's line and not the reviewer's words, so it is not listed.
+ *
+ * The last run's own attempts are those that began while it went. The
+ * ticket's earlier runs', and every one where the journal holds no run, come
+ * first; a later run's that the journal never held, such as one started from
+ * a terminal, come last. The log's stretches are paired with the last run's
+ * own attempts by the stage each began on: an attempt the run began and did
+ * not record keeps its words from the log, and so do the words before the
+ * first start the log holds where no recorded attempt is theirs. The list
+ * fills as the records arrive: an attempt read from its records shows what is
+ * already read, and the log stands in for the last run's own attempts until
+ * the records they need are read. The last run's
+ * attempts are the log's words alone where the records do not line up with
+ * the starts it holds, and where the attempts read from their records kept
+ * none of the executor's words while the log holds some.
  */
 export function watchTranscript(
   jobs: readonly Job[],
   active: Job | undefined,
   attempts: readonly AttemptTranscript[],
 ): TranscriptEntry[] {
-  const fromLog = (job: Job | undefined): TranscriptEntry[] =>
-    spokenWords(job?.log ?? "").map(({ speaker, words }) =>
-      speaker === "executor"
-        ? { author: "Executor", label: "message", text: words }
-        : { author: "Reviewer", label: "finding", text: words },
-    );
+  const said = ({ speaker, words }: { speaker: string; words: string }): TranscriptEntry =>
+    speaker === "executor"
+      ? { author: "Executor", label: "message", text: words }
+      : { author: "Reviewer", label: "finding", text: words };
+  // An attempt read from its records: each turn its retained transcript holds
+  // of the executor's own session, then each finding its review left open.
+  const fromRecords = ({ attempt, transcript }: AttemptTranscript): TranscriptEntry[] => [
+    ...retainedOutput(transcript).entries,
+    ...(attempt.review?.findings ?? [])
+      .filter((finding) => finding.status === "open" && finding.source !== "deterministic")
+      .map((finding) => ({ author: "Reviewer", label: "finding", text: finding.statement })),
+  ];
+  const run = active !== undefined && isRun(active) ? active : jobs.filter(isRun).at(-1);
+  // The run's own attempts are those that began while it went. Every other
+  // one is read from its records: the ticket's earlier runs', and every one
+  // where the journal holds no run, ahead of them; a later run's the journal
+  // never held, such as one started from a terminal, after them. What is
+  // already read is listed while the rest of the records arrive.
+  const began = (attempt: AttemptView): number => Date.parse(attempt.startedAt);
+  const isEarlier = (attempt: AttemptView): boolean => run === undefined || began(attempt) < Date.parse(run.startedAt);
+  const isLater = (attempt: AttemptView): boolean =>
+    run !== undefined && run.endedAt !== null && began(attempt) > Date.parse(run.endedAt);
+  const earlier = attempts.filter(({ attempt }) => isEarlier(attempt));
+  const own = attempts.filter(({ attempt }) => !isEarlier(attempt) && !isLater(attempt));
+  const previous = earlier.flatMap(fromRecords);
+  const following = attempts.filter(({ attempt }) => isLater(attempt)).flatMap(fromRecords);
+  const log = run?.log ?? "";
+  const logged = spokenWords(log).map(said);
   // D-137: while the run waits on the person, the pause
   // is the last line, in the runner's own words and never an agent's.
   if (active !== undefined && isRun(active)) {
     const last = runnerStages(active.log).findLast(({ stage }) => stage.kind === "egress" || stage.kind === "egressSettled");
+    const live = [...previous, ...logged];
     return last?.stage.kind === "egress"
-      ? [...fromLog(active), { author: "Perbo", label: "decision raised", text: stageWords(last.stage) }]
-      : fromLog(active);
+      ? [...live, { author: "Perbo", label: "decision raised", text: stageWords(last.stage) }]
+      : live;
   }
-  const logged = fromLog(jobs.filter(isRun).at(-1));
-  if (attempts.some(({ transcript }) => transcript === undefined)) return logged;
-  const spoken = attempts.map(({ transcript }) => retainedOutput(transcript).entries);
-  const recorded = attempts.flatMap(({ attempt }, at) => [
-    ...spoken[at]!,
-    ...(attempt.review?.findings ?? [])
-      .filter((finding) => finding.status === "open" && finding.source !== "deterministic")
-      .map((finding) => ({ author: "Reviewer", label: "finding", text: finding.statement })),
-  ]);
-  return spoken.some((entries) => entries.length > 0) || logged.length === 0 ? recorded : logged;
+  const { before, attempts: held } = spokenByAttempt(log);
+  const cut = heldFrom(
+    held.map(({ start }) => start),
+    recordedRunnerStages(own.map(({ attempt }) => attempt)).map(
+      (stages) => stages.find(({ stage }) => ATTEMPT_STARTS.includes(stage.kind))?.stage ?? null,
+    ),
+  );
+  // Each recorded attempt's stretch of the log, where the log holds its start.
+  const stretch = (at: number) => (cut === null || at < cut ? undefined : held[at - cut]);
+  const fromLog = (at: number): boolean => (stretch(at)?.said.length ?? 0) > 0;
+  const read = own.filter((_, at) => !fromLog(at));
+  if (read.some(({ transcript }) => transcript === undefined)) return [...previous, ...logged, ...following];
+  // The run's own attempts are the log's words alone where the records do not
+  // line up with the starts it holds, and where the attempts read from their
+  // records kept none of the executor's words while the log holds some.
+  if (
+    logged.length > 0 &&
+    (cut === null || (read.length > 0 && read.every(({ transcript }) => retainedOutput(transcript).entries.length === 0)))
+  )
+    return [...previous, ...logged, ...following];
+  const recorded = own.flatMap((entry, at) => (fromLog(at) ? stretch(at)!.said.map(said) : fromRecords(entry)));
+  // The words before the first start the log holds are the attempt's whose
+  // start was cut, which its records hold whole; where none was cut, they stay.
+  const head = cut === 0 ? before.map(said) : [];
+  // A start the log holds past the recorded attempts is one the run began and did not record.
+  const unrecorded = cut === null ? [] : held.slice(own.length - cut).flatMap(({ said: turns }) => turns).map(said);
+  return [...previous, ...head, ...recorded, ...unrecorded, ...following];
+}
+
+const sameStart = (a: RunnerStage, b: RunnerStage | null): boolean =>
+  b !== null && a.kind === b.kind && (a.kind !== "remediation" || (b.kind === "remediation" && a.round === b.round));
+
+/**
+ * How many of a run's recorded attempts, from its first, began before the
+ * first start its log still holds, or null where the records do not line up
+ * with the starts it holds. The starts it holds are the run's last ones: each
+ * the start of a recorded attempt, in order, except that the last may be one
+ * the run began and did not record.
+ */
+function heldFrom(starts: readonly RunnerStage[], recorded: readonly (RunnerStage | null)[]): number | null {
+  const lines = (from: number, count: number): boolean =>
+    from >= 0 && starts.slice(0, count).every((start, at) => sameStart(start, recorded[from + at] ?? null));
+  if (lines(recorded.length - starts.length, starts.length)) return recorded.length - starts.length;
+  // The last start the log holds is an attempt the run began and did not record.
+  if (starts.length > 0 && lines(recorded.length - starts.length + 1, starts.length - 1))
+    return recorded.length - starts.length + 1;
+  return null;
 }
 
 /** One entry of the loop page's steps. */
@@ -290,6 +364,109 @@ export class StageLog {
   }
 }
 
+/**
+ * How a run ended, in Perbo's words: the one home for them. The steps say
+ * these where the ticket's row names the outcome, and the stopped page says
+ * them as the reason a run with nothing left to ask ended.
+ */
+const RUN_OUTCOME_SENTENCES: Record<string, string> = {
+  approved: "The review approved the change; the merge is yours.",
+  changes_requested: "The review asked for changes the loop could not make on its own.",
+  escalated:
+    "The run stopped for a person: the review escalated a finding, or the executor declined one as having no determinable practice.",
+  remediation_stalled: "The refinement stalled: a round closed none of the findings it was given.",
+  remediation_exhausted: "The refinement ran out of rounds or budget with findings still open.",
+  no_changes: "The agent made no change to the branch.",
+  terminated: "The attempt was terminated before it finished.",
+  base_conflict: "The branch conflicts with its base, and the round given the conflict did not resolve it.",
+  review_failed: "The review did not complete, so the change was not judged.",
+};
+
+/**
+ * Why a run that closed the gate stopped where its record asks the person
+ * nothing, where the outcome alone does not say it — each in Perbo's words,
+ * beside the outcome sentences they stand for.
+ */
+const NOTHING_ASKED = {
+  /**
+   * The executor declined what was left (D-065), as the attempts record it:
+   * answered by a principle, not on the card. Plan it again is named only
+   * where the page offers it.
+   */
+  declined: (planAgain: boolean): StopReason => ({
+    text: "The executor declined the findings left open, saying no practice determines them.",
+    detail:
+      "The executor declined the findings left open, saying no practice determines them; its reasons are on the " +
+      "round record. A declined finding takes no answer on the decision card: `perbo principle add` records " +
+      "your answer in .perbo/principles.md, which the executor reads on the next run" +
+      (planAgain ? ", and Plan it again starts that run from the spec." : "."),
+  }),
+  /** An escalation with nothing declined and nothing on the record for the person, as an incomplete review's can be. */
+  escalated: {
+    text: "The review escalated the run, and put nothing on its record to you.",
+    detail:
+      "The review escalated the run, and nothing on its record takes an answer from you, so the loop cannot go " +
+      "on by itself and stopped here rather than pausing for you.",
+  },
+  /** No review to read: nothing on it can be put to the person. */
+  unreadable: {
+    text: "The run's review could not be read, so nothing on it can be put to you.",
+    detail:
+      "The review this run ended on is not readable in the records Perbo holds, so no question on it can be " +
+      "asked, and the loop stopped here rather than pausing for you with nothing to answer.",
+  },
+} satisfies Record<string, StopReason | ((planAgain: boolean) => StopReason)>;
+
+/** A run's outcome as a sentence (`RUN_OUTCOME_SENTENCES`). */
+export const outcomeSentence = (outcome: string): string =>
+  RUN_OUTCOME_SENTENCES[outcome] ?? `The run ended: ${words(outcome)}.`;
+
+/** What a ticket's row says in the steps: an outcome in Perbo's words, every other row as written. */
+const rowWords = (entry: Pick<Detail["ticket"]["history"][number], "note" | "to">): string => {
+  const outcome = runEndedOn(entry.note);
+  return outcome === null ? entry.note || entry.to.replaceAll("_", " ") : outcomeSentence(outcome);
+};
+
+/**
+ * Why a ticket whose last run closed the gate stopped, where the record puts
+ * no question to the person: that its review could not be read; for an
+ * escalation, that the executor declined what was left where an attempt since
+ * the review records declines, and otherwise that the review put nothing to
+ * them; for any other outcome, its row's outcome in Perbo's words and that
+ * nothing is left to answer. Null where the row that left the ticket where it
+ * is, a run refused for owed answers passed over (`settledRow`), is not such a
+ * run's end.
+ * `planAgain` says whether the page offers Plan it again, which a reason
+ * names only where it does.
+ */
+export function gateClosedReasons(
+  history: Detail["ticket"]["history"],
+  attempts: readonly Pick<AttemptView, "review" | "declines">[],
+  planAgain: boolean,
+): StopReason[] | null {
+  const last = settledRow(history);
+  if (last === undefined || !last.note.startsWith(gateClosedNote(""))) return null;
+  const outcome = runEndedOn(last.note);
+  if (outcome === null) return null;
+  const reviewed = attempts.findLastIndex((attempt) => attempt.review !== null);
+  if (reviewed === -1) return [NOTHING_ASKED.unreadable];
+  if (outcome === "escalated")
+    return [
+      attempts.slice(reviewed).some((attempt) => (attempt.declines ?? []).length > 0)
+        ? NOTHING_ASKED.declined(planAgain)
+        : NOTHING_ASKED.escalated,
+    ];
+  const text = outcomeSentence(outcome);
+  return [
+    {
+      text,
+      detail:
+        `${text} Nothing on its record is left for you to answer, so the loop cannot go on by itself and ` +
+        "stopped here rather than pausing for you.",
+    },
+  ];
+}
+
 /** The ticket states a run moves through, so a move from one of them to `pr_open` is the run's own delivery. */
 const RUN_STATES = new Set(["provisioning", "executing", "verifying", "independent_review"]);
 
@@ -366,7 +543,7 @@ export function loopSteps(input: {
     (logged === undefined || Date.parse(entry.at) < Date.parse(logged.startedAt))
       ? [{ text: stageWords({ kind: "delivery" }), reason: null, at: entry.at }]
       : []),
-    { text: entry.note || entry.to.replaceAll("_", " "), reason: null, at: entry.at },
+    { text: rowWords(entry), reason: null, at: entry.at },
   ]);
   return [
     ...recorded.map((step) => ({ ...step, key: step.at! })),

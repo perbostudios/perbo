@@ -13,7 +13,12 @@ import {
   InterviewEntrySchema,
   TaskModelsSchema,
 } from "../../shared/protocol.js";
-import { interviewModelFor, type PromisePair } from "../../shared/contract-editing.js";
+import {
+  interviewModelFor,
+  interviewSessionArgs,
+  type InterviewProviderName,
+  type PromisePair,
+} from "../../shared/contract-editing.js";
 import { interviewArgv, interviewProvider } from "./argv.js";
 import { relayed } from "./relay.js";
 import type { Cli } from "../cli.js";
@@ -100,6 +105,8 @@ export interface InterviewDeps {
     | "architectTitled"
     | "beginAsking"
     | "answerAsking"
+    | "turnOnAsking"
+    | "newInterview"
     | "countNodes"
     | "adopt"
   >;
@@ -139,7 +146,7 @@ export class InterviewHost {
   private readonly deps: InterviewDeps;
   private readonly live = new Map<
     string,
-    { repoId: string; child: LineProcess; model: string; exited: Promise<void> }
+    { repoId: string; child: LineProcess; model: string; provider: InterviewProviderName; exited: Promise<void> }
   >();
   /**
    * The chats asked to start and not spawned yet, while the model they run on
@@ -326,10 +333,19 @@ export class InterviewHost {
     pending: { stopped: boolean },
   ): Promise<InterviewStatus> {
     const model = await this.chatModel(TaskModelsSchema.strip().parse(asked.form.models));
-    const session = this.deps.editing.read(id);
-    if (pending.stopped || session.phase === "discarded") return this.status(id);
+    const current = this.deps.editing.read(id);
+    if (pending.stopped || current.phase === "discarded") return this.status(id);
+    // The provider from the same models the model was worked out from: the
+    // defaults a planning with no ticket reads can change while the catalog
+    // is read, and a model of one set run on another's provider is a session
+    // that cannot start.
+    const session = { ...current, form: { ...current.form, models: asked.form.models } };
+    const provider = interviewProvider(session);
     const repo = this.deps.repository(session.repoId);
     const args = interviewArgv(repo, session, model);
+    // A new session has asked nothing, and its record beside the spec says so:
+    // the planning's card says the same (D-117).
+    if (interviewSessionArgs(session, provider).length === 0) this.deps.editing.newInterview(id);
     let stderr = "";
     let gone: () => void = () => undefined;
     const exited = new Promise<void>((resolve) => {
@@ -384,7 +400,7 @@ export class InterviewHost {
         this.say(id, { kind: "note", text: "The chat's process failed.", output: redact(error.message) });
       },
     });
-    this.live.set(id, { repoId: repo.id, child, model, exited });
+    this.live.set(id, { repoId: repo.id, child, model, provider, exited });
     // Nothing is said yet: the interview's own `started` event is what says it
     // is there, and until then the only honest word is that it is starting,
     // which is what `running` on this change carries.
@@ -427,7 +443,11 @@ export class InterviewHost {
     const specBefore = owed === 1 ? this.specDigest(id) : null;
     const titleBefore = owed === 1 ? this.specTitle(id) : null;
     const pairBefore = owed === 1 ? this.deps.marks.pairOf(id, live.repoId) : null;
-    if (!live.child.write(encodeInterviewTurn(turn)))
+    // Where a problem of the host's own stands in front of the session's
+    // questions, the turn says what it did to them, since the session never
+    // saw that problem put and would read the answer to it against its own.
+    const asking = this.deps.editing.turnOnAsking(id, turn.text);
+    if (!live.child.write(encodeInterviewTurn(asking === undefined ? turn : { ...turn, asking })))
       throw new Error(
         "The chat is not listening. Start it again, then send this once it is running.",
       );
@@ -743,7 +763,7 @@ export class InterviewHost {
         this.deps.editing.recordInterview(
           id,
           read.session,
-          interviewProvider(this.deps.editing.read(id)),
+          this.live.get(id)?.provider ?? interviewProvider(this.deps.editing.read(id)),
           this.live.get(id)?.model ?? null,
         );
       } catch {
@@ -805,7 +825,12 @@ export class InterviewHost {
     const live = this.live.get(id);
     const text =
       `Perbo: ${overflow}. Write it again, condensed to fit, and leave out nothing it says.`;
-    if (asked < CONDENSE_ASKS && live?.child.write(encodeInterviewTurn({ type: "turn", text }))) {
+    // Perbo's own sentence, which answers nothing the session asked and leaves
+    // its questions where they are, as the dock leaves its card.
+    if (
+      asked < CONDENSE_ASKS &&
+      live?.child.write(encodeInterviewTurn({ type: "turn", text, asking: "kept" }))
+    ) {
       this.condensing.set(id, asked + 1);
       this.owed.set(id, (this.owed.get(id) ?? 0) + 1);
       this.say(id, null);

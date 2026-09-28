@@ -4,6 +4,7 @@ import type { TaskView } from "../shell/route.js";
 import { runnerProgress, WHEEL_STEPS, wheelAt, wheelStep, type RunnerStage } from "../../shared/runner-progress.js";
 import { heldTicket, inTheWay, isRun, ticketRun } from "../../shared/jobs.js";
 import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isMergeDecided, isPreLoop } from "../../shared/archive.js";
+import { questionsOnRecord } from "../../shared/decisions.js";
 
 export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
 /**
@@ -52,11 +53,12 @@ export const completedLabel = (count: number): string => `${count} completed`;
 /**
  * Where a Home ticket stands (S4), the one answer its card's colour, the
  * header's counts and the rail's Home badge all read: yellow where the loop
- * paused for the person — a finding waits on their answer, the run just ended
- * on a verdict for them, or a live run waits on their answer about a host off
- * the allow-list (D-137); red only where the loop
- * stopped on an error or because the person stopped it, and will not reach the
- * end on its own; green where the journey ended — a pull request opened,
+ * paused for the person (`ticketRun`) — a question on the record waits on
+ * their answer, or a live run waits on their answer about a host off the
+ * allow-list (D-137), and never where nothing is asked
+ * of them; red only where the loop stopped on an error, because the person
+ * stopped it, or with nothing to ask them, and will not reach the end on its
+ * own; green where the journey ended — a pull request opened,
  * merged or closed without merge, or a local run finished with no pull request
  * to merge; none for every other part of the loop.
  *
@@ -67,13 +69,13 @@ export const completedLabel = (count: number): string => `${count} completed`;
  */
 export function homeTone(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
-  row: Pick<TaskRow, "repoId" | "ticket">,
+  row: Pick<TaskRow, "repoId" | "ticket" | "questions">,
 ): HomeTone | null {
   const { ticket } = row;
   const { jobs, active, stoppedShort, paused, asking } = ticketRun(workspace, row);
   const settling = jobs.filter(isRun).at(-1)?.state === "completed" && workspace.refreshingRepos?.includes(row.repoId);
   if ((active?.state === "stopping" && isRun(active)) || (stoppedShort && !settling) || (!active && GIVEN_UP_STATES.includes(ticket.state))) return "red";
-  if (paused || asking || (!active && ticket.state === "changes_requested")) return "yellow";
+  if (paused || asking) return "yellow";
   return JOURNEY_END_STATES.includes(ticket.state) ? "green" : null;
 }
 
@@ -94,7 +96,7 @@ export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs"
 export type HomeGroup = HomeTone | "decided" | null;
 export const homeGroup = (
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "calledOff">,
-  row: Pick<TaskRow, "repoId" | "ticket">,
+  row: Pick<TaskRow, "repoId" | "ticket" | "questions">,
 ): HomeGroup => (isMergeDecided(workspace, row) ? "decided" : homeTone(workspace, row));
 
 /**
@@ -110,7 +112,7 @@ const HOME_ORDER: readonly HomeGroup[] = ["green", "yellow", "red", null, "decid
  * never opened coming after every opened one of its group, the most recently
  * admitted first; `newest` or `oldest`, by when the ticket last moved.
  */
-export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
+export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket" | "questions">>(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened" | "calledOff">,
   rows: readonly Row[],
   by: "opened" | "newest" | "oldest",
@@ -136,7 +138,7 @@ export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
  */
 export function homeTally(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "calledOff">,
-  rows: readonly Pick<TaskRow, "repoId" | "ticket">[],
+  rows: readonly Pick<TaskRow, "repoId" | "ticket" | "questions">[],
 ): Record<HomeTone | "completed", number> {
   const tally = { yellow: 0, red: 0, green: 0, completed: 0 };
   for (const row of rows) {
@@ -153,7 +155,7 @@ export function homeTally(
  */
 function attentionSince(
   workspace: Pick<Snapshot, "jobs">,
-  row: Pick<TaskRow, "repoId" | "ticket">,
+  row: Pick<TaskRow, "repoId" | "ticket" | "questions">,
   tone: HomeTone,
 ): string {
   const moved = row.ticket.history.findLast((entry) => entry.to === row.ticket.state)?.at ?? row.ticket.updated_at;
@@ -171,7 +173,7 @@ function attentionSince(
  */
 export function unseenAttention(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened" | "calledOff">,
-  row: Pick<TaskRow, "repoId" | "ticket">,
+  row: Pick<TaskRow, "repoId" | "ticket" | "questions">,
 ): boolean {
   const tone = homeTone(workspace, row);
   if (tone === null || isMergeDecided(workspace, row)) return false;
@@ -273,13 +275,19 @@ export const carriesOn = (jobs: readonly Job[]): boolean =>
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
 export function projectTicket(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
-  row: Pick<TaskRow, "repoId" | "ticket">,
+  row: Pick<TaskRow, "repoId" | "ticket" | "questions">,
   detail?: Detail,
   requested: TaskView = "auto",
   refreshing = workspace.refreshingRepos?.includes(row.repoId) ?? false,
 ) {
   const { ticket, repoId } = row;
-  const { jobs, active, stoppedShort, paused, asking } = ticketRun(workspace, row);
+  // The decision card's own count where the page holds this ticket's records,
+  // so the pause, the colour and the card cannot disagree.
+  const counted =
+    detail?.ticket.ticket_id === ticket.ticket_id && ticket.state === "changes_requested"
+      ? { ...row, questions: questionsOnRecord(detail).length }
+      : row;
+  const { jobs, active, stoppedShort, paused, asking } = ticketRun(workspace, counted);
   // This ticket's own run, decision or publication takes its turn; another
   // ticket's run and planning anywhere do not hold it up (D-049, D-101).
   const busy = Boolean(inTheWay(workspace.jobs, { repoId, key: ticket.key, kind: "run" }));
@@ -309,7 +317,7 @@ export function projectTicket(
     ready: !active && !refreshing && ["pr_open", "ready", "merged"].includes(ticket.state) && checksPassed && (approved || closuresVerified),
   };
   const observed = active ? runnerProgress(active.log) : null;
-  const tone = homeTone(workspace, row);
+  const tone = homeTone(workspace, counted);
   // A journey that ended is past every step, whatever stage the loop's last
   // line named. A stopped run keeps the wheel where the run had taken it,
   // rather than where the state its stop left the ticket at would put it, and
@@ -322,11 +330,18 @@ export function projectTicket(
       ? stageReached(jobs.filter(isRun).at(-1), currentDetail && detail ? detail.attempts : [])
       : paused || asking
         ? stageOf("changes_requested")
-        : observed?.stage) ?? stageOf(ticket.state);
+        : observed?.stage) ??
+    // Decisions required only where there is a decision: a ticket the review
+    // stopped with nothing to ask the person stands at the review.
+    stageOf(ticket.state === "changes_requested" && !paused ? "independent_review" : ticket.state);
   // Continue the task is offered only after the person's own stop, taken or
   // still settling, or Perbo closing mid-run.
   const continuable = carriesOn(jobs);
   const attention = !active && !refreshing && (recoverable || paused || ["changes_requested", "pr_open", "failed", "blocked", "plan_invalid"].includes(ticket.state));
+  // While a run of the ticket is live its page is the loop, whatever was
+  // asked for: the results are that run's, offered once it has ended with its
+  // review on record, and a review an earlier run left is not them.
+  const running = active !== undefined && isRun(active);
   let screen: Exclude<TaskView, "auto">;
   if (requested === "output") screen = "output";
   // The merge screen follows the review whatever the ticket holds: it merges
@@ -334,13 +349,14 @@ export function projectTicket(
   // says why neither (D-136). Calling a merge
   // off needs a pull request to leave open.
   else if (requested === "merge") screen = "merge";
-  else if (requested === "called-off") screen = ticket.delivery.pull_request_url ? "called-off" : "review";
+  else if (requested === "called-off" && (ticket.delivery.pull_request_url || !running))
+    screen = ticket.delivery.pull_request_url ? "called-off" : "review";
   else if (requested === "complete" && ticket.delivery.state === "merged") screen = "complete";
   else if (requested === "contract") screen = "contract";
   // The repository's files beside this contract, read-only: asked for from the
   // contract, and never chosen for a person, so it is only ever `requested`.
   else if (requested === "explorer") screen = "explorer";
-  else if (requested === "review" || ((requested === "auto" || requested === "loop") && resultReady)) screen = "review";
+  else if (!running && (requested === "review" || ((requested === "auto" || requested === "loop") && resultReady))) screen = "review";
   else if (requested === "auto" && ["plan_review", "ready", "draft", "specifying"].includes(ticket.state) && !active) screen = "contract";
   // A run stopped, before the record it left is read as a result. A stop seals
   // to `failed` inside the executor's window and strands the ticket where it
@@ -360,7 +376,7 @@ export function projectTicket(
   const primary = stopped ? { label: "See the stopped run", view: "stopped" as const } :
     active || refreshing ? { label: "Watch", view: "loop" as const } :
     resultReady ? { label: ticket.delivery.pull_request_url ? "Merge" : "Review result", view: "review" as const } :
-    paused || ticket.state === "changes_requested" ? { label: "Answer", view: "decisions" as const } :
+    paused ? { label: "Answer", view: "decisions" as const } :
     screen === "review" ? { label: "Review result", view: "review" as const } :
     stage === 1 ? { label: "Review contract", view: "contract" as const } : { label: "Watch", view: "loop" as const };
   const descriptions: Record<string, string> = {

@@ -39,8 +39,9 @@ digraph G {
   ready -> blocked [label="waits: a dependency unmerged, or a scope a ticket ahead holds"];
   blocked -> ready [label="what it waited on merged"];
   blocked -> cancelled;
-  provision -> failed;
+  provision -> failed [label="did not complete; or refused by the loop, owed a person's answers, where the run found it failed"];
   provision -> pr [label="every standing finding shipped as it is by a person or verified closed, on the judged commit"];
+  provision -> changes [label="the same, with a finding the executor declined left for a principle: escalated; or refused by the loop, owed a person's answers"];
   execute -> failed;
   verify -> failed;
   failed -> ready [label="new attempt"];

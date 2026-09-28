@@ -1,4 +1,4 @@
-import { interviewSessionArgs, readingState, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
+import { contractStateOf, interviewSessionArgs, readingState, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -19,7 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
 import { EVERY_PROBLEM_RESOLVED, GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
-import { isLive, lane } from "../shared/jobs.js";
+import { isLive, lane, ticketRun } from "../shared/jobs.js";
 import { DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
 import type {
   Change,
@@ -152,6 +152,48 @@ describe("the spec a planning session holds", () => {
     };
     writeFileSync(at, JSON.stringify(ticket));
   }
+
+  it("takes the ticket's own models as it finds the plan drafted from its spec", async () => {
+    // A ticket admitted on models of its own; the planning that wrote the spec
+    // finds it, and from then on writes with the ticket's models rather than
+    // the defaults it read while it held no ticket (D-093).
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
+    await saveSpec(service, { kind: "specSave", id: session.id, repoId: registered.id, title: "A light colour mode", sections });
+    const own = {
+      executorProvider: "claude-cli" as const,
+      executorModel: "claude-sonnet-5",
+      reviewerProvider: "claude-cli" as const,
+      reviewerModel: "claude-sonnet-5",
+      draftingProvider: "claude-cli" as const,
+      architectProvider: null,
+      architectModel: null,
+      executorSkills: [],
+      executorEffort: null,
+      reviewerEffort: null,
+    };
+    await finished(
+      service,
+      (
+        await service.request({
+          kind: "admit",
+          repoId: registered.id,
+          draft: {
+            outcome: "New users receive an activation email",
+            criteria: [{ text: "A signup queues one email", assertion: "signup.test.ts", kind: "test" }],
+            paths: ["packages/auth/**"],
+            prohibited: [],
+          },
+          models: own,
+        })
+      ).id,
+    );
+    recordSpecPath(repo, "specs/a-light-colour-mode/spec.md");
+    const found = await service.request({ kind: "editingOpen", target: { kind: "session", id: session.id } });
+    expect(found.key).toBe("PRB-1");
+    expect(found.form.models).toMatchObject({ executorModel: "claude-sonnet-5", reviewerModel: "claude-sonnet-5" });
+  });
 
   it("refuses a recorded spec path that climbs out of the spec folder", async () => {
     // The path reaches this from an admission record, which is a file in the
@@ -1344,6 +1386,199 @@ describe("the graph while the work runs", () => {
     expect(decided.criteria.every((criterion) => criterion.finding === null)).toBe(true);
   });
 
+  it("counts on Home, and takes an answer to, only what a stalled refinement left open (D-132)", async () => {
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const digest = (await service.detail(repoId, "PRB-1")).digest;
+    const [stuck, alsoStuck, closed] = ["7", "8", "9"].map((digit) => digit.repeat(64)) as [string, string, string];
+    const toExecutor = (key: string) => ({
+      key,
+      rule_id: "verification.execution_missing",
+      criterion_id: "ac_1",
+      status: "open",
+      routing: "remediable",
+      closure: "executor",
+      statement: `${key.slice(0, 1)} has no execution result.`,
+    });
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [],
+      review: {
+        createdAt: "2026-09-27T12:48:05.305Z",
+        body: JSON.stringify({ review_id: "rev_one", decision: "remediable", findings: [stuck, alsoStuck, closed].map(toExecutor) }),
+      },
+    });
+    // PRB-15's rounds: the first closed one finding, the second none.
+    const manifests = join(repo, ".perbo", "bundles", "bundles");
+    for (const [at, round] of [
+      { given: [stuck, alsoStuck, closed], open: [stuck, alsoStuck], createdAt: "2026-09-27T12:51:23.001Z" },
+      { given: [stuck, alsoStuck], open: [stuck, alsoStuck], createdAt: "2026-09-27T12:53:03.509Z" },
+    ].entries())
+      writeFileSync(
+        join(manifests, `bundle_00000000000000d${at}.json`),
+        JSON.stringify({
+          bundle_id: `bundle_00000000000000d${at}`,
+          kind: "review",
+          created_at: round.createdAt,
+          subject_id: `cv_att_000000000000000${at + 3}`,
+          ticket_id: ticketId,
+          inputs: { findings_given: round.given.join(","), findings_open: round.open.join(",") },
+          artifacts: [],
+        }),
+      );
+    const ticketPath = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ended = (note: string) => {
+      const ticket = JSON.parse(readFileSync(ticketPath, "utf8")) as { state: string; history: unknown[] };
+      writeFileSync(
+        ticketPath,
+        JSON.stringify({
+          ...ticket,
+          state: "changes_requested",
+          history: [...ticket.history, { at: "2026-09-27T12:53:04.517Z", from: ticket.state, to: "changes_requested", note }],
+        }),
+      );
+    };
+    const row = async () =>
+      (await service.snapshot()).tasks.find((task) => task.repoId === repoId && task.ticket.key === "PRB-1")!;
+    const decide = async (decisions: { findingKey: string; choice: "approach" | "ship_as_is"; answer: string }[]) =>
+      finished(
+        service,
+        (await service.request({ kind: "decide", repoId, key: "PRB-1", digest, answer: "Answers.", decisions })).id,
+      );
+
+    // While the executor is still trying them, nothing is the person's.
+    ended("the gate closed: changes_requested");
+    expect((await row()).questions).toBe(0);
+    const early = await decide([{ findingKey: stuck, choice: "ship_as_is", answer: "Ship it." }]);
+    expect(early.state).toBe("failed");
+    expect(early.error).toContain("not one the review routed to you");
+
+    // Once a run ended stalled, what the rounds left open is.
+    ended("the gate closed: remediation_stalled");
+    expect((await row()).questions).toBe(2);
+    const closedOne = await decide([{ findingKey: closed, choice: "ship_as_is", answer: "Ship it." }]);
+    expect(closedOne.state).toBe("failed");
+    expect(closedOne.error).toContain("not one the review routed to you");
+    expect(calls).toEqual([]);
+    const answered = await decide([
+      { findingKey: stuck, choice: "ship_as_is", answer: "Ship it." },
+      { findingKey: alsoStuck, choice: "approach", answer: "Assert it in a real browser." },
+    ]);
+    expect(answered.state).toBe("completed");
+    expect(calls.map((call) => call[0])).toEqual(["verdict", "verdict", "principle", "run"]);
+
+    // With no review to read, nothing on the record can be put to the person:
+    // 0, which reads as a stop, as the ticket's own page reads it.
+    rmSync(join(manifests, "bundle_00000000000000ab.json"));
+    const unread = await row();
+    expect(unread.ticket.state).toBe("changes_requested");
+    expect(unread.questions).toBe(0);
+    expect(ticketRun(await service.snapshot(), unread)).toMatchObject({ paused: false, stoppedShort: true });
+  });
+
+  it("refuses a run that owes the person's answers while the branch is at the commit judged, and starts one once a person has moved it (D-132)", async () => {
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run") {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-C", repo, ...args], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_AUTHOR_NAME: "Owen", GIT_AUTHOR_EMAIL: "o@example.com", GIT_COMMITTER_NAME: "Owen", GIT_COMMITTER_EMAIL: "o@example.com" },
+      }).trim();
+    // The branch the loop worked on, at the commit its review judged.
+    const judged = git("rev-parse", "HEAD");
+    const branch = `prb/${ticketId.replace(/^ticket_/, "")}/work`;
+    git("branch", branch, judged);
+    const stuck = "7".repeat(64);
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [],
+      review: {
+        createdAt: "2026-09-27T12:48:05.305Z",
+        body: JSON.stringify({
+          review_id: "rev_one",
+          decision: "remediable",
+          target: { head_commit: judged },
+          findings: [
+            {
+              key: stuck,
+              rule_id: "verification.execution_missing",
+              criterion_id: "ac_1",
+              status: "open",
+              routing: "remediable",
+              closure: "executor",
+              statement: "No execution result establishes the total.",
+            },
+          ],
+        }),
+      },
+    });
+    // Only the review is read here: the branch is the one the delivery record
+    // names, and `perbo inspect` reads no hand-written attempt.
+    rmSync(join(repo, ".perbo", "state", `${ticketId}.attempts.json`));
+    const ticketPath = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(ticketPath, "utf8")) as { state: string; history: unknown[]; delivery: Record<string, unknown> };
+    // The run stalled on it, on the branch its delivery record names.
+    writeFileSync(
+      ticketPath,
+      JSON.stringify({
+        ...ticket,
+        state: "changes_requested",
+        approved_at: "2026-09-27T12:00:00.000Z",
+        delivery: { ...ticket.delivery, branch },
+        history: [
+          ...ticket.history,
+          { at: "2026-09-27T12:53:04.517Z", from: ticket.state, to: "changes_requested", note: "the gate closed: remediation_stalled" },
+        ],
+      }),
+    );
+    const start = async () => {
+      const detail = await service.detail(repoId, "PRB-1");
+      return finished(
+        service,
+        (
+          await service.request({
+            kind: "run",
+            repoId,
+            key: "PRB-1",
+            digest: detail.digest,
+            approve: false,
+            publish: false,
+            resumeFrom: null,
+          })
+        ).id,
+      );
+    };
+
+    expect((await service.detail(repoId, "PRB-1")).owed.map((question) => question.id)).toEqual([stuck]);
+    const refused = await start();
+    expect(refused.state).toBe("failed");
+    expect(refused.error).toContain("PRB-1's last run finished trying and left 1 question for you to answer");
+    expect(calls).toEqual([]);
+
+    // A person commits a fix by hand on the branch: \`perbo run\` reviews
+    // that afresh, and the desktop offers and starts the same run.
+    const byHand = git("commit-tree", `${judged}^{tree}`, "-p", judged, "-m", "a fix by hand");
+    git("update-ref", `refs/heads/${branch}`, byHand);
+    expect((await service.detail(repoId, "PRB-1")).owed).toEqual([]);
+    const ran = await start();
+    expect(ran.error).toBeNull();
+    expect(calls.map((call) => call[0])).toEqual(["run"]);
+  });
+
   it("records none of a person's answers where one of them is not one the loop acts on", async () => {
     const calls: string[][] = [];
     const runner: typeof runProcess = async (binary, args, options) => {
@@ -1986,6 +2221,7 @@ describe("desktop bridge against the actual bundled CLI", () => {
     // The review the loop reads, routing the one finding each decision answers to a person.
     const body = Buffer.from(
       JSON.stringify({
+        review_id: "rev_one",
         findings: [
           { key: "a".repeat(64), rule_id: "product.retry", status: "open", routing: "escalates", statement: "Keep the retry button?" },
         ],
@@ -2860,6 +3096,54 @@ readline.createInterface({ input: process.stdin })
       options.modelCatalog = asked;
       expect(await startedOn(service, repoId, id, fake.argv)).toBe("claude-opus-5-5");
       expect(asked).not.toHaveBeenCalled();
+    });
+
+    it("is the Architect model chosen under Connections, for a planning opened before it was chosen", async () => {
+      const { service, repoId, id } = await writing();
+      await service.request({
+        kind: "saveSettings",
+        settings: {
+          ...(await service.snapshot()).settings,
+          draftingProvider: "claude-cli",
+          architectProvider: "claude-cli",
+          architectModel: "claude-fable-5-1",
+        },
+      });
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      expect((await service.request({ kind: "editingRead", id })).interviewModel).toBe("claude-fable-5-1");
+      await service.request({ kind: "interviewStop", id });
+    });
+
+    it("starts on the model and the provider of one set of defaults, whatever changes while the catalog is read", async () => {
+      // A planning with no ticket reads the defaults as they are now; the
+      // person moves them to Codex while the chat's catalog is being read.
+      // The service the catalog read reaches, once it is made.
+      const late: { service: DesktopService | null } = { service: null };
+      const made = await writing(undefined, {
+        modelCatalog: async (provider) => {
+          await late.service!.request({
+            kind: "saveSettings",
+            settings: {
+              ...(await late.service!.snapshot()).settings,
+              executorProvider: "codex-cli",
+              executorModel: "gpt-5.6-terra",
+              draftingProvider: "codex-cli",
+            },
+          });
+          return offering(["claude-opus-5-5"])(provider);
+        },
+      });
+      late.service = made.service;
+      const service = made.service;
+      await service.request({ kind: "interviewStart", repoId: made.repoId, id: made.id });
+      await running(service, made.id);
+      const started = await service.request({ kind: "editingRead", id: made.id });
+      expect({ model: started.interviewModel, provider: started.interviewProvider }).toEqual({
+        model: "claude-opus-5-5",
+        provider: "claude",
+      });
+      await service.request({ kind: "interviewStop", id: made.id });
     });
 
     it("keeps the planning's executor model where it drafts on Codex, and reads no catalog", async () => {
@@ -4655,7 +4939,33 @@ describe("UI v2 host behaviour", () => {
     setBattery(false);
     service.powerChanged();
     expect(holds.at(-1)).toEqual({ hold: true, displaySleep: false });
-    setTicketState(repo, "PRB-1", "changes_requested");
+    const { ticket_id } = setTicketState(repo, "PRB-1", "changes_requested");
+    // The review the run left, putting one question to the person: a
+    // decision is what the notice says only where there is one (D-132).
+    const review = Buffer.from(
+      JSON.stringify({
+        review_id: "rev_one",
+        decision: "escalate",
+        findings: [
+          { key: "a".repeat(64), rule_id: "product.retry", status: "open", routing: "escalates", statement: "Keep the retry button?" },
+        ],
+      }),
+    );
+    const reviewSha = createHash("sha256").update(review).digest("hex");
+    mkdirSync(join(repo, ".perbo", "bundles", "objects"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "bundles", "bundles"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "bundles", "objects", reviewSha), review);
+    writeFileSync(
+      join(repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ac.json"),
+      JSON.stringify({
+        bundle_id: "bundle_00000000000000ac",
+        kind: "review",
+        created_at: "2026-09-10T10:00:00.000Z",
+        subject_id: "rev_one",
+        ticket_id,
+        artifacts: [{ name: "review.json", sha256: reviewSha, bytes: review.length, retained: true }],
+      }),
+    );
     release();
     await finished(service, job.id);
     await vi.waitFor(() =>
@@ -4711,6 +5021,9 @@ describe("UI v2 host behaviour", () => {
     expect(ended.state).toBe(state);
     expect(ended.outcome).toBe(state === "completed" ? outcome : undefined);
     expect(ended.error === null).toBe(state === "completed");
+    // The log is what the run printed as it went; its result is the job's own.
+    expect(ended.log).toBe("  ceilings commands none\n  egress allow-list: registry.npmjs.org");
+    expect(ended.result).toMatchObject({ outcome });
   });
 
   it("opens the worktree on the branch a ticket already has, whatever its key would derive", async () => {
@@ -6124,7 +6437,7 @@ readline.createInterface({ input: process.stdin })
       const record = JSON.parse(readFileSync(made.ticket, "utf8")) as Record<string, unknown>;
       writeFileSync(made.ticket, JSON.stringify({ ...record, state: "pr_open" }));
       await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
-        "PRB-1 has a pull request open",
+        "PRB-1's pull request is open",
       );
       expect(existsSync(made.ticket), "the ticket").toBe(true);
       expect(existsSync(made.spec), "the spec its plan is read against").toBe(true);
@@ -6426,6 +6739,13 @@ describe("a stopped run's ticket", () => {
     expect(opened.nodes).toBeGreaterThanOrEqual(0);
     const session = await made.service.request({ kind: "editingRead", id: opened.sessionId });
     expect(session.key).toBe("PRB-2");
+    // Landed where it is ready to confirm, a flat plan on its contract, which
+    // is where the planning reopens and a tab from the start, reached at the
+    // state it was drafted at (D-138).
+    const listed = (await made.service.request({ kind: "drafts" })).find((draft) => draft.id === opened.sessionId)!;
+    const row = (await made.service.snapshot()).tasks.find((task) => task.ticket.key === "PRB-2")!;
+    expect(listed.lastPane).toBe("contract");
+    expect(listed.confirmed).toBe(contractStateOf(listed, row.ticket.updated_at));
     // The stopped ticket is gone, and everything recorded after its contract
     // with it; another ticket's evidence was never asked about.
     for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json"])
@@ -6443,6 +6763,28 @@ describe("a stopped run's ticket", () => {
     ) as { state: string; admission: { spec: { path: string } } };
     expect(minted.state).toBe("plan_review");
     expect(minted.admission.spec.path).toBe(spec);
+  });
+
+  it("opens the planning over the plan drafted again where its landing cannot be recorded", async () => {
+    let repo = "";
+    const made = await stopped(drafting(() => repo));
+    repo = made.repo;
+    const { ContractEditing } = await import("../shared/contract-editing.js");
+    const refused = vi.spyOn(ContractEditing.prototype, "landDrafted").mockImplementation(() => {
+      throw new Error("the profile could not be written");
+    });
+    // The planning stands and the reply names it, so the page lands on it.
+    let asked = 0;
+    const opened = await made.service
+      .request({ kind: "replan", repoId: made.repoId, key: "PRB-1" })
+      .finally(() => {
+        asked = refused.mock.calls.length;
+        refused.mockRestore();
+      });
+    expect(asked).toBe(1);
+    expect(opened).toMatchObject({ key: "PRB-2", nodes: 0 });
+    const session = await made.service.request({ kind: "editingRead", id: opened.sessionId });
+    expect(session).toMatchObject({ key: "PRB-2", phase: "editing", lastPane: null, confirmed: null });
   });
 
   it("records a basic plan drafted again as read by its drafting, and a criterion edited after it is what the confirm's reading judges (D-138)", async () => {
@@ -6682,7 +7024,7 @@ describe("a stopped run's ticket", () => {
     writeFileSync(made.at, JSON.stringify({ ...held, state: "pr_open" }));
     await expect(
       made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" }),
-    ).rejects.toThrow(/has a pull request open, and that is a record this machine does not own/);
+    ).rejects.toThrow(/pull request is open, and that is a record this machine does not own/);
     expect(existsSync(join(made.repo, ".perbo", "tickets", "PRB-1.json"))).toBe(true);
     expect(existsSync(join(made.repo, "specs", slug))).toBe(true);
     // Merged on GitHub, and the work is the person's to delete again.
@@ -6755,6 +7097,126 @@ describe("a stopped run's ticket", () => {
     expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
   });
 
+  describe("Plan it again where the loop ended on a verdict (D-132)", () => {
+    /** PRB-1 as a run that closed the gate left it, its review asking the person `asks`. */
+    async function closedGate(runner: typeof runProcess, asks: boolean) {
+      const made = await stopped(runner);
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; ticket_id: string };
+      writeFileSync(made.at, JSON.stringify({ ...held, state: "changes_requested" }));
+      const body = Buffer.from(
+        JSON.stringify({
+          review_id: "rev_one",
+          decision: asks ? "escalate" : "remediable",
+          findings: [
+            {
+              key: "a".repeat(64),
+              rule_id: "product.retry",
+              status: asks ? "open" : "resolved",
+              routing: asks ? "escalates" : "remediable",
+              statement: "Keep the retry button?",
+            },
+          ],
+        }),
+      );
+      const sha256 = createHash("sha256").update(body).digest("hex");
+      mkdirSync(join(made.repo, ".perbo", "bundles", "objects"), { recursive: true });
+      writeFileSync(join(made.repo, ".perbo", "bundles", "objects", sha256), body);
+      writeFileSync(
+        join(made.repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ab.json"),
+        JSON.stringify({
+          bundle_id: "bundle_00000000000000ab",
+          kind: "review",
+          created_at: "2026-09-10T10:00:00.000Z",
+          subject_id: "rev_one",
+          ticket_id: held.ticket_id,
+          artifacts: [{ name: "review.json", sha256, bytes: body.length, retained: true }],
+        }),
+      );
+      return made;
+    }
+
+    it("drafts the plan again where the record asks the person nothing", async () => {
+      let repo = "";
+      const made = await closedGate(drafting(() => repo), false);
+      repo = made.repo;
+      const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+      expect(opened.key).toBe("PRB-2");
+      expect(existsSync(made.at), "the stopped ticket").toBe(false);
+    });
+
+    it("is refused where the record still asks the person, before anything is deleted", async () => {
+      const made = await closedGate(async (binary, args, options) => runProcess(binary, args, options), true);
+      await expect(
+        made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+      ).rejects.toThrow(/PRB-1 is changes_requested, which is past re-drafting/);
+      expect(existsSync(made.at), "the ticket").toBe(true);
+    });
+  });
+
+  describe("Plan it again and delete where an escalated run's pull request is open (D-129)", () => {
+    it("refuses both before anything is deleted or drafted, naming the pull request", async () => {
+      const seen: string[][] = [];
+      const made = await stopped(async (binary, args, options) => {
+        seen.push(args.slice(1, args.indexOf("--repo")));
+        return runProcess(binary, args, options);
+      });
+      // An escalated run that published (D-065): the ticket waits at
+      // changes_requested, and its pull request is open on GitHub.
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; delivery: Record<string, unknown> };
+      writeFileSync(
+        made.at,
+        JSON.stringify({
+          ...held,
+          state: "changes_requested",
+          delivery: { ...held.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+        }),
+      );
+      seen.length = 0;
+      const refusal =
+        "PRB-1's pull request #15 is open, and that is a record this machine does not own. Close or merge it on GitHub, " +
+        "then Refresh from GitHub; the work can be deleted or planned again after that.";
+      await expect(made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(refusal);
+      await expect(made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(refusal);
+      expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
+      expect(existsSync(made.at), "the ticket").toBe(true);
+      expect(existsSync(made.attempts), "the attempts record").toBe(true);
+      expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(true);
+    });
+
+    it("reads the pull request again on Refresh from GitHub, and deletes the work once it reads closed", async () => {
+      const synced: string[][] = [];
+      let at = "";
+      const made = await stopped(async (binary, args, options) => {
+        const command = args.slice(1, args.indexOf("--repo"));
+        if (command[0] !== "sync") return runProcess(binary, args, options);
+        synced.push(command);
+        // What `perbo sync` records where `gh` reports the pull request closed:
+        // the delivery record, and the ticket where it waits.
+        const read = JSON.parse(readFileSync(at, "utf8")) as { delivery: Record<string, unknown> };
+        writeFileSync(at, JSON.stringify({ ...read, delivery: { ...read.delivery, state: "closed" } }));
+        return { code: 0, stdout: "", stderr: "", cancelled: false };
+      });
+      at = made.at;
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string; delivery: Record<string, unknown> };
+      writeFileSync(
+        made.at,
+        JSON.stringify({
+          ...held,
+          state: "changes_requested",
+          delivery: { ...held.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
+        }),
+      );
+      await expect(made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" })).rejects.toThrow(
+        /PRB-1's pull request #15 is open/,
+      );
+      const sync = await made.service.request({ kind: "sync", repoId: made.repoId, key: "PRB-1" });
+      expect((await finished(made.service, sync.id)).state).toBe("completed");
+      expect(synced).toEqual([["sync", "PRB-1"]]);
+      await made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" });
+      expect(existsSync(made.at), "the ticket").toBe(false);
+    });
+  });
+
   describe("Plan it again where the pull request is open", () => {
     it("is refused before anything is deleted or drafted, because that ticket is not deleted", async () => {
       const seen: string[][] = [];
@@ -6767,7 +7229,7 @@ describe("a stopped run's ticket", () => {
       seen.length = 0;
       await expect(
         made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
-      ).rejects.toThrow(/PRB-1 is pr_open, which is past re-drafting/);
+      ).rejects.toThrow(/PRB-1's pull request is open, and that is a record this machine does not own/);
       expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
       expect(existsSync(made.at), "the ticket").toBe(true);
       expect(existsSync(made.attempts), "the attempts record").toBe(true);
@@ -7117,6 +7579,8 @@ describe("usage: who is connected, and why a provider has no windows", () => {
       id: "opencode",
       name: "OpenCode",
       role: null,
+      connection: "cli",
+      about: null,
       connected: true,
       plan: null,
       windows: null,
@@ -7301,5 +7765,149 @@ describe("the merge press on a retained branch", () => {
     expect(job.state).toBe("failed");
     expect(job.error).toBe(refusal);
     expect(opened).toEqual([]);
+  });
+});
+
+/**
+ * The defaults for new tasks chosen under Connections are what a new planning
+ * drafts with and what the ticket it admits runs on, whatever model the
+ * repository's `.perbo/config.json` names: that file's `model` is what a run
+ * takes where the person chose nothing (D-093).
+ */
+describe("the defaults for new tasks", () => {
+  it("reach a planning opened before they changed, and the ticket it admits, over the repository's own model", async () => {
+    let repo = "";
+    const asked: string[][] = [];
+    const made = fixture(drafting(() => repo, asked));
+    repo = made.repo;
+    const { service } = made;
+    mkdirSync(join(repo, ".perbo"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ agent_binary: "claude", model: "claude-opus-5", reviewer_provider: "claude-cli" }));
+    // A planning opened on the defaults as they were, before the person
+    // changed them under Connections.
+    const registered = await service.registerRepository(repo);
+    const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
+    expect(opened.form.models).toMatchObject({ executorModel: "claude-opus-5", architectModel: null });
+    const settings = (await service.snapshot()).settings;
+    await service.request({
+      kind: "saveSettings",
+      settings: {
+        ...settings,
+        executorProvider: "claude-cli",
+        executorModel: "claude-opus-5-5",
+        reviewerProvider: "claude-cli",
+        reviewerModel: "claude-opus-5-5",
+        draftingProvider: "claude-cli",
+        architectProvider: "claude-cli",
+        architectModel: "claude-fable-5-1",
+      },
+    });
+    const session = await service.request({ kind: "editingRead", id: opened.id });
+    expect(session.form.models).toMatchObject({ executorModel: "claude-opus-5-5", reviewerModel: "claude-opus-5-5", architectModel: "claude-fable-5-1" });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "Activation email",
+      sections: {
+        outcome: "New users receive an activation email within a minute.",
+        requirements: "- A signup queues exactly one email.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+    });
+    const before = await service.request({ kind: "editingRead", id: session.id });
+    const submitted = await service.request({
+      kind: "editingSubmit",
+      id: session.id,
+      revision: before.revision,
+      operationId: randomUUID(),
+      intent: "generate",
+    });
+    await finished(service, submitted.operation!.jobId!);
+    let key: string | null = null;
+    for (let count = 0; count < 300 && key === null; count++) {
+      key = (await service.request({ kind: "editingRead", id: session.id })).key;
+      if (key === null) await delay(10);
+    }
+    expect(key).not.toBeNull();
+    // Drafted with the person's executor model, not the repository's.
+    expect(asked[0]).toContain("claude-opus-5-5");
+    // And the ticket the contract page reads its models from carries them.
+    expect((await service.snapshot()).taskModels?.[`${registered.id}:${key}`]).toMatchObject({
+      executorModel: "claude-opus-5-5",
+      reviewerModel: "claude-opus-5-5",
+      architectModel: "claude-fable-5-1",
+    });
+    // Once there is a ticket, the models are the ticket's own: a later change
+    // of the defaults reaches neither it nor the planning over it.
+    await service.request({
+      kind: "saveSettings",
+      settings: { ...(await service.snapshot()).settings, executorModel: "claude-sonnet-5", reviewerModel: "claude-sonnet-5" },
+    });
+    expect((await service.request({ kind: "editingRead", id: opened.id })).form.models.executorModel).toBe("claude-opus-5-5");
+    expect((await service.snapshot()).taskModels?.[`${registered.id}:${key}`]?.executorModel).toBe("claude-opus-5-5");
+  });
+
+  it("leave the ticket on the models it was admitted with when they change while the draft runs", async () => {
+    let repo = "";
+    const late: { service: DesktopService | null } = { service: null };
+    const draft = drafting(() => repo);
+    // The person changes the defaults under Connections while the plan is
+    // being drafted: after the press, before the ticket is read back.
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "admit" && args.includes("--from-spec"))
+        await late.service!.request({
+          kind: "saveSettings",
+          settings: { ...(await late.service!.snapshot()).settings, executorModel: "claude-sonnet-5", reviewerModel: "claude-sonnet-5" },
+        });
+      return draft(binary, args, options);
+    };
+    const made = fixture(runs);
+    repo = made.repo;
+    late.service = made.service;
+    const service = made.service;
+    await service.request({
+      kind: "saveSettings",
+      settings: { ...(await service.snapshot()).settings, executorProvider: "claude-cli", executorModel: "claude-opus-5-5", reviewerProvider: "claude-cli", reviewerModel: "claude-opus-5-5", draftingProvider: "claude-cli" },
+    });
+    const registered = await service.registerRepository(repo);
+    const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: opened.id,
+      repoId: registered.id,
+      title: "Activation email",
+      sections: { outcome: "New users receive an activation email within a minute.", requirements: "- A signup queues exactly one email.", no_gos: "", rabbit_holes: "", notes: "" },
+    });
+    const before = await service.request({ kind: "editingRead", id: opened.id });
+    const submitted = await service.request({ kind: "editingSubmit", id: opened.id, revision: before.revision, operationId: randomUUID(), intent: "generate" });
+    await finished(service, submitted.operation!.jobId!);
+    let drafted = await service.request({ kind: "editingRead", id: opened.id });
+    for (let count = 0; count < 300 && !drafted.operation?.reconciled; count++) {
+      await delay(10);
+      drafted = await service.request({ kind: "editingRead", id: opened.id });
+    }
+    const key = drafted.key!;
+    expect((await service.snapshot()).settings.executorModel, "the defaults did change").toBe("claude-sonnet-5");
+    expect(drafted.form.models.executorModel, "the planning holds the ticket's models").toBe("claude-opus-5-5");
+    // The next write from the planning — its contract opened and a criterion
+    // changed and written in — carries them, so the ticket keeps what it was
+    // admitted with.
+    drafted = await service.request({ kind: "editingOpen", target: { kind: "session", id: opened.id } });
+    const saved = await service.request({
+      kind: "editingSave",
+      id: opened.id,
+      revision: drafted.revision,
+      repoId: registered.id,
+      form: { ...drafted.form, draft: { ...drafted.form.draft, outcome: "New users receive one activation email within a minute." } },
+    });
+    const compiled = await service.request({ kind: "editingSubmit", id: opened.id, revision: saved.revision, operationId: randomUUID(), intent: "compile" });
+    await finished(service, compiled.operation!.jobId!);
+    expect((await service.snapshot()).taskModels?.[`${registered.id}:${key}`]).toMatchObject({
+      executorModel: "claude-opus-5-5",
+      reviewerModel: "claude-opus-5-5",
+    });
   });
 });

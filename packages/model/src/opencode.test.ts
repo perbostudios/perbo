@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { OPENCODE_SESSION_RETRY_MS } from "@perbo/contracts";
 import { ProviderError } from "./failure.js";
 import { openCodeCliModel, openCodeStructured } from "./opencode.js";
 import { fakeOpenCodeReviewer } from "./test-support/fake-opencode.js";
@@ -55,8 +56,10 @@ describe("the opencode-cli reviewer transport", () => {
       expect(started.argv).toEqual(["acp"]);
       expect(started.env["OPENCODE_DISABLE_PROJECT_CONFIG"]).toBe("1");
       expect(JSON.parse(started.env["OPENCODE_CONFIG_CONTENT"]!).permission["*"]).toBe("deny");
-      // One session, both turns in it, the model asked for selected.
-      expect(lines.filter((line) => line["method"] === "session/new")).toHaveLength(1);
+      // One scratch session for the catalogue, deleted, then the review's
+      // own, both turns in it, the model asked for selected.
+      expect(lines.filter((line) => line["method"] === "session/new")).toHaveLength(2);
+      expect(lines.filter((line) => line["method"] === "session/delete")).toHaveLength(1);
       expect(lines.filter((line) => line["method"] === "session/prompt")).toHaveLength(2);
       expect(model.provider).toBe("opencode-cli");
       expect(model.unreported_cost_basis).toBe("unavailable");
@@ -113,6 +116,79 @@ describe("the opencode-cli reviewer transport", () => {
       await expect(
         openCodeCliModel({ submitSchema, binary: other.binary, modelId: "opencode/big-pickle" }).turn(request()),
       ).rejects.toThrow("instead of registered opencode/big-pickle");
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the review's session and OpenCode's catalogue", () => {
+  it(
+    "opens the review's session only once a scratch session's catalogue offers the model, so a stale first snapshot cannot refuse it",
+    async () => {
+      const fake = fakeOpenCodeReviewer([{ text: verdict }], { staleSnapshots: 1 });
+      const turn = await openCodeCliModel({ submitSchema, binary: fake.binary, modelId: "opencode/big-pickle" }).turn(request());
+      expect(turn.toolCalls.map((call) => call.name)).toEqual(["submit_review"]);
+      const { lines } = logOf(fake.log);
+      const opened = lines.filter((line) => line["method"] === "session/new").map((line) => (line["params"] as { cwd: string }).cwd);
+      expect(opened).toHaveLength(3);
+      expect(opened[0]).toContain("catalogue-");
+      expect(opened[1]).toContain("catalogue-");
+      expect(opened[2]!.endsWith("/scratch")).toBe(true);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "asks again for a session OpenCode refused while its catalogue was still arriving, the catalogue's or the review's",
+    async () => {
+      // The first scratch session is refused, the second offers the model, and
+      // the review's own is refused once before it opens.
+      const fake = fakeOpenCodeReviewer([{ text: verdict }], { refuseSessions: [1, 3] });
+      const turn = await openCodeCliModel({ submitSchema, binary: fake.binary, modelId: "opencode/big-pickle" }).turn(request());
+      expect(turn.toolCalls.map((call) => call.name)).toEqual(["submit_review"]);
+      const opened = logOf(fake.log)
+        .lines.filter((line) => line["method"] === "session/new")
+        .map((line) => (line["params"] as { cwd: string }).cwd);
+      expect(opened).toHaveLength(4);
+      expect(opened.slice(0, 2).every((cwd) => cwd.includes("catalogue-"))).toBe(true);
+      expect(opened.slice(2).every((cwd) => cwd.endsWith("/scratch"))).toBe(true);
+    },
+    // Spawns the fake, and waits OPENCODE_SESSION_RETRY_MS before each of the two sessions asked again.
+    SPAWN_TEST_TIMEOUT_MS + 2 * OPENCODE_SESSION_RETRY_MS,
+  );
+});
+
+describe("an OpenCode that stops", () => {
+  it(
+    "fails the review with why OpenCode stopped, as soon as it stops opening the catalogue's session or the review's",
+    async () => {
+      // The first session is the catalogue's scratch one, the second the review's own.
+      for (const nth of [1, 2]) {
+        const fake = fakeOpenCodeReviewer([{ text: verdict }], { exit: { method: "session/new", nth, answered: false } });
+        const started = Date.now();
+        await expect(openCodeCliModel({ submitSchema, binary: fake.binary }).turn(request())).rejects.toThrow(
+          "OpenCode exited before the review completed (3): opencode crashed",
+        );
+        // No session asked for after the process was gone.
+        expect(logOf(fake.log).lines.filter((line) => line["method"] === "session/new")).toHaveLength(nth);
+        expect(Date.now() - started).toBeLessThan(5_000);
+      }
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a request made after OpenCode stopped at once, with why it stopped, rather than wait out its timeout",
+    async () => {
+      const fake = fakeOpenCodeReviewer([{ text: read }, { text: verdict }], {
+        exit: { method: "session/prompt", nth: 1, answered: true },
+      });
+      const model = openCodeCliModel({ submitSchema, binary: fake.binary });
+      expect((await model.turn(request())).toolCalls.map((call) => call.name)).toEqual(["read_file"]);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const started = Date.now();
+      await expect(model.turn(request())).rejects.toThrow("OpenCode exited before the review completed (3): opencode crashed");
+      expect(Date.now() - started).toBeLessThan(5_000);
     },
     SPAWN_TEST_TIMEOUT_MS,
   );

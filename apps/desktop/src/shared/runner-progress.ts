@@ -145,6 +145,34 @@ export function spokenWords(log: string): { speaker: Speaker; words: string }[] 
   });
 }
 
+/** The stages that begin an attempt: its execution, a refinement round, or a round resolving a conflict with the base. */
+export const ATTEMPT_STARTS: readonly RunnerStage["kind"][] = ["executing", "remediation", "conflict"];
+
+/**
+ * The agents' words out of a run's log, by the attempt each was said in:
+ * `before` holds the words said before the first attempt the log saw begin,
+ * which are the end of an attempt whose start the log's tail has cut, and
+ * `attempts` each attempt the log saw begin, oldest first, with the stage it
+ * began on and the words said in it.
+ */
+export function spokenByAttempt(log: string): {
+  before: { speaker: Speaker; words: string }[];
+  attempts: { start: RunnerStage; said: { speaker: Speaker; words: string }[] }[];
+} {
+  const before: { speaker: Speaker; words: string }[] = [];
+  const attempts: { start: RunnerStage; said: { speaker: Speaker; words: string }[] }[] = [];
+  for (const line of log.split("\n").map((each) => each.trim())) {
+    const spoken = readSpoken(line);
+    if (spoken !== null) {
+      (attempts.at(-1)?.said ?? before).push(spoken);
+      continue;
+    }
+    const stage = readStage(line);
+    if (stage !== null && ATTEMPT_STARTS.includes(stage.kind)) attempts.push({ start: stage, said: [] });
+  }
+  return { before, attempts };
+}
+
 /**
  * What a run has done so far, from the last tally line its log holds: the
  * runner's own counts and the providers' usage, each over the whole run, so the

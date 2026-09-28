@@ -85,3 +85,14 @@ describe("the loop page, live from the run's log and rebuilt from its records", 
     );
   });
 });
+
+describe("the declines each attempt recorded", () => {
+  it("carry to the page by key, which the stopped page reads an escalation's cause off (D-065)", () => {
+    const report = structuredClone(captured.report) as { attempts: Array<Record<string, unknown>> };
+    const declined = "a".repeat(64);
+    report.attempts.at(-1)!["declines"] = [{ finding_key: declined, reason: "no practice determines it" }];
+    const attempts = attemptViews(ReportSchema.parse(report));
+    expect(attempts.at(-1)!.declines).toEqual([declined]);
+    expect(attempts.slice(0, -1).every((attempt) => attempt.declines?.length === 0)).toBe(true);
+  });
+});

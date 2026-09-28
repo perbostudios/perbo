@@ -14,8 +14,15 @@ import { openDrafts, problemsHoldApproval, titleChanged, turnHoldsApproval, turn
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, calledOffEntry, calledOffPrefix, isArchivable, notArchivable, notCallable } from "../shared/archive.js";
 import { heldTicket, isLive, isRun } from "../shared/jobs.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
-import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
+import { questionsOnRecord } from "../shared/decisions.js";
+import {
+  ANOTHER_PLANNING_HOLDS,
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
+  deletePullRequestOpen,
+  pullRequestOpen,
+} from "../shared/discard.js";
+import { ANTHROPIC_API_ABOUT, HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import { untilItRuns } from "../shared/reading-retry.js";
 import { egressSettledLine } from "@perbo/contracts/browser";
 import { pendingEgressQuestion } from "../shared/egress-question.js";
@@ -484,6 +491,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   replan: async (request) => {
     const { ticket } = ticketRow(request.key);
+    // A ticket whose pull request is open is not deleted, so it is not planned
+    // again either, as the host refuses it (D-129).
+    if (pullRequestOpen(ticket)) throw new Error(deletePullRequestOpen(ticket));
     // The spec the stopped plan was drafted from, in the words the CLI refuses
     // in, because this is the same question `admit --start-over` asks and a
     // person should not meet two sentences for one answer.
@@ -505,8 +515,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // reachable way to press this with nothing to draft from.
     if (specFiles()[named] === undefined) throw new Error(`no spec at ${spec}`);
     // And only beside a spent record, in `admit`'s own words: a spec whose
-    // ticket is still live has its plan.
-    if (!["failed", "plan_invalid", "cancelled"].includes(ticket.state))
+    // ticket is still live has its plan. A ticket in `changes_requested` whose
+    // record asks the person nothing is spent too, as the host reads it (D-132).
+    const unanswerable =
+      ticket.state === "changes_requested" && questionsOnRecord(detail(request.key)).length === 0;
+    if (!unanswerable && !["failed", "plan_invalid", "cancelled"].includes(ticket.state))
       throw new Error(
         `${request.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
           `${request.key} is ${ticket.state}, which is past re-drafting, so this spec has its plan`,
@@ -555,6 +568,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // unchanged reads nothing again (D-138).
     const read = draftedReading(editing.read(opened.id));
     if (read !== null) editing.recordRead(opened.id, read);
+    // Landed where the plan is ready to confirm, with its contract a tab from
+    // the start, as the host lands it (D-138).
+    editing.landDrafted(opened.id, sampleSpecText, drafted.updated_at);
     return { sessionId: opened.id, key: drafted.key, nodes: opened.nodes };
   },
   generatePlan: (request, owner) =>
@@ -590,6 +606,12 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket });
         draftFromSpec(ticket.key, markdown, session.specSlug, editing.read(request.id));
         job.resultKey = ticket.key;
+        // The ticket runs on the models the planning drafted with, as the host
+        // records them on the ticket it admits.
+        if (request.models) {
+          snapshot.taskModels = { ...snapshot.taskModels, [request.repoId + ":" + ticket.key]: request.models };
+          emitPreferences();
+        }
       },
       1400,
       owner,
@@ -795,17 +817,17 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     readAt: new Date().toISOString(),
     ledger: { month: new Date().toISOString().slice(0, 7), spentMicros: 24_500_000, pricedAttempts: 41, unpricedAttempts: 0, ticketsRun: 34, ticketsMerged: 18, stoppedShort: 2, averageMergedMicros: 1_380_000 },
     providers: [
-      { id: "claude", name: "Claude Code", role: "default executor", connected: true, plan: "Max", detail: "Read from Claude Code.", windows: [
+      { id: "claude", name: "Claude Code", role: "default executor", connection: "cli", about: null, connected: true, plan: "Max", detail: "Read from Claude Code.", windows: [
         { label: "5-hour limit", usedPercent: 78, resetsAt: new Date(Date.now() + 108 * 60_000).toISOString() },
         { label: "Weekly · all models", usedPercent: 41, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
         { label: "Weekly · Fable", usedPercent: 12, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
       ] },
-      { id: "codex", name: "Codex", role: "default reviewer", connected: true, plan: "Pro", detail: "Read from the Codex app-server.", windows: [
+      { id: "codex", name: "Codex", role: "default reviewer", connection: "cli", about: null, connected: true, plan: "Pro", detail: "Read from the Codex app-server.", windows: [
         { label: "5-hour limit", usedPercent: 23, resetsAt: new Date(Date.now() + 133 * 60_000).toISOString() },
         { label: "Weekly · all models", usedPercent: 18, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
       ] },
-      { id: "opencode", name: "OpenCode", role: null, connected: true, plan: null, windows: null, detail: "OpenCode reports what each run cost; it reports no plan window." },
-      { id: "anthropic", name: "Anthropic API", role: null, connected: false, plan: null, windows: null, detail: "No API key in the app environment." },
+      { id: "opencode", name: "OpenCode", role: null, connection: "cli", about: null, connected: true, plan: null, windows: null, detail: "OpenCode reports what each run cost; it reports no plan window." },
+      { id: "anthropic", name: "Anthropic API", role: null, connection: "api", about: ANTHROPIC_API_ABOUT, connected: false, plan: null, windows: null, detail: "No API key in the app environment." },
     ],
     notes: ["Sample figures. The desktop reads its own records."],
   }),
@@ -1011,11 +1033,16 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   sync: (request) =>
     job("sync", request.repoId, request.key, () => {
       const { ticket } = ticketRow(request.key);
-      if (ticket.delivery.state === "open") {
+      if (ticket.delivery.state !== "open") return;
+      // The sample's pull request is merged where the ticket waits at
+      // `pr_open`, and was closed on GitHub where an escalated run published
+      // it and the ticket waits elsewhere (D-129): the record says so, and the
+      // ticket stays where it is.
+      if (ticket.state === "pr_open") {
         moveTicket(ticket, [{ to: "merged", note: "The pull request was merged." }]);
         ticket.delivery.state = "merged";
-        ticket.delivery.observed_at = new Date().toISOString();
-      }
+      } else ticket.delivery.state = "closed";
+      ticket.delivery.observed_at = new Date().toISOString();
     }),
   // The merge press on a retained branch: pushed and its pull request opened
   // as the host does it, refused as the CLI refuses it

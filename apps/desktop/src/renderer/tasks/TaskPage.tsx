@@ -40,6 +40,13 @@ export function TaskPage({
   // settles, rather than turning into the read that no longer finds it.
   const deleting = useCreate().deleting.has(deletes.ticket(repoId, taskKey));
   const projection = query.data ? projectTicket(workspace, { repoId, ticket: query.data.ticket }, query.data, view) : null;
+  // And keeps the screen it showed as the delete began: the reads meanwhile
+  // say the repository is being read again, then that the ticket is gone, and
+  // a stopped run read that way is a result to review, whose page would drop
+  // the Plan it again under way and offer the stopped page's ways out again.
+  const kept = useRef<Exclude<TaskView, "auto"> | null>(null);
+  if (!deleting) kept.current = projection?.screen ?? null;
+  const shown = deleting && kept.current !== null ? kept.current : projection?.screen;
   const show = (view: TaskView): void =>
     navigate({ page: "task", repoId, key: taskKey, view });
   const resultReady = projection?.resultReady;
@@ -181,7 +188,7 @@ export function TaskPage({
   return (
     <>
       {stale}
-      {taskScreen(projection!.screen, context)}
+      {taskScreen(shown!, context)}
     </>
   );
 }

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "../shell/App.js";
 import { bridge } from "../workspace/index.js";
-import type { Provider, Request } from "../../shared/protocol.js";
+import { ANTHROPIC_API_ABOUT, type Provider, type Request } from "../../shared/protocol.js";
 
 let client: QueryClient;
 beforeEach(() => {
@@ -103,4 +103,21 @@ it("offers OpenCode in the pickers for the roles its connection offers, and grey
   fireEvent.click(screen.getByRole("button", { name: "Change reviewer model" }));
   fireEvent.click(screen.getByRole("combobox", { name: "reviewer provider" }));
   expect((await screen.findByRole("option", { name: "OpenCode · CLI" })).getAttribute("aria-disabled")).toBe("true");
+});
+
+it("draws no connection dot on an API row, and says what the row is before how its key is supplied", async () => {
+  mount("usage");
+  const api = (await screen.findByText("Anthropic API", { selector: ".card-heading strong" }, { timeout: 20_000 })).closest("section")!;
+  // Nothing probes an API key, so a dot there would say nothing.
+  expect(api.querySelector(".connection-dot")).toBeNull();
+  const lines = [...api.querySelectorAll("p")].map((line) => line.textContent);
+  expect(lines).toEqual([ANTHROPIC_API_ABOUT, "No API key in the app environment."]);
+  expect(ANTHROPIC_API_ABOUT).toBe(
+    "A direct Anthropic API key, offered for the reviewer only and billed per token under the per-token cost caps, separate from the Claude Code login the executor, reviewer and Architect run on.",
+  );
+  // A CLI's sign-in is probed, and its row keeps the dot.
+  for (const name of ["Claude Code", "Codex", "OpenCode"]) {
+    const cli = screen.getByText((text) => text.startsWith(name), { selector: ".card-heading strong" }).closest("section")!;
+    expect(cli.querySelector(".connection-dot"), name).not.toBeNull();
+  }
 });

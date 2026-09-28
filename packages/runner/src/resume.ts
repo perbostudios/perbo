@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BundleIdSchema, CommitShaSchema, type ResumedFrom, type RunBundle } from "@perbo/contracts";
+import { BundleIdSchema, CommitShaSchema, sameCommit, type ResumedFrom, type RunBundle } from "@perbo/contracts";
 import { git } from "@perbo/workspace";
 import { BundleStore } from "./bundle.js";
 
@@ -91,26 +91,6 @@ export type ResumeOutcome =
    */
   | { state: "dropped"; at: string; reason: string };
 
-/**
- * Whether two recorded commit shas name the same commit.
- *
- * A contract may pin an abbreviated sha and a bundle records the resolved one,
- * so equality alone would refuse a resume that is perfectly in order. Git's own
- * abbreviation rule — a prefix identifies one commit in the repository — is
- * what makes the prefix comparison the right one rather than a loosening.
- *
- * The rule holds only for a prefix long enough to be an abbreviation. Git will
- * not print one shorter than seven characters, and `CommitShaSchema` is where
- * this repository already states that floor; anything below it is a string that
- * happens to start the same way, and `0` or `00` would match half the commits
- * in a repository. Neither side is compared until it has passed that schema, so
- * a bundle recording a truncated base is not silently read as a match.
- */
-export function sameCommit(one: string, other: string): boolean {
-  if (!CommitShaSchema.safeParse(one).success) return false;
-  if (!CommitShaSchema.safeParse(other).success) return false;
-  return one.startsWith(other) || other.startsWith(one);
-}
 
 /** Who the prior attempt was and how it ended, as every resume sentence opens. */
 function resumedFromClause(source: ResumeSource, tense: "ed" | "ing"): string {

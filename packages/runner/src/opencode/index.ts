@@ -522,7 +522,9 @@ export async function runOpenCodeAgent(request: AgentRequest): Promise<AgentResu
     if (!stopped) {
       const detail = redact(error instanceof Error ? error.message : String(error));
       termination = {
-        reason: /429|5\d\d|rate.limit|usage.limit|connection|timed out|No models are available|Internal service failure/i.test(detail)
+        // `model not found` is OpenCode's catalogue not having settled on the
+        // model in time (`awaitOpenCodeModel`), which a later attempt can clear.
+        reason: /429|5\d\d|rate.limit|usage.limit|connection|timed out|No models are available|Internal service failure|model not found/i.test(detail)
           ? "transport_unavailable"
           : "agent_error",
         detail,

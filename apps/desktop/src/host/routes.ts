@@ -13,7 +13,13 @@ import { draftedReading, nameSpecAfterRename, saveSpec, specPath, specTexts, spe
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
-import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_TICKET_COMMAND } from "../shared/discard.js";
+import {
+  ANOTHER_PLANNING_HOLDS,
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_TICKET_COMMAND,
+  deletePullRequestOpen,
+  pullRequestOpen,
+} from "../shared/discard.js";
 import {
   deleteDraftedFromSpec,
   deleteSpec,
@@ -22,8 +28,8 @@ import {
 } from "./tickets/work.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
-import { objectsPath } from "./repository/layout.js";
-import { findingsOnRecord } from "./records.js";
+import { objectsPath, verdictsPath } from "./repository/layout.js";
+import { questionsOnFiles, reviewOnRecord } from "./records.js";
 import { forgetCalledOff, recordCalledOff, recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
@@ -33,6 +39,7 @@ import {
   approveArgs,
   assertEditable,
   assertDecidable,
+  assertNothingOwed,
   assertResumable,
   decisionArgs,
   doctorArgs,
@@ -843,6 +850,10 @@ async function replan(
 ): Promise<ReplyMap["replan"]> {
   const ticket = (await m.tickets.list(repo)).tickets.find((entry) => entry.key === request.key);
   if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
+  // A ticket whose pull request is open is not deleted, so it is not planned
+  // again either, at `pr_open` or wherever its delivery records the pull
+  // request open, as an escalated run that published leaves it (D-129).
+  if (pullRequestOpen(ticket)) throw new Error(deletePullRequestOpen(ticket));
   // The spec the stopped plan was drafted from, in the words the CLI refuses
   // in, because this is the same question `admit --start-over` asks and a
   // person should not meet two sentences for one answer.
@@ -868,9 +879,20 @@ async function replan(
   // Only a spent record, in `admit`'s own words: a spent ticket is not the plan
   // its spec has, it is the plan it did not get, and a run killed outside the
   // executor's window leaves one saying `executing`, which is still the plan
-  // this spec has. Asked here rather than left to `admit`, because the stopped
-  // ticket is deleted before the admission runs.
-  if (!["failed", "plan_invalid", "cancelled"].includes(ticket.state))
+  // this spec has. A ticket in `changes_requested` whose record asks the person
+  // nothing is spent too: its loop ended on a verdict nobody can answer, so
+  // planning again is the way forward (D-132); one that asks is theirs to
+  // answer. Asked here rather than left to `admit`, because the stopped ticket
+  // is deleted before the admission runs.
+  const unanswerable =
+    ticket.state === "changes_requested" &&
+    (questionsOnFiles({
+      bundles: await m.tickets.bundles(repo),
+      ticket,
+      objectsDirectory: objectsPath(repo),
+      verdictsPath: verdictsPath(repo),
+    })?.length ?? 0) === 0;
+  if (!unanswerable && !["failed", "plan_invalid", "cancelled"].includes(ticket.state))
     throw new Error(
       `${request.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
         `${request.key} is ${ticket.state}, which is past re-drafting, so this spec has its plan`,
@@ -940,6 +962,17 @@ async function replan(
   // is what the confirm's reading judges (D-138).
   const drafted = draftedReading((id) => m.registry.lookup(id), m.editing.read(opened.id));
   if (drafted !== null) m.editing.recordRead(opened.id, drafted);
+  // Landed where the plan is ready to confirm, its Graph for an epic and its
+  // contract for a basic ticket, with the contract a tab from the start:
+  // every way back into this planning opens it there (D-138). Where that
+  // cannot be recorded the planning still stands, and the page that asked
+  // opens it by this reply all the same.
+  try {
+    const { ticket: landed } = await m.tickets.detail(repo.id, job.resultKey);
+    m.editing.landDrafted(opened.id, specTexts(() => repo), landed.updated_at);
+  } catch {
+    // The planning reopens where the person is next on it instead.
+  }
   return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
 }
 
@@ -1003,13 +1036,32 @@ function loop(
       const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
       if (resumeFrom)
         assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
+      // A run that owes the person's answers is refused before the CLI starts,
+      // on the branch as the loop reads it: one a person has moved is
+      // reviewed afresh (D-132). An explicit
+      // resume carries an attempt's work into a fresh review, and an approval
+      // starts a ticket no run has tried.
+      if (request.kind === "run" && !request.approve && !resumeFrom)
+        assertNothingOwed(
+          await m.tickets.owed(
+            repo,
+            await m.tickets.ticket(repo, request.key),
+            m.tickets.contract(repo, request.key).contract,
+          ),
+          request.key,
+        );
       if (request.kind === "decide") {
         // Each answer closes its finding
         // (D-132); the principle
         // carries the same words to the executor.
         const ticket = await m.tickets.ticket(repo, request.key);
         assertDecidable(
-          findingsOnRecord(await m.tickets.bundles(repo), ticket.ticket_id, objectsPath(repo)),
+          reviewOnRecord({
+            bundles: await m.tickets.bundles(repo),
+            ticket,
+            objectsDirectory: objectsPath(repo),
+            verdictsPath: verdictsPath(repo),
+          }),
           request.decisions,
         );
         const author = m.profile.state.settings.name || "Local user";
@@ -1039,8 +1091,9 @@ function loop(
         m.drift.forget(repo.id, request.key, null);
       }
       if (run.signal.aborted) return;
-      // A run that ends on a verdict for the person completes, paused for them.
-      await run.invoke(runArgs(request.key, path, resumeFrom), { verdict: true });
+      // A run that ends on a verdict for the person completes, paused for them,
+      // and its log is what it printed as it went, its result kept apart.
+      await run.invoke(runArgs(request.key, path, resumeFrom), { verdict: true, progressLog: true });
     },
   );
   // A filed ticket whose loop starts again is back on Home, and stays there

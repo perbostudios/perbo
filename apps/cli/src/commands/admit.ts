@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
   APPROACH_SCHEMA_VERSION,
+  APPROVED_NOTE,
   AcceptanceCriterionSchema,
   EXIT_CODES,
   IllegalTransitionError,
@@ -17,6 +18,7 @@ import {
   costPhrase,
   derivePlannedRisk,
   gateClosedNote,
+  incompleteNote,
   isActive,
   isConfigPath,
   isDependencyPath,
@@ -2681,7 +2683,7 @@ export function statesObserved(result: {
 
   switch (result.outcome) {
     case "approved":
-      path.push({ to: "pr_open", note: "approved; a human merges it" });
+      path.push({ to: "pr_open", note: APPROVED_NOTE });
       break;
     // SCP-194: `remediation_stalled` joins these three. A round closed none of
     // the findings it was given; the change set is on the branch and the open
@@ -2704,7 +2706,7 @@ export function statesObserved(result: {
               ? "the branch cannot reach the base it would be merged into and the round given " +
                 "the conflict did not resolve it — not the change (a re-run merges " +
                 "the base up again)"
-              : `the attempt did not complete: ${result.outcome}`,
+              : incompleteNote(result.outcome),
       });
   }
   return path;

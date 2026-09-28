@@ -3499,7 +3499,7 @@ describe("a scope escape handed back to a remediation round", () => {
     // The review stays on record, anchored on the commit it judged, with the
     // refusal's open set: a later run finds the review and sees the branch has
     // moved past what was judged.
-    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id });
+    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id, history: [] });
     expect(judged?.review.review_id).toBe("rev_0000000000000196");
     expect(judged?.head_commit).toBe(first.final_review!.target.head_commit);
     expect(judged?.head_commit).not.toBe(round.attempt.head_commit);

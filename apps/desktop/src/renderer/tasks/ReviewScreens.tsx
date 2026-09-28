@@ -424,9 +424,9 @@ export function OutputScreen(context: TaskContext) {
     [copied, setCopied] = useState(false),
     [follow, setFollow] = useState(true);
   const action = useAction();
-  // Every attempt of the latest run, in order: its rounds are what the live
-  // list showed as they went.
-  const attempts = latest === undefined ? [] : detail.attempts.filter((attempt) => attempt.run === latest.run),
+  // Every attempt of the ticket, in order, over all its runs: the transcript
+  // follows the whole loop, not one run.
+  const attempts = detail.attempts,
     outputs = useOutputs(
       repoId,
       ticket.key,
@@ -438,8 +438,10 @@ export function OutputScreen(context: TaskContext) {
   // The latest attempt's own read: its terminal, its changes, its records.
   const output = outputs.at(-1);
   const recorded = retainedOutput(output?.data?.transcript);
-  // The agents' own words, the latest at the bottom: live from the run's log
-  // while it goes, from the records once it has ended.
+  // The agents' own words over the whole ticket, the latest at the bottom:
+  // the last run's from its log, while it goes and once it has ended, and from
+  // the records an attempt whose start the log's tail cut, one whose stretch
+  // of the log holds no turn, and every attempt that is not the last run's own.
   const transcript = watchTranscript(
     jobs,
     active,

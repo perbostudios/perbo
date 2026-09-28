@@ -4,6 +4,8 @@ const EntrySchema = z.object({
   type: z.string().optional(),
   parent_tool_use_id: z.string().nullable().optional(),
   subagent: z.boolean().optional(),
+  sessionUpdate: z.string().optional(),
+  text: z.string().optional(),
   item: z
     .object({
       type: z.string(),
@@ -32,7 +34,8 @@ export interface TranscriptEntry {
 /**
  * Interpret only documented display fields; provider records never become actions.
  * The transcript is each turn the executor's own session spoke, as the run
- * printed it while it went — never a subagent's words (a Claude turn with a
+ * printed it while it went — a Claude turn, a Codex `agentMessage` item, an
+ * OpenCode `agent_message` — never a subagent's words (a Claude turn with a
  * `parent_tool_use_id`, a Codex item marked `subagent`) and never a row per
  * tool call: the commands it ran, a subagent's among them, are the terminal's.
  */
@@ -62,6 +65,9 @@ export function retainedOutput(raw: string | null | undefined): {
     // Trimmed, as the run printed it.
     const message = entry.item?.type === "agentMessage" && entry.subagent !== true ? (entry.item.text ?? "").trim() : "";
     if (message) entries.push({ author: "Executor", label: "message", text: message });
+    // OpenCode records the message its session finished, whole.
+    const finished = entry.sessionUpdate === "agent_message" ? (entry.text ?? "").trim() : "";
+    if (finished) entries.push({ author: "Executor", label: "message", text: finished });
     // One entry per turn, its text blocks together, as the run printed it.
     const said =
       entry.type === "assistant" && !entry.parent_tool_use_id

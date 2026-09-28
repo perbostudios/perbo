@@ -27,6 +27,8 @@ import { recordStreams } from "../../test-support/streams.js";
  */
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-interview-opencode-"));
+/** The fake's catalogue settles as soon as it is asked, so nothing waits between snapshots. */
+const noWait = async () => undefined;
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 async function interview(
@@ -38,6 +40,8 @@ async function interview(
     data?: string;
     repo?: string;
     refuseResumes?: number;
+    staleSnapshots?: number;
+    exitAtScratch?: number;
   } = {},
 ) {
   const repo = extra.repo ?? repository(scratch);
@@ -46,6 +50,8 @@ async function interview(
     steps,
     sessionId: "ses-7",
     ...(extra.refuseResumes === undefined ? {} : { refuseResumes: extra.refuseResumes }),
+    ...(extra.staleSnapshots === undefined ? {} : { staleSnapshots: extra.staleSnapshots }),
+    ...(extra.exitAtScratch === undefined ? {} : { exitAtScratch: extra.exitAtScratch }),
   });
   const data = extra.data ?? join(mkdtempSync(join(scratch, "home-")), "data");
   const streams = recordStreams();
@@ -58,6 +64,7 @@ async function interview(
         binary: fake.binary,
         dataDirectory: data,
         env: extra.env ?? { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", GH_TOKEN: "ghp_not_forwarded" },
+        wait: noWait,
       }),
       turns: (async function* () {
         yield JSON.stringify({ type: "turn", text: "let us write the spec" });
@@ -151,6 +158,72 @@ describe("the OpenCode the interview starts", () => {
       );
       // No turn was sent to a session that carried it.
       expect(fake.seen().prompts).toEqual([]);
+    }
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  it("opens the chat's session only once a scratch session's catalogue offers its model, opened or resumed", async () => {
+    for (const argv of [[], ["--session", "ses-7"]]) {
+      const { code, fake } = await interview([], { argv: ["--model", "opencode/big-pickle", ...argv], staleSnapshots: 1 });
+      expect(code, argv.join(" ")).toBe(EXIT_CODES.approve);
+      const seen = fake.seen();
+      // The first snapshot lacked the model, the second offered it, and the
+      // checkout's own session was opened after that and took it.
+      expect(seen.scratch).toHaveLength(2);
+      expect(seen.modelRefused).toEqual([]);
+    }
+  }, SPAWN_TEST_TIMEOUT_MS + OPENCODE_SESSION_RETRY_MS);
+
+  it("opens a new session, with no model named, on the settled catalogue's default, selected by name", async () => {
+    const { code, fake } = await interview([], { staleSnapshots: 1 });
+    expect(code).toBe(EXIT_CODES.approve);
+    const seen = fake.seen();
+    // The first snapshot named the unsettled default; the next two agreed
+    // on the settled one, which the checkout's own session was set to.
+    expect(seen.scratch).toHaveLength(3);
+    expect(seen.selected).toEqual(["opencode/big-pickle"]);
+    expect(seen.modelRefused).toEqual([]);
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  it("resumes a session, with no model named, on the model it already runs on, once the catalogue has settled", async () => {
+    const { code, fake } = await interview([], { argv: ["--session", "ses-7"], staleSnapshots: 1 });
+    expect(code).toBe(EXIT_CODES.approve);
+    const seen = fake.seen();
+    // The checkout's snapshot is taken after two agreed, and no model is chosen for the session.
+    expect(seen.scratch).toHaveLength(3);
+    expect(seen.resumed).toBe("ses-7");
+    expect(seen.selected).toEqual([]);
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  it("says why opencode stopped where it stops while the catalogue is waited for, a model named or not", async () => {
+    for (const argv of [[], ["--model", "opencode/big-pickle"]]) {
+      const repo = repository(scratch);
+      const fake = fakeOpenCode({ root: mkdtempSync(join(scratch, "fake-")), steps: [], sessionId: "ses-7", exitAtScratch: 1 });
+      /** Every wait between snapshots, each of which a snapshot asked again comes after. */
+      const waits: number[] = [];
+      const failure = await Promise.resolve(
+        runCommandLine(interviewCommandLine, {
+          argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "opencode", ...argv],
+          streams: recordStreams(),
+          cwd: repo,
+          deps: {
+            transport: openCodeInterviewTransport({
+              binary: fake.binary,
+              dataDirectory: join(mkdtempSync(join(scratch, "home-")), "data"),
+              wait: async (ms) => {
+                waits.push(ms);
+              },
+            }),
+            turns: (async function* () {
+              yield JSON.stringify({ type: "turn", text: "hello" });
+            })(),
+          },
+        }),
+      ).catch((error: unknown) => error);
+      expect(failure, argv.join(" ")).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain("opencode stopped before the interview ended (3): opencode crashed");
+      // No snapshot was asked for, or waited for, after the process was gone.
+      expect(fake.seen().scratch).toHaveLength(1);
+      expect(waits, argv.join(" ")).toEqual([]);
     }
   }, SPAWN_TEST_TIMEOUT_MS);
 

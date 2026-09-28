@@ -92,9 +92,12 @@ export {
   OPENCODE_BUILTIN_MODES,
   OPENCODE_INTERVIEW_SERVER,
   OPENCODE_MIN_VERSION,
+  OPENCODE_MODEL_NOT_FOUND,
   OPENCODE_ROLES,
+  OPENCODE_SERVE_ARGV,
   OPENCODE_SESSION_ATTEMPTS,
   OPENCODE_SESSION_RETRY_MS,
+  awaitOpenCodeModel,
   opencodeConfig,
   opencodeEnvironment,
   opencodeInstructionsPath,
@@ -126,6 +129,7 @@ export {
   CriterionIdSchema,
   RequirementIdSchema,
   ReviewIdSchema,
+  sameCommit,
   TicketIdSchema,
 } from "./ids.js";
 export type { NodeId } from "./ids.js";
@@ -134,16 +138,25 @@ export {
   decodeInterviewTurn,
   encodeInterviewEvent,
   encodeInterviewTurn,
+  groupAnswers,
   INTERVIEW_SAID_MAX_CHARS,
   InterviewEventSchema,
   InterviewQuestionGroupSchema,
+  InterviewQuestionPartSchema,
   interviewSaidMessage,
   InterviewTurnSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
   MAX_QUESTION_GROUPS,
   PART_LETTERS,
+  sameQuestion,
 } from "./interview-protocol.js";
-export type { InterviewEvent, InterviewQuestionGroup } from "./interview-protocol.js";
+export type {
+  InterviewEvent,
+  InterviewQuestionGroup,
+  InterviewQuestionPart,
+  InterviewTurn,
+  QuestionPut,
+} from "./interview-protocol.js";
 export {
   assertProviderEnabled,
   assertWithinLimits,
@@ -304,10 +317,17 @@ export {
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
+  FINISHED_TRYING,
+  judgedCommit,
+  leftToPrinciple,
+  loopOnRecord,
+  loopOnReview,
   NEVER_HANDED_FAMILIES,
+  NOTHING_TRIED,
+  owedAnswers,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
 export { compareLevels, deriveActualRisk, derivePlannedRisk, maxLevel } from "./risk.js";
 export type { RiskDerivation } from "./risk.js";
 export { bundleId, BundleIdSchema, computeReplayability, RunBundleSchema } from "./runbundle.js";
@@ -455,7 +475,15 @@ export type {
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
 export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
 export type { TicketTransition } from "./ticket-transitions.js";
-export { gateClosedNote, retainedBranch } from "./retained.js";
+export {
+  ANSWERS_OWED_NOTE,
+  APPROVED_NOTE,
+  gateClosedNote,
+  incompleteNote,
+  retainedBranch,
+  runEndedOn,
+  settledRow,
+} from "./retained.js";
 export type { RetainedBranch } from "./retained.js";
 export {
   commitCarriesArm,

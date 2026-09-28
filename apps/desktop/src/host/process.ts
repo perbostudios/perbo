@@ -198,16 +198,16 @@ export function redact(
 export const LOG_TAIL_CHARS = 80_000;
 
 /**
- * The end of a command's output a job's log keeps: at most
- * {@link LOG_TAIL_CHARS}, and where that cuts a line, nothing up to its first
- * newline, so the log starts on a whole line. A half line is not read as
- * what it would say whole: an agent's words cut after its mark would
- * otherwise read as one of the run's stages.
+ * The end of a command's output a job's log keeps: at most `limit`
+ * characters, {@link LOG_TAIL_CHARS} unless the log shares it, and where that
+ * cuts a line, nothing up to its first newline, so the log starts on a whole
+ * line. A half line is not read as what it would say whole: an agent's words
+ * cut after its mark would otherwise read as one of the run's stages.
  */
-export function logTail(text: string): string {
-  if (text.length <= LOG_TAIL_CHARS) return text;
-  const cut = text.slice(-LOG_TAIL_CHARS);
-  if (text[text.length - LOG_TAIL_CHARS - 1] === "\n") return cut;
+export function logTail(text: string, limit = LOG_TAIL_CHARS): string {
+  if (text.length <= limit) return text;
+  const cut = text.slice(-limit);
+  if (text[text.length - limit - 1] === "\n") return cut;
   const whole = cut.indexOf("\n");
   return whole < 0 ? "" : cut.slice(whole + 1);
 }

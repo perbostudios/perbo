@@ -1,24 +1,36 @@
+import { join } from "node:path";
 import {
   ExecutionAttemptSchema,
   NodeReviewsSchema,
   ReviewArtifactSchema,
   answersReview,
+  attemptsFileName,
   decidable,
   decisionChoicesFor,
+  judgedCommit,
+  leftToPrinciple,
+  loopOnRecord,
+  owedAnswers,
   routedToPerson,
   type ExecutionAttempt,
   type Finding,
+  type LoopOnReview,
   type NodeReview,
+  type PlanContract,
   type ReviewArtifact,
   type RunBundle,
+  type HistoryRow,
+  sameCommit,
 } from "@perbo/contracts";
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
+import { git, ticketBranchStillAt } from "@perbo/workspace";
 import { z } from "zod";
-import type { AttemptsRecord } from "../../attempts.js";
+import { lastAttemptBranch, readAttemptsRecord, type AttemptsRecord } from "../../attempts.js";
 import { handsToExecutor, recordDecisions, type DecidedFinding } from "../../decisions.js";
-import type { BundleStore } from "../../bundle.js";
-import { sameCommit } from "../../resume.js";
+import { BundleStore } from "../../bundle.js";
+import type { Decline } from "../../declines.js";
 import { changedPathsBetween, commitsSince } from "../../seal.js";
+import type { TicketRunConfig } from "./config.js";
 import type { RoundState } from "./state.js";
 
 /**
@@ -42,23 +54,29 @@ import type { RoundState } from "./state.js";
  * branch by the caller; this answers the first, and says which commit was last
  * judged so the caller can.
  *
- * A finding the review routed to a person joins the round where the person
- * decided it with an approach of their own or left the approach to the
- * executor (D-132): the executor is
- * handed it with the person's words, and the closure verifier checks it
- * (D-061), until a verification records it closed. One in a family the
- * executor is never handed — `security.*`, `context.*` — stays with the person
- * whatever they chose, and no answer to an `incomplete` or `error` review hands
- * anything on (`decisionsOn`).
+ * A finding routed to a person (`routedToPerson`) joins the round where the
+ * person decided it with an approach of their own or left the approach to the
+ * executor (D-132): the executor is handed it with the person's words, and the
+ * closure verifier checks it (D-061), until a verification records it closed.
+ * One in a family the executor is never handed — `security.*`, `context.*` —
+ * stays with the person whatever they chose, and no answer to an `incomplete`
+ * or `error` review hands anything on (`decisionsOn`). Once a run ended on
+ * `FINISHED_TRYING`, every finding it left open is the person's, so a round
+ * after it is the one their answers scope, and none where they gave none
+ * (`answersOwed`). A finding left to a principle (`leftToPrinciple`) is never
+ * given again.
  */
 export function remediationToContinue(input: {
   bundles: BundleStore;
   ticket_id: string;
   decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
 }): {
   review: ReviewArtifact;
   node_reviews: NodeReview[];
   reviewed_at: string;
+  /** What the loop has done on the review, which says who each finding is asked of. */
+  loop: LoopOnReview;
   findings: Finding[];
   /** The person's words for each decided finding the round is handed, as data for the brief. */
   directions: Direction[];
@@ -66,19 +84,21 @@ export function remediationToContinue(input: {
 } | null {
   const judged = judgedOnRecord(input);
   if (judged === null) return null;
-  const { review, node_reviews, reviewed_at, openKeys, head_commit } = judged;
-  const decisions = decisionsOn(review, reviewed_at, input.decided);
+  const { review, node_reviews, reviewed_at, openKeys, loop, head_commit } = judged;
+  const decisions = decisionsOn(review, reviewed_at, input.decided, loop);
   const remediable = remediableFindings(review.findings)
     .filter((finding) => isRemediableFamily(finding.rule_id))
-    .filter((finding) => openKeys === null || openKeys.has(finding.key));
+    .filter((finding) => openKeys === null || openKeys.has(finding.key))
+    .filter((finding) => !leftToPrinciple(finding, loop))
+    .filter((finding) => !routedToPerson(finding, loop));
   const handed = review.findings.filter((finding) => {
     const decision = decisions.get(finding.key);
     return (
-      routedToPerson(finding) &&
+      routedToPerson(finding, loop) &&
       decision !== undefined &&
       handsToExecutor(decision.choice) &&
       decisionChoicesFor(finding.rule_id).includes(decision.choice) &&
-      !closedByRound(judged, finding.key)
+      !loop.closed.has(finding.key)
     );
   });
   const findings = [...remediable, ...handed];
@@ -87,6 +107,7 @@ export function remediationToContinue(input: {
     review,
     node_reviews,
     reviewed_at,
+    loop,
     findings,
     directions: handed.map((finding) => ({ finding_key: finding.key, words: decisions.get(finding.key)!.note })),
     head_commit,
@@ -101,29 +122,37 @@ export interface Direction {
 
 /**
  * The last independent review on the ticket's record, what the verifications
- * after it left open, and the commit the branch should still be at.
+ * after it left open, what the loop has done on it, and the commit the branch
+ * should still be at.
  *
- * The last verification's open set is the authoritative one — each round
- * narrows it. The commit the branch should still be at is the last one a
+ * A finding's status is the one the last verification given it recorded
+ * (`loopOnReview`): each round narrows what it is given, and a round scoped to
+ * a person's answers says nothing of the findings it was not given. Whether
+ * the loop has finished trying is read from the ticket's rows, which the
+ * caller hands in. The commit the branch should still be at is the last one a
  * verification judged, or the review's where none did: a round the scope rule
  * refused (SCP-194) records the commit it refused under a key of its own and
  * judged no tree, so a branch left at that commit has moved past what was
  * judged and is reviewed afresh. Null where there is no readable review, or
  * where a verification cannot say what it left open.
  */
-export function judgedOnRecord(input: { bundles: BundleStore; ticket_id: string }): {
+export function judgedOnRecord(input: {
+  bundles: BundleStore;
+  ticket_id: string;
+  history: readonly HistoryRow[];
+}): {
   review: ReviewArtifact;
   node_reviews: NodeReview[];
   /** When the review was recorded: a person's answer to it is taken after this. */
   reviewed_at: string;
-  /** What the last verification after the review left open; null where none ran. */
-  openKeys: Set<string> | null;
   /**
-   * Every finding a verification after the review was given. A finding given
-   * and absent from the last open set was closed; one never given — a declined
-   * one (D-065) — was not.
+   * What the verifications after the review left open: every finding one was
+   * given or left open that a later one did not close. Null where none ran; a
+   * finding never given — a declined one (D-065) — is not in it.
    */
-  givenKeys: Set<string>;
+  openKeys: Set<string> | null;
+  /** What the loop has done on the review: whether it finished trying, and what it closed. */
+  loop: LoopOnReview;
   head_commit: string;
 } | null {
   const forTicket = input.bundles.forTicket(input.ticket_id);
@@ -149,64 +178,40 @@ export function judgedOnRecord(input: { bundles: BundleStore; ticket_id: string 
   // the same default the schema gives a record that never held them.
   const node_reviews = readNodeReviews(input.bundles, last);
 
-  const verifications = forTicket.filter(
-    (bundle) =>
-      bundle.kind === "review" &&
-      bundle.subject_id.startsWith("cv_") &&
-      bundle.created_at >= last.created_at,
-  );
-  const lastVerification = verifications[verifications.length - 1];
+  const onRecord = loopOnRecord({ review_id: review.review_id, bundles: forTicket, history: input.history });
+  if (onRecord === null) return null;
+  const { verifications, loop } = onRecord;
+  const keysOf = (value: unknown): string[] =>
+    String(value ?? "")
+      .split(",")
+      .filter((key) => key.length > 0);
   const openKeys =
-    lastVerification === undefined
+    verifications.length === 0
       ? null
       : new Set(
-          String(lastVerification.inputs["findings_open"] ?? "")
-            .split(",")
-            .filter((key) => key.length > 0),
+          verifications
+            .flatMap((bundle) => [...keysOf(bundle.inputs["findings_given"]), ...keysOf(bundle.inputs["findings_open"])])
+            .filter((key) => !loop.closed.has(key)),
         );
-  // A verification bundle written before this ticket recorded its open set
-  // cannot say what is still open, and guessing would hand the executor
-  // findings it already closed.
-  if (openKeys !== null && lastVerification!.inputs["findings_open"] === undefined) return null;
 
-  const givenKeys = new Set(
-    verifications.flatMap((bundle) =>
-      String(bundle.inputs["findings_given"] ?? "")
-        .split(",")
-        .filter((key) => key.length > 0),
-    ),
-  );
-
-  const lastJudged = verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined);
-  const head =
-    lastJudged === undefined ? review.target.head_commit : (lastJudged.inputs["head_commit"] ?? null);
-  if (typeof head !== "string" || head.length === 0) return null;
-  return { review, node_reviews, reviewed_at: last.created_at, openKeys, givenKeys, head_commit: head };
-}
-
-/**
- * Whether a round closed a finding: given to a verification after the review,
- * and absent from the last one's open set, which is the authoritative one
- * because each round narrows it.
- */
-function closedByRound(
-  judged: Pick<NonNullable<ReturnType<typeof judgedOnRecord>>, "openKeys" | "givenKeys">,
-  key: string,
-): boolean {
-  return judged.openKeys !== null && judged.givenKeys.has(key) && !judged.openKeys.has(key);
+  const head = judgedCommit(review.target.head_commit, verifications);
+  if (head === null) return null;
+  return { review, node_reviews, reviewed_at: last.created_at, openKeys, loop, head_commit: head };
 }
 
 /**
  * The decisions that answer a review (`answersReview`): one per finding key.
- * None answer a review that is not `decidable`: it did not judge the whole
- * change, so the run goes on as though nothing were answered.
+ * None answer a review that is not `decidable`: one that did not judge the
+ * whole change, or that routed its findings to the executor while the loop is
+ * still trying, so the run goes on as though nothing were answered.
  */
 export function decisionsOn(
   review: ReviewArtifact,
   reviewed_at: string,
   decided: readonly DecidedFinding[],
+  loop: LoopOnReview,
 ): Map<string, DecidedFinding> {
-  if (!decidable(review)) return new Map();
+  if (!decidable(review, loop)) return new Map();
   const keys = new Set(review.findings.map((finding) => finding.key));
   return new Map(
     decided
@@ -220,17 +225,18 @@ export function decisionsOn(
 }
 
 /**
- * The findings a review routed to a person that are still open: no decision
- * answers them, or the decision handed them to the executor and the round did
- * not take them — a family the executor is never handed.
+ * The findings routed to a person that are still open: no decision answers
+ * them, or the decision handed them to the executor and the round did not take
+ * them — a family the executor is never handed.
  */
 export function stillWithPerson(
   review: ReviewArtifact,
   decisions: ReadonlyMap<string, DecidedFinding>,
   handed: ReadonlySet<string>,
+  loop: LoopOnReview,
 ): Finding[] {
   return review.findings.filter((finding) => {
-    if (!routedToPerson(finding)) return false;
+    if (!routedToPerson(finding, loop)) return false;
     const decision = decisions.get(finding.key);
     if (decision === undefined) return true;
     return handsToExecutor(decision.choice) && !handed.has(finding.key);
@@ -245,6 +251,8 @@ export interface DecidedDelivery {
   /** The commit the review, or the last verification after it, judged. */
   head_commit: string;
   decided: DecidedFinding[];
+  /** The review's open findings left to a principle (`leftToPrinciple`), which the delivery leaves for the person. */
+  declined: Finding[];
 }
 
 /**
@@ -260,11 +268,14 @@ export interface DecidedDelivery {
  * that requested no change goes.
  *
  * Every finding that still stands has to be answered: shipped as it is by a
- * person where the review routed it to one, or recorded closed by a
+ * person where it is routed to one (`routedToPerson`), or recorded closed by a
  * verification, whether the review routed it to the executor or a person
  * handed it on. One still open is the executor's
  * work, which `remediationToContinue` continues; a review that could not judge
  * every criterion, or did not complete, is answered by nothing (`decisionsOn`).
+ * A finding left to a principle (`leftToPrinciple`) does not hold the
+ * delivery back: it goes to the person with the delivery, which ends
+ * `escalated` (D-065).
  * A run that delivered and then stopped short of the pull request, where the
  * base would not merge, delivers again on the same answers.
  */
@@ -273,20 +284,22 @@ export function decidedDelivery(input: {
   ticket_id: string;
   repository_id: string;
   decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
 }): DecidedDelivery | null {
   if (input.decided.length === 0) return null;
   const judged = judgedOnRecord(input);
   if (judged === null) return null;
-  const { review } = judged;
-  const decisions = decisionsOn(review, judged.reviewed_at, input.decided);
-  const standing = review.findings.filter(
+  const { review, loop } = judged;
+  const decisions = decisionsOn(review, judged.reviewed_at, input.decided, loop);
+  const open = review.findings.filter(
     (finding) =>
       finding.status === "open" &&
-      (finding.blocking || routedToPerson(finding) || finding.routing === "remediable"),
+      (finding.blocking || routedToPerson(finding, loop) || finding.routing === "remediable"),
   );
+  const standing = open.filter((finding) => !leftToPrinciple(finding, loop));
   const answered = (finding: Finding): boolean =>
-    (routedToPerson(finding) && decisions.get(finding.key)?.choice === "ship_as_is") ||
-    closedByRound(judged, finding.key);
+    (routedToPerson(finding, loop) && decisions.get(finding.key)?.choice === "ship_as_is") ||
+    loop.closed.has(finding.key);
   if (!standing.some((finding) => decisions.has(finding.key))) return null;
   if (!standing.every(answered)) return null;
   const decided = new Map([...decisions].filter(([key]) => standing.some((finding) => finding.key === key)));
@@ -295,7 +308,128 @@ export function decidedDelivery(input: {
     node_reviews: judged.node_reviews,
     head_commit: judged.head_commit,
     decided: [...decided.values()],
+    declined: open.filter((finding) => leftToPrinciple(finding, loop)),
   };
+}
+
+/**
+ * The findings of the ticket's last review a run would start without an
+ * answer to (`owedAnswers`), with the commit the review, or the last
+ * verification after it, judged: a branch that has moved past it is reviewed
+ * afresh, and the caller asks the branch. Null where a run has what it needs.
+ */
+export function answersOwed(input: {
+  bundles: BundleStore;
+  ticket_id: string;
+  decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
+}): { findings: Finding[]; head_commit: string } | null {
+  const judged = judgedOnRecord(input);
+  if (judged === null) return null;
+  const { review, loop } = judged;
+  const decisions = decisionsOn(review, judged.reviewed_at, input.decided, loop);
+  const owed = new Set(
+    owedAnswers({
+      review,
+      loop,
+      answers: new Map([...decisions].map(([key, decision]) => [key, decision.choice])),
+    }),
+  );
+  const findings = review.findings.filter((finding) => owed.has(finding.key));
+  return findings.length === 0 ? null : { findings, head_commit: judged.head_commit };
+}
+
+/**
+ * A run refused because the person owes answers to findings its last review's
+ * loop finished trying (`answersOwed`). Raised before anything is provisioned,
+ * executed or paid for; its message is the one sentence the person reads.
+ */
+export class AnswersOwedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AnswersOwedError";
+  }
+}
+
+/**
+ * Refuse a run that owes a person's answers (`answersOwed`), with the sentence
+ * that says how to give them, before anything is provisioned: the command
+ * asks it before it moves the ticket, and the loop again under the run lock.
+ * The branch the ticket's records name is read in the checkout itself
+ * (`ticketBranchStillAt`, which the desktop's host reads too): one whose tip
+ * is no longer the commit the review, or the last verification after it,
+ * judged carries work nobody judged, and that run reviews it afresh. An
+ * explicit `--resume-from` names the attempt whose work the run carries on,
+ * which a fresh review then judges, and a re-level merges the base into an
+ * open pull request's branch: neither is refused here.
+ */
+export async function refuseOwedAnswers(input: {
+  config: Pick<
+    TicketRunConfig,
+    | "bundle_root"
+    | "retain_context"
+    | "state_root"
+    | "repository_root"
+    | "ticket_key"
+    | "delivery_branch"
+    | "resume_from"
+    | "relevel"
+  >;
+  contract: Pick<PlanContract, "ticket_id" | "outcome">;
+  decided: readonly DecidedFinding[];
+  history: readonly HistoryRow[];
+}): Promise<void> {
+  const { config, contract } = input;
+  if (config.resume_from !== null || config.relevel) return;
+  const owed = answersOwed({
+    bundles: new BundleStore({ root: config.bundle_root, retainContext: config.retain_context }),
+    ticket_id: contract.ticket_id,
+    decided: input.decided,
+    history: input.history,
+  });
+  if (owed === null) return;
+  const attempts = readAttemptsRecord(join(config.state_root, attemptsFileName(contract.ticket_id)));
+  const judged = await ticketBranchStillAt({
+    resolveCommit: (ref) => git.resolveCommit(config.repository_root, ref),
+    recorded: { delivery: config.delivery_branch, attempt: lastAttemptBranch(attempts) },
+    ticket_key: config.ticket_key,
+    ticket_id: contract.ticket_id,
+    outcome: contract.outcome,
+    commit: owed.head_commit,
+  });
+  if (!judged) return;
+  throw new AnswersOwedError(answersOwedSentence(config.ticket_key, owed.findings));
+}
+
+/**
+ * The sentence a run owed answers is refused with: which ticket, which
+ * findings, and the commands that answer them.
+ */
+export function answersOwedSentence(ticket_key: string, findings: readonly Pick<Finding, "key">[]): string {
+  return (
+    `${ticket_key}'s last run finished trying and left ${findings.length} finding(s) for you to answer ` +
+    `(${findings.map((finding) => finding.key.slice(0, 12)).join(", ")}), none of them handed to the ` +
+    `executor, so this run does not start: answer each with \`perbo verdict ${ticket_key} --decide ` +
+    "<finding> --choice approach|let-it-decide|ship-as-is`, and `perbo options " +
+    `${ticket_key} --finding <finding>\` offers answers to pick`
+  );
+}
+
+/**
+ * The executor's declines on the ticket's record for the given findings, the
+ * last reason each was given: what a pull request lists for the person where
+ * the run that declined them is not the one delivering.
+ */
+export function declinesOnRecord(record: AttemptsRecord | null, keys: ReadonlySet<string>): Decline[] {
+  const reasons = new Map<string, string>();
+  for (const entry of record?.attempts ?? []) {
+    const parsed = ExecutionAttemptSchema.safeParse(entry);
+    if (!parsed.success) continue;
+    for (const decline of parsed.data.declines ?? []) {
+      if (keys.has(decline.finding_key)) reasons.set(decline.finding_key, decline.reason);
+    }
+  }
+  return [...reasons].map(([finding_key, reason]) => ({ finding_key, reason }));
 }
 
 /**
@@ -311,9 +445,9 @@ export function retainedReview(
   repository_id: string,
 ): { review: ReviewArtifact; decided: DecidedFinding[] } {
   const closed = new Map(
-    [...decisionsOn(judged.review, judged.reviewed_at, decided)].filter(
+    [...decisionsOn(judged.review, judged.reviewed_at, decided, judged.loop)].filter(
       ([key, decision]) =>
-        decision.choice === "ship_as_is" || (handsToExecutor(decision.choice) && closedByRound(judged, key)),
+        decision.choice === "ship_as_is" || (handsToExecutor(decision.choice) && judged.loop.closed.has(key)),
     ),
   );
   return { review: recordDecisions(judged.review, closed, repository_id), decided: [...closed.values()] };
