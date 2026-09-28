@@ -159,7 +159,7 @@ describe("what the rule leaves to the others", () => {
     "H\\OME=/x git status",
     // `env` sets `HOME+`, and leaves `HOME` as it was.
     "env HOME+=/x git status",
-    "export PAGER+=x; git log",
+    "export FOO+=x; git log",
   ]) {
     it(`admits ${JSON.stringify(line)} on the hook, where the allow list is what decides it`, () => {
       expect(claude(line), line).toMatchObject({ decision: "allowed", rule: null });

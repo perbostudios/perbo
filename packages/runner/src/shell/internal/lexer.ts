@@ -424,30 +424,68 @@ function readHeredocTag(text: string, from: number): { heredoc: Heredoc; end: nu
 
 /**
  * Where the text after the bodies of `opened` starts, `from` being line one,
- * and the body each of them consumed.
+ * the body each of them consumed, and why the line cannot be read, where a
+ * body's end is one the shells do not agree on.
+ *
+ * A quoted tag's body is what the lines say, and ends at the first line that
+ * is the tag. An unquoted tag's body has its line continuations taken out, as
+ * the shells take them out: a line ending in an odd number of backslashes goes
+ * on with the next, so `x\<newline>EOF` is the body's `xEOF` and not its end.
+ * Where lines so joined spell the tag, bash, sh and zsh end the body there and
+ * dash and ksh do not, and where the tag holds a newline, dash and ksh end the
+ * body at the lines that spell it and bash, sh and zsh never do; either way
+ * which lines are data and which the shell runs cannot be told.
  */
 function skipHeredocBodies(
   text: string,
   from: number,
   opened: readonly Heredoc[],
   bodies: HeredocBody[],
-): number {
+): { end: number; unreadable: string | null } {
   let at = from;
+  let unreadable: string | null = null;
   for (const heredoc of opened) {
-    const { tag, stripTabs } = heredoc;
+    const { tag, stripTabs, quoted } = heredoc;
+    if (tag.includes("\n")) {
+      unreadable ??=
+        `the heredoc tag ${JSON.stringify(tag)} holds a newline, and dash and bash end its body ` +
+        "in different places, so which lines are data and which the shell runs cannot be told";
+    }
     const lines: string[] = [];
     while (at < text.length) {
-      const newline = text.indexOf("\n", at);
-      const end = newline === -1 ? text.length : newline;
-      const line = text.slice(at, end).replace(/\r$/, "");
-      at = newline === -1 ? end : newline + 1;
+      let line = "";
+      let joined = 0;
+      for (;;) {
+        const newline = text.indexOf("\n", at);
+        const end = newline === -1 ? text.length : newline;
+        const physical = text.slice(at, end);
+        at = newline === -1 ? end : newline + 1;
+        const [, backslashes, cr] = /(\\*)(\r?)$/.exec(physical)!;
+        const continues = !quoted && backslashes!.length % 2 === 1;
+        if (continues && cr === "\r") unreadable ??= crlfReason(physical);
+        if (continues && cr === "" && newline !== -1) {
+          line += physical.slice(0, -1);
+          joined += 1;
+          continue;
+        }
+        line += physical.replace(/\r$/, "");
+        break;
+      }
       const stripped = stripTabs ? line.replace(/^\t+/, "") : line;
-      if (stripped === tag) break;
+      if (stripped === tag) {
+        if (joined > 0) {
+          unreadable ??=
+            `the heredoc body's lines spell its tag ${JSON.stringify(tag)} once a line continuation ` +
+            "is taken out, which ends the body for bash and not for dash, so which lines are data " +
+            "and which the shell runs cannot be told";
+        }
+        break;
+      }
       lines.push(stripped);
     }
     bodies.push({ ...heredoc, body: lines.join("\n") });
   }
-  return at;
+  return { end: at, unreadable };
 }
 
 /** Skip the quoted text that starts at `from`, returning where it ends, or null. */
@@ -663,8 +701,117 @@ function misreadAnsiQuote(text: string): number {
 }
 
 /**
- * The same line with every heredoc body removed, and why the line cannot be
- * read, where it cannot.
+ * Why a line with a backslash before a carriage return and a newline cannot be
+ * read, `excerpt` being the text from the start of the line it stands on.
+ *
+ * bash, sh, dash, zsh and ksh read an escaped carriage return in the word and
+ * a newline that ends the line; a shell that reads a carriage return and a
+ * newline as one line end — Cygwin's bash under `igncr` — reads a line
+ * continuation. Each reading hides a command from the other: `true a\` then
+ * CR LF then `rm x` runs `rm` under the first, and under the second is one
+ * `true`. The guard cannot tell which shell the line reaches, so it reads
+ * neither.
+ */
+function crlfReason(excerpt: string): string {
+  return (
+    `the backslash before the carriage return and newline in ${JSON.stringify(excerpt.split("\n")[0])} ` +
+    "escapes the carriage return for bash and continues the line for a shell that reads CR LF " +
+    "as a line end, so which commands the line runs cannot be told"
+  );
+}
+
+/** Where the `'…'` at `from` ends, just past its closing quote; in a `$'…'`, `ansi`, a backslash escapes. */
+function singleQuoteEnd(text: string, from: number, ansi: boolean): number {
+  for (let i = from + 1; i < text.length; i += 1) {
+    if (ansi && text[i] === "\\") i += 1;
+    else if (text[i] === "'") return i + 1;
+  }
+  return text.length;
+}
+
+/**
+ * `text` with each line continuation taken out, as the shells take one out,
+ * and where in `text` each character kept stands.
+ *
+ * A backslash before a newline goes with the newline, and what stands either
+ * side of them is read as one: `HO\<newline>ME=x` assigns `HOME`, and
+ * `<\<newline><` opens a heredoc. That holds outside quotes and inside double
+ * quotes, a `$(…)`, a `${…}` and a subshell, and anywhere in a backtick pair,
+ * whose body the shells take continuations out of before they read its
+ * quotes. Inside `'…'` and `$'…'` the two are characters of the word, and
+ * after an escaped backslash (`\\` then a newline) the newline ends the line.
+ * bash, sh, dash, zsh and ksh read all of these alike.
+ *
+ * A comment is not told apart. Each of those shells ends one at its newline,
+ * a backslash before it or not, save bash 3.2 inside a `$(…)`, which reads the
+ * next line into it; a `#` that may start a comment makes the line unreadable
+ * (`withoutHeredocBodies`), so nothing joined inside one is read.
+ *
+ * A backslash before a carriage return and a newline stays, and `crlf` is
+ * where the first stands, or -1: the shells read it two ways (`crlfReason`).
+ */
+function joinContinuations(text: string): { text: string; at: number[]; crlf: number } {
+  let out = "";
+  const at: number[] = [];
+  let crlf = -1;
+  /**
+   * The quotes, `$(…)`, subshells, `${…}` and backtick pairs open at `i`,
+   * innermost last: `"{` is a `${…}` inside double quotes, where a `'` is a
+   * character, and `{` one outside them, where it opens a quote.
+   */
+  const open: string[] = [];
+  /** Whether the last character kept was escaped, so that a `$` it is opens nothing. */
+  let escaped = false;
+  let i = 0;
+  const keep = (end: number) => {
+    for (; i < Math.min(end, text.length); i += 1) {
+      out += text[i];
+      at.push(i);
+    }
+  };
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      if (text[i + 1] === "\n") {
+        i += 2;
+        continue;
+      }
+      if (crlf === -1 && text.startsWith("\r\n", i + 1)) crlf = i;
+      keep(i + 2);
+      escaped = true;
+      continue;
+    }
+    const inside = open.at(-1);
+    const dollar = !escaped && out.endsWith("$");
+    escaped = false;
+    let end = i + 1;
+    if (inside === "`") {
+      if (ch === "`") open.pop();
+    } else if (ch === "`") open.push("`");
+    else if (dollar && ch === "(") open.push("(");
+    else if (dollar && ch === "{") open.push(inside === '"' || inside === '"{' ? '"{' : "{");
+    else if (ch === '"') {
+      if (inside === '"') open.pop();
+      else open.push('"');
+    } else if (inside === '"' || inside === '"{') {
+      if (ch === "}" && inside === '"{') open.pop();
+    } else if (ch === "'") end = singleQuoteEnd(text, i, dollar);
+    else if (ch === "(") open.push("(");
+    else if ((ch === ")" && inside === "(") || (ch === "}" && inside === "{")) open.pop();
+    keep(end);
+  }
+  return { text: out, at, crlf };
+}
+
+/**
+ * The same line with every heredoc body removed and every line continuation
+ * taken out, and why the line cannot be read, where it cannot.
+ *
+ * The continuations come out as the text is read, because the shells take one
+ * out before they read anything else: `<\<newline><EOF` opens a heredoc, and
+ * `cat <<EO\<newline>F` ends its body at `EOF` (`joinContinuations`). A body is
+ * the exception — what it keeps is its tag's business (`skipHeredocBodies`) —
+ * so the text after one is joined afresh.
  *
  * `cat >> file <<'EOF'` feeds the lines that follow to the command's standard
  * input. They are its data: a `>` or a `cd` written inside one redirects and
@@ -710,15 +857,46 @@ function misreadAnsiQuote(text: string): number {
  */
 export function withoutHeredocBodies(command: string): {
   text: string;
+  /** The line with its continuations taken out and its heredoc bodies where they stand. */
+  joined: string;
   bodies: HeredocBody[];
   unreadable: string | null;
 } {
   const bodies: HeredocBody[] = [];
-  const ansi = misreadAnsiQuote(command);
-  if (!command.includes("<<") && !command.includes("#") && ansi === -1) {
-    return { text: command, bodies, unreadable: null };
+  let piece = joinContinuations(command);
+  /**
+   * The line as the shell reads it: its continuations taken out up to the
+   * first body, and after each body from the text that follows it, since a
+   * body keeps or takes out its own (`skipHeredocBodies`).
+   */
+  let line = piece.text;
+  /** Where the last piece joined starts, in `line` and in `command`. */
+  let pieceAt = 0;
+  let pieceFrom = 0;
+  let unreadable: string | null = null;
+  const crlf = (where: number) => {
+    if (where !== -1) {
+      unreadable ??= crlfReason(command.slice(command.lastIndexOf("\n", where) + 1));
+    }
+  };
+  crlf(piece.crlf);
+  /** The first `$'…'` `misreadAnsiQuote` finds in a piece joined, as the piece spells it, or null. */
+  const misread = (text: string): string | null => {
+    const at = misreadAnsiQuote(text);
+    return at === -1 ? null : JSON.stringify(text.slice(at).split("\n")[0]);
+  };
+  /**
+   * The first `$'…'` found holding an escaped quote: in the first piece, and in
+   * each piece joined afresh after a body, since a join there can spell one the
+   * first piece did not — `$\<newline>'` joins into `$'` once the body before
+   * it no longer holds a quote open.
+   */
+  let ansiQuote = misread(line);
+  if (!line.includes("<<") && !line.includes("#") && ansiQuote === null) {
+    return { text: line, joined: line, bodies, unreadable };
   }
   let kept = "";
+  let joined = "";
   let start = 0;
   let opened: Heredoc[] = [];
   let quote: string | null = null;
@@ -730,12 +908,11 @@ export function withoutHeredocBodies(command: string): {
   let zshUntil = -1;
   /** The first `<<` whose body has not started, as written, or null. */
   let waiting: string | null = null;
-  let unreadable: string | null = null;
   /** The expansion or `$'` after which what is quoted is uncertain, as written. */
   const opener = () =>
-    JSON.stringify(command.slice(unsure, command[unsure] === "`" ? unsure + 1 : unsure + 2));
+    JSON.stringify(line.slice(unsure, line[unsure] === "`" ? unsure + 1 : unsure + 2));
   const comment = (hash: number): string => {
-    const excerpt = JSON.stringify(command.slice(hash, hash + 24).split("\n")[0]);
+    const excerpt = JSON.stringify(line.slice(hash, hash + 24).split("\n")[0]);
     if (unsure === -1) {
       return `the # in ${excerpt} starts a word, so it may open a comment, and ${COMMENT}`;
     }
@@ -754,27 +931,26 @@ export function withoutHeredocBodies(command: string): {
         `after the ${opener()} that follows it where that line ends cannot be read with ` +
         "certainty, so which lines are data and which the shell runs cannot be told";
     }
-    const hash = looseHash(command, from);
+    const hash = looseHash(line, from);
     if (hash !== -1) unreadable ??= comment(hash);
   };
   let i = 0;
-  while (i < command.length) {
-    const ch = command[i]!;
+  while (i < line.length) {
+    const ch = line[i]!;
     if (quote === "'") {
       if (ch === "'") quote = null;
       i += 1;
       continue;
     }
     if (ch === "\\") {
-      // An escaped newline continues the line, so the body it opens still
-      // begins after the next newline that ends one, and the word it stood in
-      // goes on after it.
-      if (command[i + 1] !== "\n") at = "inside";
+      // The character after a backslash is escaped. Outside quotes it is never
+      // a newline: the continuations are out.
+      at = "inside";
       i += 2;
       continue;
     }
     if (quote === null && (ch === '"' || ch === "'")) {
-      if (ch === "'" && command[i - 1] === "$" && !ansiQuoteReadsPlain(command, i - 1)) {
+      if (ch === "'" && line[i - 1] === "$" && !ansiQuoteReadsPlain(line, i - 1)) {
         lose(i - 1);
       }
       quote = ch;
@@ -784,20 +960,20 @@ export function withoutHeredocBodies(command: string): {
     }
     if (quote === '"') {
       if (ch === '"') quote = null;
-      else if (unsure === -1 && opensExpansion(command, i)) {
+      else if (unsure === -1 && opensExpansion(line, i)) {
         // The shells read an expansion inside double quotes whole, a `"` in it
         // included, and this reads on to the next `"`: the same place only
         // where the expansion's end is certain.
-        const read = readExpansion(command, i);
+        const read = readExpansion(line, i);
         if (read === null || !read.certain) lose(i);
       }
       i += 1;
       continue;
     }
-    if (opensExpansion(command, i)) {
+    if (opensExpansion(line, i)) {
       // A heredoc inside a substitution belongs to the command the substitution
       // runs, which is read on its own.
-      const read = readExpansion(command, i);
+      const read = readExpansion(line, i);
       if (read === null) {
         lose(i);
         break;
@@ -814,15 +990,15 @@ export function withoutHeredocBodies(command: string): {
       i += 1;
       continue;
     }
-    if (ch === "<" && command[i + 1] === "<") {
-      if (command[i + 2] === "<") {
+    if (ch === "<" && line[i + 1] === "<") {
+      if (line[i + 2] === "<") {
         // A here-string. Its word is on this line, and the two characters it
         // ends with are not an operator of their own.
         at = "start";
         i += 3;
         continue;
       }
-      const read = readHeredocTag(command, i + 2);
+      const read = readHeredocTag(line, i + 2);
       if (read === null) {
         at = "start";
         i += 2;
@@ -835,29 +1011,41 @@ export function withoutHeredocBodies(command: string): {
       }
       if (unsure !== -1) {
         unreadable ??=
-          `the << in ${JSON.stringify(command.slice(i, read.end))} may stand inside a quote — ` +
+          `the << in ${JSON.stringify(line.slice(i, read.end))} may stand inside a quote — ` +
           `what is quoted after the ${opener()} before it cannot be read with certainty — and ` +
           "a heredoc it opened would take the lines the shell runs after it as data";
       }
       opened.push(read.heredoc);
-      waiting ??= JSON.stringify(command.slice(i, read.end));
+      waiting ??= JSON.stringify(line.slice(i, read.end));
       at = "inside";
       i = read.end;
       continue;
     }
     if (ch === "\n" && opened.length > 0) {
-      kept += command.slice(start, i + 1);
-      i = skipHeredocBodies(command, i + 1, opened, bodies);
+      // The bodies are read from the line as written, and what follows them
+      // is joined afresh.
+      const from = pieceFrom + piece.at[i - pieceAt]! + 1;
+      const skipped = skipHeredocBodies(command, from, opened, bodies);
+      unreadable ??= skipped.unreadable;
+      kept += line.slice(start, i + 1);
+      joined += line.slice(start, i + 1) + command.slice(from, skipped.end);
+      piece = joinContinuations(command.slice(skipped.end));
+      crlf(piece.crlf === -1 ? -1 : skipped.end + piece.crlf);
+      ansiQuote ??= misread(piece.text);
+      line = line.slice(0, i + 1) + piece.text;
+      pieceAt = i + 1;
+      pieceFrom = skipped.end;
+      i += 1;
       start = i;
       opened = [];
       waiting = null;
       at = "start";
       continue;
     }
-    if (ch === "(" && at !== "inside" && command[i + 1] === "(") {
-      const end = readArithmeticCommand(command, i);
+    if (ch === "(" && at !== "inside" && line[i + 1] === "(") {
+      const end = readArithmeticCommand(line, i);
       if (end !== null) {
-        if (!certain(command, i + 2, end - 2, null)) lose(i);
+        if (!certain(line, i + 2, end - 2, null)) lose(i);
         at = "start";
         i = end;
         continue;
@@ -866,12 +1054,12 @@ export function withoutHeredocBodies(command: string): {
     at = /\s/.test(ch) || WORD_BREAK.has(ch) ? "start" : "inside";
     i += 1;
   }
-  if (ansi !== -1) {
+  if (ansiQuote !== null) {
     unreadable ??=
-      `the $'…' in ${JSON.stringify(command.slice(ansi).split("\n")[0])} holds an ` +
-      "escaped quote, which ends it for this guard and not for the shell";
+      `the $'…' in ${ansiQuote} holds an escaped quote, which ends it for this guard and not ` +
+      "for the shell";
   }
-  return { text: kept + command.slice(start), bodies, unreadable };
+  return { text: kept + line.slice(start), joined: joined + line.slice(start), bodies, unreadable };
 }
 
 /**
@@ -897,21 +1085,26 @@ export function heredocQueue(bodies: readonly HeredocBody[]): Map<string, Heredo
  *
  * Splitting is quote-aware: a separator inside `"…"`, `'…'`, a `$(…)`, a
  * backtick pair or a subshell is part of a command, not a boundary. Heredoc
- * bodies come out before anything else is read, because they are input rather
- * than command text (SCP-174). Line continuations are joined next, because
- * `git branch \<newline> -D main` deletes a branch.
+ * bodies and line continuations come out before anything else is read
+ * (`withoutHeredocBodies`): a body is input rather than command text
+ * (SCP-174), and a continuation joins what stands either side of it into one
+ * word, as the shell does, so `git branch \<newline> -D main` deletes a branch
+ * and `cp a /tm\<newline>p/x` writes `/tmp/x`.
  */
 export function scanSegments(command: string): {
   texts: string[];
   separators: string[];
   balanced: boolean;
   bodies: HeredocBody[];
-  /** Why the line cannot be read, where it cannot (`withoutHeredocBodies`). */
+  /**
+   * Why the line cannot be read, where it cannot: `withoutHeredocBodies`'s
+   * reason, or a continuation it and this read inside different quotes.
+   */
   unreadable: string | null;
 } {
   const read = withoutHeredocBodies(command);
-  const bodies = read.bodies;
-  const text = read.text.replace(/\\\r?\n/g, " ");
+  const { bodies, text } = read;
+  let unreadable = read.unreadable;
   const texts: string[] = [];
   const separators: string[] = [];
   let start = 0;
@@ -932,6 +1125,16 @@ export function scanSegments(command: string): {
       continue;
     }
     if (ch === "\\") {
+      // Every continuation outside single quotes is out already, so one met
+      // here stands where the join read a quote this reads otherwise: the join
+      // reads a backtick pair or a `$(…)` inside `"…"` whole, as bash does,
+      // and this ends the `"` at the first `"` inside it, as ksh does a
+      // backtick pair's. What the line runs cannot be told.
+      if (text[i + 1] === "\n") {
+        unreadable ??=
+          `the line continuation in ${JSON.stringify(text.slice(Math.max(0, i - 16), i + 1))} stands ` +
+          "where the shells read the quotes around it differently, so what the line runs cannot be told";
+      }
       i += 2;
       continue;
     }
@@ -990,7 +1193,7 @@ export function scanSegments(command: string): {
   if (quote !== null || depth !== 0) balanced = false;
   texts.push(text.slice(start));
   separators.push("");
-  return { texts, separators, balanced, bodies, unreadable: read.unreadable };
+  return { texts, separators, balanced, bodies, unreadable };
 }
 
 /** The list `inspectCommand` evaluates its pattern rules against. */

@@ -87,11 +87,15 @@ export function readCommandLine(command: string, scope: ResolvedScope): CommandR
 /**
  * The values a line gives `SIMPLE_BACKUP_SUFFIX`: undefined where it never
  * names the variable, null where it names it anywhere but in a literal
- * assignment — `export`, `read`, a quoted expansion — which this does not read.
+ * assignment — `export`, `read`, a quoted expansion, a name or a value a line
+ * continuation splits — which this does not read. The name is looked for with
+ * every backslash and newline taken out, quoted or not, so no continuation
+ * hides it.
  */
 function backupSuffixesSet(text: string): string[] | null | undefined {
   const name = "SIMPLE_BACKUP_SUFFIX";
-  if (!text.includes(name)) return undefined;
+  const named = text.replace(/\\\n/g, "").split(name).length - 1;
+  if (named === 0) return undefined;
   const values: string[] = [];
   const assignment = /(?:^|[\s;&|(])SIMPLE_BACKUP_SUFFIX=('[^']*'|"[^"$`\\]*"|[^\s;&|()<>'"$`\\]*)(?=$|[\s;&|)])/g;
   let found = 0;
@@ -100,7 +104,7 @@ function backupSuffixesSet(text: string): string[] | null | undefined {
     const value = match[1]!;
     values.push(/^['"]/.test(value) ? value.slice(1, -1) : value);
   }
-  return found === text.split(name).length - 1 ? values : null;
+  return found === named ? values : null;
 }
 
 /**
@@ -125,6 +129,15 @@ export function inspectWritePath(path: string, scope: ResolvedScope): WriteFindi
     resolved: landed(destination),
     rule: ruleOf(destination),
   };
+}
+
+/**
+ * A command line with its line continuations taken out, as the shell takes
+ * them out, and its heredoc bodies where they stand: the text each segment
+ * `splitCommandSegments` reads stands in, in the order they run.
+ */
+export function joinedLine(command: string): string {
+  return withoutHeredocBodies(command).joined;
 }
 
 /**

@@ -119,6 +119,22 @@ const DEFINITIONS = [
   "git config --local alias.x 'branch -D'",
   "git config set alias.x 'branch -D'",
   "git config --rename-section tools alias",
+  // A lone name the shell can split into a key and a value: with `X='zz
+  // !pwd'`, `git config alias.$X` writes `alias.zz`, so it is no read.
+  "git config alias.$X",
+  "git config $X",
+  "git config ${X}",
+  "git config $@",
+  "git config alias.$1",
+  "git config credential.$X",
+  "git config include.$X",
+  "git config --global alias.$X",
+  "git config alias.*",
+  "git config alias.{zz,yy}",
+  'git config "alias.$@"',
+  "git config --file $F alias.zz",
+  "for X in 'zz !pwd'; do git config alias.$X; done",
+  "read X <<< 'zz !pwd'; git config alias.$X",
   // Behind a wrapper, a nested shell and a substitution.
   "env git -c alias.x='branch -D' x main",
   "sh -c \"git -c alias.x='branch -D' x main\"",
@@ -161,6 +177,10 @@ describe("a git line that sets config and defines no alias", () => {
     "git config get alias.x",
     "git config --get-regexp '^alias\\.'",
     "git config --list",
+    // One key the shell hands over whole is a read of it.
+    'git config "alias.$X"',
+    "git config alias.\\$X",
+    "git config user.email",
     "git -c 'color.ui=always' status",
     "git --config-env=color.ui=COLOR status",
   ]) {

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
 import { everySegment, readCommandLine, resolveScope } from "../index.js";
 import { decision, sentence } from "../test-support/pins.js";
-import { expandedPrefix, leadingSubstitution, literalArithmetic } from "./lexer.js";
+import { expandedPrefix, leadingSubstitution, literalArithmetic, scanSegments } from "./lexer.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
@@ -23,7 +23,7 @@ const COMMENT = "a comment cannot be told from an argument here";
  * The shells a line is run under below: `bash 3.2` is the bash macOS ships,
  * which reads a process substitution's end before its comments.
  */
-type Shell = "bash" | "bash 3.2" | "zsh";
+type Shell = "bash" | "bash 3.2" | "zsh" | "dash" | "ksh";
 
 /**
  * Lines a shell runs a write outside the worktree in, which the guard would
@@ -202,6 +202,8 @@ const BASH = bashVersion();
 /** How to run `shell` without its startup files, where it is installed as the table names it. */
 function installed(shell: Shell): string[] | null {
   if (shell === "zsh") return existsSync("/bin/zsh") ? ["/bin/zsh", "-f"] : null;
+  if (shell === "dash") return existsSync("/bin/dash") ? ["/bin/dash"] : null;
+  if (shell === "ksh") return existsSync("/bin/ksh") ? ["/bin/ksh"] : null;
   if (shell === "bash 3.2") return BASH === "3.2" ? ["/bin/bash", "--norc"] : null;
   return BASH === null ? null : ["/bin/bash", "--norc"];
 }
@@ -446,4 +448,212 @@ describe("what a word begins with", () => {
     expect(literalArithmetic('"$((1) ; (2))"', "1")).toBeNull();
     expect(literalArithmetic('"$(( $(echo 1) ))"', "1")).toBeNull();
   });
+});
+
+/**
+ * A backslash before a newline is taken out with it, and the shell reads what
+ * stands either side as one word — outside quotes, inside double quotes and
+ * anywhere in a backtick pair — while inside single quotes the two are
+ * characters of the word. Read as a space, `/et\<newline>c/x` was two words to
+ * the guard and `/etc/x` to the shell.
+ */
+describe("a line continuation", () => {
+  it("joins what stands either side of it outside quotes", () => {
+    expect(scanSegments("cp a /et\\\nc/x").texts).toEqual(["cp a /etc/x"]);
+    expect(scanSegments("HO\\\nME=/tmp/h git status").texts).toEqual(["HOME=/tmp/h git status"]);
+  });
+
+  it("joins what stands either side of it inside double quotes", () => {
+    expect(scanSegments('echo "a\\\nb" > out.txt').texts).toEqual(['echo "ab" > out.txt']);
+    // Inside double quotes a `${…}`'s `'` is a character, and opens no quote.
+    expect(scanSegments(`echo "\${x:-'a\\\nb'}"`).texts).toEqual([`echo "\${x:-'ab'}"`]);
+  });
+
+  it("is two characters of the word inside single quotes and an ANSI-C quote", () => {
+    expect(scanSegments("echo 'a\\\nb' > out.txt").texts).toEqual(["echo 'a\\\nb' > out.txt"]);
+    expect(scanSegments("echo $'a\\\nb' > out.txt").texts).toEqual(["echo $'a\\\nb' > out.txt"]);
+    expect(scanSegments(`echo "$(echo 'a\\\nb')"`).texts).toEqual([`echo "$(echo 'a\\\nb')"`]);
+    expect(scanSegments(`echo \${x:-'a\\\nb'}`).texts).toEqual([`echo \${x:-'a\\\nb'}`]);
+    // An escaped `$` opens no ANSI-C quote, so the `\` in `'a\'` escapes nothing.
+    expect(scanSegments(`echo \\$'a\\' 'b\\\nc'`).texts).toEqual([`echo \\$'a\\' 'b\\\nc'`]);
+  });
+
+  it("joins inside a backtick pair, single quotes and all", () => {
+    expect(scanSegments("echo `echo 'a\\\nb'`").texts).toEqual(["echo `echo 'ab'`"]);
+  });
+
+  it("is no continuation after an escaped backslash, whose newline ends the command", () => {
+    const scan = scanSegments("echo a\\\\\nrm -rf /etc/x");
+    expect(scan.texts).toEqual(["echo a\\\\", "rm -rf /etc/x"]);
+    expect(scan.separators).toEqual(["\n", ""]);
+  });
+
+  it("takes the continuations out of an unquoted heredoc's body and leaves a quoted one's", () => {
+    expect(scanSegments("cat <<EOF\na\\\nb\nEOF").bodies.map((body) => body.body)).toEqual(["ab"]);
+    expect(scanSegments("cat <<'EOF'\na\\\nb\nEOF").bodies.map((body) => body.body)).toEqual(["a\\\nb"]);
+  });
+
+  /** Lines a shell runs a write outside the worktree in, which reading a continuation as a space hid. */
+  const JOINED_WRITES: Array<{ line: string; shells: Shell[] }> = [
+    { line: "cp a /et\\\nc/x", shells: ["bash", "zsh", "dash"] },
+    { line: 'cp a "/et\\\nc/x"', shells: ["bash", "zsh", "dash"] },
+    { line: "cp a `echo '/et\\\nc/x'`", shells: ["bash", "zsh", "dash"] },
+    { line: "sh -c 'cp a /et\\\nc/x'", shells: ["bash", "zsh", "dash"] },
+    { line: "X=/etc; cp a $\\\nX/x", shells: ["bash", "zsh", "dash"] },
+    { line: "echo a\\\\\ncp a /etc/x", shells: ["bash", "zsh", "dash"] },
+    // The heredoc's tag is `EOF`, so the `cp` after its body is a command.
+    { line: "cat <<EO\\\nF\nbody\nEOF\ncp a /etc/x", shells: ["bash", "zsh", "dash"] },
+    // `<\<newline><` is a heredoc, whose body's quote opens nothing.
+    { line: "cat <\\\n<EOF\n'\nEOF\ncp a /etc/x\necho '", shells: ["bash", "dash"] },
+    // `x\<newline>EOF` is the body's `xEOF`, not its end.
+    { line: "cat <<EOF\nx\\\nEOF\n'\nEOF\ncp a /etc/x\necho '", shells: ["bash", "dash"] },
+  ];
+  for (const { line } of JOINED_WRITES) {
+    it(`refuses the write in ${JSON.stringify(line)}`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain("/etc/x");
+    });
+  }
+  for (const { line, shells } of JOINED_WRITES) {
+    for (const shell of shells) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} as <a></etc/x> in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        const probe = line.replace(/\bcp(?= )/, 'printf "<%s>"');
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
+  }
+
+  /** Continued lines that write inside the worktree, or nowhere: allowed, and read as the one command they are. */
+  const CONTINUED_INSIDE = [
+    { line: "git status \\\n --short", runs: "git" },
+    { line: "echo a \\\n b > out.txt", runs: "echo" },
+    { line: "cp a \\\n sub/x", runs: "cp" },
+    { line: "cat > build.sh <<'EOF'\ngcc a.c \\\n  -o a\nEOF", runs: "cat" },
+  ];
+  const scope = resolveScope({ root: "/work/tree", home: "/Users/nobody" });
+  for (const { line, runs } of CONTINUED_INSIDE) {
+    it(`allows ${JSON.stringify(line)} and reads it as one ${runs}`, () => {
+      expect(decision(line), line).toBe("allowed");
+      const programs = everySegment(readCommandLine(line, scope).segments).flatMap((segment) => segment.programs);
+      expect(programs, line).toEqual([runs]);
+    });
+  }
+
+  it("does not hide a rebinding of the scratch directory from the guard", () => {
+    const root = scratch("perbo-continuation-scratch-");
+    const scope = resolveScope({ root, home: "/Users/nobody", tmpdir: `${root}/.scratch` });
+    const command = "TMP\\\nDIR=/etc cp a $TMPDIR/b";
+    expect(readCommandLine(command, scope).findings, command).not.toEqual([]);
+  });
+
+  it("does not hide a backup suffix from the guard", () => {
+    const command = "SIMPLE_BACKUP_SUF\\\nFIX=/../../../../etc/x cp -b a sub/b";
+    expect(decision(command), command).toBe("refused");
+  });
+
+  /**
+   * An ANSI-C quote a continuation spells only once the text after a heredoc's
+   * body is joined: the body's `'` keeps `$\<newline>'` apart in the line as
+   * first joined, and `$'\''` holds an escaped quote, which ends it for the
+   * readers here and not for bash or zsh, which run the `cp`.
+   */
+  const ANSI_C_AFTER_A_BODY = [
+    "cat <<EOF\n'\nEOF\necho $\\\n'\\'' ; cp a /etc/x ; echo '\\'",
+    "cat <<'EOF'\n'\nEOF\necho $\\\n'\\'' ; cp a /etc/x ; echo '\\'",
+    // After the second of two bodies.
+    "cat <<A\nx\nA\ncat <<B\n'\nB\necho $\\\n'\\'' ; cp a /etc/x ; echo '\\'",
+  ];
+  for (const line of ANSI_C_AFTER_A_BODY) {
+    it(`makes ${JSON.stringify(line)} unreadable, where a join after a body spells an ANSI-C quote`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain("holds an escaped quote");
+    });
+    for (const shell of ["bash", "zsh"] as const) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} as <a></etc/x> in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        const probe = line.replace(/\bcp(?= )/, 'printf "<%s>"');
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
+  }
+
+  /**
+   * A continuation the join keeps inside a `'…'` and this reads outside one:
+   * the join reads a backtick pair or a `$(…)` inside `"…"` whole, as bash
+   * does, and the segment reader ends the `"` at the first `"` inside it, as
+   * ksh does a backtick pair's — and ksh copies to `../o/x`.
+   */
+  const QUOTED_TWO_WAYS = [
+    "echo \"`echo \"'\"`\" ' && cp a .\\\n./o/x ; echo '",
+    "echo \"$(echo \"'\")\" ' && cp a .\\\n./o/x ; echo '",
+  ];
+  for (const line of QUOTED_TWO_WAYS) {
+    it(`makes ${JSON.stringify(line)} unreadable, where the readers quote its continuation differently`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain("read the quotes around it differently");
+    });
+  }
+  const ksh = installed("ksh");
+  it.skipIf(ksh === null)(`is run by ksh as <a><../o/x> in ${JSON.stringify(QUOTED_TWO_WAYS[0])}`, () => {
+    const probe = QUOTED_TWO_WAYS[0]!.replace(/\bcp(?= )/, 'printf "<%s>"');
+    const run = spawnSync(ksh![0]!, ["-c", probe], {
+      encoding: "utf8",
+      env: { PATH: "/usr/bin:/bin" },
+      timeout: 10_000,
+    });
+    expect(run.stdout, `ksh: ${probe}`).toContain("<a><../o/x>");
+  });
+
+  /**
+   * Lines the shells read in different places, each the other's hidden
+   * command: `shells` names the ones that run the `cp`.
+   */
+  const READ_TWO_WAYS: Array<{ line: string; reason: string; shells: Shell[] }> = [
+    // Joined, the body's lines spell its tag: bash ends the body there, dash does not.
+    {
+      line: "cat <<EOF\nEO\\\nF\ncp a /etc/x\nEOF",
+      reason: "once a line continuation is taken out",
+      shells: ["bash", "zsh"],
+    },
+    // A tag holding a newline: dash ends the body at the two lines that spell it, bash never does.
+    { line: "cat <<'E\nF'\nx\nE\nF\ncp a /etc/x", reason: "holds a newline", shells: ["dash"] },
+    // An escaped carriage return to bash, a continuation to a shell that reads CR LF as a line end.
+    { line: "true a\\\r\ncp a /etc/x", reason: "carriage return", shells: ["bash", "zsh", "dash"] },
+    // The same after a heredoc's body, whose `'` holds a quote open over it in the line as first joined.
+    { line: "cat <<EOF\n'\nEOF\ntrue a\\\r\ncp a /etc/x", reason: "carriage return", shells: ["bash", "zsh", "dash"] },
+  ];
+  for (const { line, reason } of READ_TWO_WAYS) {
+    it(`makes ${JSON.stringify(line)} unreadable`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain(reason);
+    });
+  }
+  for (const { line, shells } of READ_TWO_WAYS) {
+    for (const shell of shells) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} as <a></etc/x> in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        const probe = line.replace(/\bcp(?= )/, 'printf "<%s>"');
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
+  }
 });
