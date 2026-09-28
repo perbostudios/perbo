@@ -36,8 +36,9 @@ import {
  * Everything else is admitted, including a verb the allow-list does not carry.
  * The runner's refusals are the entries of `ADMISSION_RULES` below — the
  * deny-list, the three write rules (outside the worktree, a prohibited path,
- * outside the contract's globs), a write to git's credential wiring, a `git
- * branch` that changes a branch, the three git rules that stand behind the
+ * outside the contract's globs), a write to git's credential wiring, a
+ * program git runs that the line chooses, a `git branch` that changes a
+ * branch, the three git rules that stand behind the
  * allow lists (an alias defined on the line, a repository or config file the
  * line picks, a verb git does not define), and the two programs the guard
  * cannot read — and absence from a list is not one of them. The allow-list is not the whole of what the agent's
@@ -57,15 +58,16 @@ import {
  *   1. a git alias defined on the line (`git_alias_defined`);
  *   2. the runner's deny-list;
  *   3. a write to git's credential wiring (`git_credential_config`);
- *   4. git pointed at a repository or config file the line picks
+ *   4. a program git runs that the line chooses (`git_program_config`);
+ *   5. git pointed at a repository or config file the line picks
  *      (`git_repository_redirect`);
- *   5. a `git branch` that changes a branch (`git_branch_write`);
- *   6. a program the resolver could not read (`unreadable_program`);
- *   7. the write rule, by resolved target — outside the worktree, inside it
+ *   6. a `git branch` that changes a branch (`git_branch_write`);
+ *   7. a program the resolver could not read (`unreadable_program`);
+ *   8. the write rule, by resolved target — outside the worktree, inside it
  *      and prohibited by the contract, or inside it and outside the
  *      contract's globs — and inline code it could not classify;
- *   8. a git verb git does not define (`git_verb_unknown`);
- *   9. otherwise admitted — and only the agent's reported refusal turns that
+ *   9. a git verb git does not define (`git_verb_unknown`);
+ *  10. otherwise admitted — and only the agent's reported refusal turns that
  *      into a denial, on the strength of a refusal that actually happened.
  *
  * The judgement runs twice: before the tool, in the `PreToolUse` hook
@@ -111,10 +113,30 @@ export const ADMISSION_RULES = {
    * `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_EXEC_PATH` or `--exec-path=<dir>`
    * (SCP-201). Not a write-target
    * rule: there is no path to resolve, only a key to read, and `git config
-   * user.name` has to stay admitted while `git config credential.helper` does
-   * not.
+   * user.name x` has to stay admitted while `git config credential.helper x`
+   * does not.
    */
   git_credential_config: "git_credential_config",
+  /**
+   * A line that has git run a program the line chooses: a config key whose
+   * value is a program git runs, or a place it runs them from —
+   * `core.pager`, `core.editor`, `core.fsmonitor`, `core.hooksPath`,
+   * `diff.external`, a diff, merge or filter driver's command, `gpg.program`
+   * and the rest `GIT_PROGRAM_KEYS` names — set for one command through
+   * `-c`, `--config-env`, `GIT_CONFIG_PARAMETERS` or a `GIT_CONFIG_KEY_<n>`,
+   * or written with `git config` for the lines after it; or a variable that
+   * names one — `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `GIT_EDITOR` and the rest
+   * of `GIT_PROGRAM_ENV`, and on a line that runs git `PAGER`, `EDITOR`,
+   * `VISUAL` and the rest of `PROGRAM_ENV`. A value set for one command that
+   * runs nothing — a pager of `cat` or `less -R`, an editor of `true` — is
+   * admitted, and so is a read of any key. Beside the credential rule rather
+   * than inside it: that rule keeps `core.sshCommand`, `--exec-path` and the
+   * variables that choose git's SSH, askpass and exec-path programs, and a
+   * pager is no credential. It does not see a program already in a config file git
+   * reads, a nested repository's own among them, nor one git's own options
+   * name (`--upload-pack`, `--extcmd`, `--exec`).
+   */
+  git_program_config: "git_program_config",
   /**
    * A `git branch` that changes a branch — deletes, renames, copies, creates
    * or forces one, or sets its upstream, its tracking or its description —
@@ -354,8 +376,16 @@ function splitWords(text: string): string[] {
 
 /** `git config`'s read forms: naming the key here answers a question, it does not set one. */
 const GIT_CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"]);
-/** These take the scope's own value as a separate word, unless attached with `=` (`-f` is `--file`). */
-const GIT_CONFIG_VALUE_FLAGS = new Set(["--file", "-f", "--blob"]);
+/**
+ * These take their value as a separate word, unless attached with `=`: the
+ * scope's (`-f` is `--file`), a value's type (`-t` is `--type`) and a read's
+ * default.
+ */
+const GIT_CONFIG_VALUE_FLAGS = new Set(["--file", "-f", "--blob", "--type", "-t", "--default"]);
+/** The flags that make one operand a write: without one, `git config <name>` reads that key. */
+const GIT_CONFIG_WRITE_FLAGS = new Set([
+  "--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e",
+]);
 
 /** git's global flags that take no value, wherever they stand before the subcommand. */
 const GIT_GLOBAL_FLAGS = new Set([
@@ -454,15 +484,50 @@ const GIT_CONFIG_WRITE_SUBCOMMANDS = new Set(["set", "unset", "edit", "remove-se
 const GIT_CONFIG_RENAME = new Set(["--rename-section", "rename-section"]);
 
 /**
+ * Whether the shell can make one word several when the line runs: an
+ * expansion or substitution outside quotes (`$X`, `$(…)`, a backtick), which
+ * it splits at blanks, a glob (`*`, `?`, `[`) or a brace (`{a,b}`) outside
+ * quotes, or `$@` or `${a[@]}` inside double quotes, which is one word per
+ * parameter or element. An escaped character outside quotes stands for
+ * itself, and any other expansion inside double quotes is one word.
+ */
+function splitWhenRun(word: string): boolean {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < word.length; i += 1) {
+    const ch = word[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\") i += 1;
+      else if (ch === "$" && (word[i + 1] === "@" || (word[i + 1] === "{" && /^[^}]*@/.test(word.slice(i + 2))))) return true;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "\\") i += 1;
+    else if ("$`*?[{".includes(ch)) return true;
+  }
+  return false;
+}
+
+/**
  * The keys and sections a `git config` invocation writes, past git's global
  * options: its first operand, and the new name a section is renamed to —
  * spelled as flags (`git config user.name x`, `--unset`, `--rename-section`)
  * or as a subcommand (`git config set user.name x`). Empty for a read
- * (`--get`, `--list`, `get`, `list`) and for any other verb.
+ * (`--get`, `--list`, `get`, `list`, and a name given alone with no flag that
+ * writes, `git config user.name`) and for any other verb. A name stands
+ * alone only where no word after `config` is one the shell can split into
+ * several (`splitWhenRun`): `git config alias.$X` writes `alias.zz` where
+ * `X='zz !pwd'`, so it is read as the write it can be, while `git config
+ * "alias.$X"` names one key.
  */
 function gitConfigWrittenKeys(words: readonly string[], verbIndex: number): string[] {
   if (words[verbIndex] !== "config") return [];
   let read = false;
+  let writes = false;
   let renames = false;
   let subcommand: string | null = null;
   const operands: string[] = [];
@@ -472,6 +537,7 @@ function gitConfigWrittenKeys(words: readonly string[], verbIndex: number): stri
       const eq = word.indexOf("=");
       const name = eq === -1 ? word : word.slice(0, eq);
       if (GIT_CONFIG_READ_FLAGS.has(name)) read = true;
+      if (GIT_CONFIG_WRITE_FLAGS.has(name)) writes = true;
       if (GIT_CONFIG_RENAME.has(name)) renames = true;
       if (GIT_CONFIG_VALUE_FLAGS.has(name) && eq === -1) i += 1;
       continue;
@@ -485,7 +551,8 @@ function gitConfigWrittenKeys(words: readonly string[], verbIndex: number): stri
     }
     operands.push(value);
   }
-  if (read) return [];
+  const alone = !words.slice(verbIndex + 1).some(splitWhenRun);
+  if (read || (subcommand === null && !writes && operands.length === 1 && alone)) return [];
   return operands.slice(0, renames ? 2 : 1);
 }
 
@@ -546,11 +613,11 @@ function gitAliasDefinition(text: string): string | null {
       return `${name} points git at a config file the line chooses, which can define a git alias, ${ALIAS_BECAUSE}`;
     }
     if (name === GIT_CONFIG_PARAMETERS_VAR) {
-      const keys = keysInGitConfigParameters(value);
-      if (BUILT.test(value) || keys === null) {
+      const pairs = gitConfigParameterPairs(value);
+      if (BUILT.test(value) || pairs === null) {
         return `${name} cannot be read off the line the way git reads it, so it can define a git alias through the environment, ${ALIAS_BECAUSE}`;
       }
-      if (keys.some(isAliasKey)) {
+      if (pairs.some(({ key }) => isAliasKey(key))) {
         return `${name} defines a git alias through the environment, ${ALIAS_BECAUSE}`;
       }
     }
@@ -915,64 +982,56 @@ function gitRepositoryRedirect(text: string): string | null {
 }
 
 /**
- * The keys `GIT_CONFIG_PARAMETERS` sets, read by git's own grammar for it:
- * entries apart by blanks, each a single-quoted span — `'key=value'`, whose
- * key ends at its first `=`, or `'key'` alone — or a quoted key joined by `=`
- * to a quoted value or to none, `'key'='value'` and `'key'=`. A span goes on
- * past `'\''` and `'\!'`, each of which stands for the character it escapes,
- * and git trims the blanks around an old-style key. Null where the value
- * does not keep to that grammar, since what a reading of it sets is then not
- * one this guard can vouch for.
+ * The pairs `GIT_CONFIG_PARAMETERS` sets, read by git's own grammar for it
+ * (`parse_config_env_list` and `sq_dequote_step`): entries apart by blanks,
+ * each a single-quoted span — `'key=value'`, whose key ends at its first
+ * `=`, or `'key'` alone — or a quoted key joined by `=` to a quoted value or
+ * to none, `'key'='value'` and `'key'=`. A key with no value is set to
+ * `true`. A span goes on past `'\''` and `'\!'`, each of which stands for the
+ * character it escapes, and git trims the blanks around an old-style key.
+ * Null where the value does not keep to that grammar, which git refuses as
+ * malformed and a reading of which this guard cannot vouch for.
  */
-function keysInGitConfigParameters(value: string): string[] | null {
-  const keys: string[] = [];
+function gitConfigParameterPairs(text: string): Array<{ key: string; value: string }> | null {
+  const pairs: Array<{ key: string; value: string }> = [];
   let i = 0;
-  /** The single-quoted span at `i`, its escapes applied, with `i` moved past it; null where there is none. */
-  const span = (): string | null => {
-    if (value[i] !== "'") return null;
+  const quoted = (): string | null => {
+    if (text[i] !== "'") return null;
     let out = "";
-    for (i += 1; i < value.length; ) {
-      const ch = value[i]!;
-      i += 1;
-      if (ch !== "'") {
-        out += ch;
-        continue;
-      }
-      const escaped = value[i + 1];
-      if (value[i] === "\\" && (escaped === "'" || escaped === "!") && value[i + 2] === "'") {
-        out += escaped;
-        i += 3;
-        continue;
-      }
-      return out;
+    i += 1;
+    for (;;) {
+      const close = text.indexOf("'", i);
+      if (close === -1) return null;
+      out += text.slice(i, close);
+      i = close + 1;
+      if (text[i] !== "\\" || (text[i + 1] !== "'" && text[i + 1] !== "!") || text[i + 2] !== "'") return out;
+      out += text[i + 1];
+      i += 3;
     }
-    return null;
   };
-  const atBlankOrEnd = (): boolean => i >= value.length || /\s/.test(value[i]!);
-  while (i < value.length) {
-    if (/\s/.test(value[i]!)) {
+  const ends = (): boolean => i >= text.length || /\s/.test(text[i]!);
+  while (i < text.length) {
+    const key = quoted();
+    if (key === null) return null;
+    if (ends()) {
+      const eq = key.indexOf("=");
+      pairs.push(eq === -1 ? { key: key.trim(), value: "true" } : { key: key.slice(0, eq).trim(), value: key.slice(eq + 1) });
+    } else if (text[i] === "=") {
       i += 1;
-      continue;
+      const value = ends() ? "true" : quoted();
+      if (value === null || !ends()) return null;
+      pairs.push({ key, value });
+    } else {
+      return null;
     }
-    const first = span();
-    if (first === null) return null;
-    if (value[i] === "=") {
-      i += 1;
-      if (value[i] === "'" && span() === null) return null;
-      if (!atBlankOrEnd()) return null;
-      keys.push(first.trim());
-      continue;
-    }
-    if (!atBlankOrEnd()) return null;
-    const eq = first.indexOf("=");
-    keys.push((eq === -1 ? first : first.slice(0, eq)).trim());
+    while (i < text.length && /\s/.test(text[i]!)) i += 1;
   }
-  return keys;
+  return pairs;
 }
 
 /** Variables that choose the program git runs for it — credential-shaping however they are set. */
 const GIT_PROGRAM_ENV_VARS = new Set(["GIT_SSH_COMMAND", "GIT_SSH", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_EXEC_PATH"]);
-/** git reads its own config out of this variable too, one `'key=value'` pair at a time. */
+/** git reads its own config out of this variable too, in the pairs `gitConfigParameterPairs` reads. */
 const GIT_CONFIG_PARAMETERS_VAR = "GIT_CONFIG_PARAMETERS";
 /** Pairs with `GIT_CONFIG_VALUE_<n>`; this one's own value is a config key name. */
 const GIT_CONFIG_KEY_VAR = /^GIT_CONFIG_KEY_\d+$/;
@@ -1130,7 +1189,7 @@ function gitCredentialEnvAssignment(text: string): { name: string; key: string |
   for (const { name, value } of lineEnvironment(splitWords(text.trim()))) {
     if (GIT_PROGRAM_ENV_VARS.has(name)) return { name, key: null };
     if (name === GIT_CONFIG_PARAMETERS_VAR) {
-      const key = keysInGitConfigParameters(value)?.find(isCredentialConfigKey);
+      const key = gitConfigParameterPairs(value)?.find((pair) => isCredentialConfigKey(pair.key))?.key;
       if (key !== undefined) return { name, key };
     }
     if (GIT_CONFIG_KEY_VAR.test(name) && isCredentialConfigKey(value)) {
@@ -1153,6 +1212,267 @@ function gitExecPathChosen(text: string): string | null {
   const { verbIndex } = gitGlobalOptions(words);
   const before = words[verbIndex]?.startsWith("-") === true ? words.length : verbIndex;
   return words.slice(1, before).find((word) => word.startsWith("--exec-path=")) ?? null;
+}
+
+/**
+ * A cluster of `less` or `more` options that names no file: letters only,
+ * and none of `-o`/`-O`, a log file it writes, or `-k`, a key file it reads.
+ */
+const PAGER_OPTIONS = /^-[a-jl-np-zA-NP-Z]+$/;
+/** A pager that runs nothing the line chose: none, `cat`, or `less` or `more` given such options. */
+function pagerRunsNothing(value: string): boolean {
+  const [program, ...options] = value.trim().split(/\s+/).filter((word) => word.length > 0);
+  return program === undefined || (["cat", "less", "more"].includes(program) && options.every((option) => PAGER_OPTIONS.test(option)));
+}
+/** `LESS`: options a `less` reads before its own, the leading `-` optional. */
+const lessOptionsNameNoFile = (value: string): boolean =>
+  value.trim().split(/\s+/).every((word) => word === "" || PAGER_OPTIONS.test(word.startsWith("-") ? word : `-${word}`));
+/** An editor that runs nothing: `:`, which git reads as no editor, or `true`. */
+const editorRunsNothing = (value: string): boolean => /^\s*(?:true|:)\s*$/.test(value);
+/** git's boolean spellings, in any case: the words, and a number with an optional unit. */
+const GIT_BOOLEAN = /^(?:true|false|yes|no|on|off|[-+]?\d+[kmg]?)$/i;
+/** git's false spellings, the empty value and a zero among them. */
+const GIT_FALSE = /^(?:|false|no|off|[-+]?0+[kmg]?)$/i;
+/** A protocol policy that lets nothing through, which git reads in any case. */
+const policyAllowsNothing = (value: string): boolean => value.toLowerCase() === "never";
+
+/**
+ * The config keys whose value is a program git runs, or a place it runs
+ * programs from, each with the values that run nothing where there are
+ * any: `section.variable`, or `section.<subsection>.variable` with `*` for
+ * any subsection, as `git help config` and the pages of the commands that
+ * read them name them on git 2.39.5. `core.fsmonitor` set false starts no
+ * monitor, and `core.hooksPath` set to `/dev/null` holds no hook. A
+ * `protocol.allow` or `protocol.ext.allow` other than `never` lets an
+ * `ext::` URL run the command it names. `core.askPass` is here rather than
+ * with the credential rule's keys because a key's rule is the one that reads
+ * it, and `GIT_ASKPASS` stays the credential rule's. A key that only picks
+ * one of the programs git names itself or one a config file defines —
+ * `diff.tool`, `merge.tool`, `help.browser`, `web.browser`, `man.viewer`,
+ * `gpg.format` — is not among them.
+ */
+const GIT_PROGRAM_KEYS = (
+  [
+    ["core.pager", pagerRunsNothing],
+    ["pager.*", (value) => GIT_BOOLEAN.test(value) || pagerRunsNothing(value)],
+    ["core.editor", editorRunsNothing],
+    ["sequence.editor", editorRunsNothing],
+    ["core.fsmonitor", (value) => GIT_FALSE.test(value)],
+    ["core.hookspath", (value) => value === "/dev/null"],
+    ["protocol.allow", policyAllowsNothing],
+    ["protocol.ext.allow", policyAllowsNothing],
+    ["core.askpass"],
+    ["core.gitproxy"],
+    ["core.alternaterefscommand"],
+    ["diff.external"],
+    ["diff.*.command"],
+    ["diff.*.textconv"],
+    ["interactive.difffilter"],
+    ["difftool.*.cmd"],
+    ["difftool.*.path"],
+    ["mergetool.*.cmd"],
+    ["mergetool.*.path"],
+    ["merge.*.driver"],
+    ["filter.*.clean"],
+    ["filter.*.smudge"],
+    ["filter.*.process"],
+    ["gpg.program"],
+    ["gpg.*.program"],
+    ["gpg.ssh.defaultkeycommand"],
+    ["sendemail.sendmailcmd"],
+    ["sendemail.smtpserver"],
+    ["sendemail.tocmd"],
+    ["sendemail.cccmd"],
+    ["sendemail.*.sendmailcmd"],
+    ["sendemail.*.smtpserver"],
+    ["sendemail.*.tocmd"],
+    ["sendemail.*.cccmd"],
+    ["imap.tunnel"],
+    ["trailer.*.cmd"],
+    ["trailer.*.command"],
+    ["submodule.*.update"],
+    ["remote.*.uploadpack"],
+    ["remote.*.receivepack"],
+    ["remote.*.vcs"],
+    ["uploadpack.packobjectshook"],
+    ["init.templatedir"],
+    ["browser.*.cmd"],
+    ["browser.*.path"],
+    ["man.*.cmd"],
+    ["man.*.path"],
+    ["guitool.*.cmd"],
+    ["instaweb.httpd"],
+    ["instaweb.modulepath"],
+  ] as ReadonlyArray<readonly [string, ((value: string) => boolean)?]>
+).map(([spelled, runsNothing]) => {
+  const parts = spelled.split(".");
+  return {
+    section: parts[0]!,
+    subsection: parts.length === 3 ? parts[1]! : null,
+    variable: parts[parts.length - 1]!,
+    runsNothing: runsNothing ?? null,
+  };
+});
+
+type GitProgramKey = (typeof GIT_PROGRAM_KEYS)[number];
+
+/** Whether a table entry's subsection — none, `*` or one name — is the one a key spells. */
+const subsectionMatches = (entry: string | null, spelled: string | null): boolean =>
+  entry === null ? spelled === null : spelled !== null && (entry === "*" || entry === spelled);
+
+/**
+ * The program key a config key is, or null. git reads the section and the
+ * variable in any case and the subsection between them as spelled:
+ * `Core.Pager` is `core.pager`, and `protocol.EXT.allow` is not the `ext`
+ * protocol's.
+ */
+function gitProgramKey(key: string): GitProgramKey | null {
+  const first = key.indexOf(".");
+  const last = key.lastIndexOf(".");
+  if (first <= 0 || last === key.length - 1) return null;
+  const section = key.slice(0, first).toLowerCase();
+  const subsection = first === last ? null : key.slice(first + 1, last);
+  const variable = key.slice(last + 1).toLowerCase();
+  return (
+    GIT_PROGRAM_KEYS.find(
+      (entry) =>
+        entry.section === section &&
+        (entry.variable === "*" || entry.variable === variable) &&
+        subsectionMatches(entry.subsection, subsection),
+    ) ?? null
+  );
+}
+
+/** Whether a section `git config` renames or removes — `core`, `diff.tool1` — can hold a program key. */
+function sectionHoldsProgramKey(name: string): boolean {
+  const dot = name.indexOf(".");
+  const section = (dot === -1 ? name : name.slice(0, dot)).toLowerCase();
+  const subsection = dot === -1 ? null : name.slice(dot + 1);
+  return GIT_PROGRAM_KEYS.some((entry) => entry.section === section && subsectionMatches(entry.subsection, subsection));
+}
+
+/** `git config`'s actions whose operands are sections rather than keys. */
+const GIT_CONFIG_SECTION_ACTIONS = new Set(["--rename-section", "--remove-section", "rename-section", "remove-section"]);
+
+/**
+ * Whether a program key, set for one command to this value, runs a program
+ * the line chose: every value but the ones its entry says run nothing, and
+ * a value the guard cannot read (null).
+ */
+const runsChosenProgram = (entry: GitProgramKey, value: string | null): boolean =>
+  value === null || entry.runsNothing === null || !entry.runsNothing(value);
+
+/**
+ * git's variables that name a program it runs, or a place it copies hooks
+ * from, each with the values that run nothing; the credential rule holds
+ * the SSH, askpass and exec-path ones. `GIT_ALLOW_PROTOCOL` runs one where
+ * it lets `ext::` through, `GIT_TEST_FSMONITOR` stands for `core.fsmonitor`
+ * where that is unset, `GIT_DIFFTOOL_EXTCMD` is `git difftool`'s command and
+ * `GIT_TEST_MAINT_SCHEDULER` the scheduler `git maintenance` runs.
+ */
+const GIT_PROGRAM_ENV = new Map<string, ((value: string) => boolean) | null>([
+  ["GIT_EXTERNAL_DIFF", null],
+  ["GIT_PAGER", pagerRunsNothing],
+  ["GIT_EDITOR", editorRunsNothing],
+  ["GIT_SEQUENCE_EDITOR", editorRunsNothing],
+  ["GIT_PROXY_COMMAND", null],
+  ["GIT_TEMPLATE_DIR", null],
+  ["GIT_ALLOW_PROTOCOL", (value) => !value.split(":").includes("ext")],
+  ["GIT_TEST_FSMONITOR", (value) => GIT_FALSE.test(value)],
+  ["GIT_DIFFTOOL_EXTCMD", null],
+  ["GIT_TEST_MAINT_SCHEDULER", null],
+]);
+/**
+ * The variables that choose a program git runs only on a line that runs
+ * git: the generic ones git reads after its own; the ones through which a
+ * `less` git starts runs a preprocessor or postprocessor, reads a key file,
+ * or takes options that can name a file; and the directory `git difftool`
+ * and `git mergetool` source their tool scripts from. `PAGER=/tmp/x psql`
+ * chooses nothing for git.
+ */
+const PROGRAM_ENV = new Map<string, ((value: string) => boolean) | null>([
+  ["PAGER", pagerRunsNothing],
+  ["EDITOR", editorRunsNothing],
+  ["VISUAL", editorRunsNothing],
+  ["LESS", lessOptionsNameNoFile],
+  ["LESSOPEN", null],
+  ["LESSCLOSE", null],
+  ["LESSKEY", null],
+  ["LESSKEY_CONTENT", null],
+  ["MERGE_TOOLS_DIR", null],
+]);
+
+/** The sentence every program refusal ends with. */
+const PROGRAM_BECAUSE = "so git would run a program the line chooses";
+
+/**
+ * Why one command line has git run a program it chooses, and the key or
+ * variable that does, or null. The environment the line gives git
+ * (`lineEnvironment`) is read for `GIT_PROGRAM_ENV`, for `PROGRAM_ENV` where
+ * `onGitLine` says the line runs git somewhere, and for a program key set
+ * through `GIT_CONFIG_PARAMETERS` or a `GIT_CONFIG_KEY_<n>` with its
+ * `GIT_CONFIG_VALUE_<n>`; one the line builds, or a `GIT_CONFIG_PARAMETERS`
+ * git would refuse as malformed, is the alias rule's, which reads the same
+ * line first and refuses it. Where the command is `git`, every
+ * `-c`/`--config-env` before the verb is read, its key as the alias rule
+ * reads it (`configuredKey`), and a `--config-env` value comes from the
+ * environment, where the guard cannot read it; a value the line builds when
+ * it runs cannot be read either, and each is refused. A `git config` write of a program key, or
+ * of a section that can hold one, is refused whatever its value, since it
+ * holds for every git line after it.
+ */
+function gitProgramChoice(text: string, onGitLine: boolean): { target: string; reason: string } | null {
+  const words = splitWords(text.trim());
+  const readable = (value: string): string | null => (BUILT.test(value) ? null : value);
+  const assigned = new Map<string, string | null>();
+  for (const { name, value } of lineEnvironment(words)) assigned.set(name, readable(value));
+  for (const [name, value] of assigned) {
+    const known = GIT_PROGRAM_ENV.has(name) || (onGitLine && PROGRAM_ENV.has(name));
+    const runsNothing = GIT_PROGRAM_ENV.get(name) ?? PROGRAM_ENV.get(name) ?? null;
+    if (known && (value === null || runsNothing === null || !runsNothing(value))) {
+      return { target: name, reason: `${name} chooses a program git runs, ${PROGRAM_BECAUSE}` };
+    }
+    const configured =
+      name === GIT_CONFIG_PARAMETERS_VAR && value !== null
+        ? (gitConfigParameterPairs(value) ?? [])
+        : GIT_CONFIG_KEY_VAR.test(name) && value !== null
+          ? [{ key: value, value: assigned.get(`GIT_CONFIG_VALUE_${name.slice("GIT_CONFIG_KEY_".length)}`) ?? null }]
+          : [];
+    for (const pair of configured) {
+      const entry = gitProgramKey(pair.key);
+      if (entry !== null && runsChosenProgram(entry, pair.value)) {
+        return { target: pair.key, reason: `${name} sets ${pair.key}, which chooses a program git runs, ${PROGRAM_BECAUSE}` };
+      }
+    }
+  }
+  if (words.length === 0 || shellValue(words[0]!).split("/").pop() !== "git") return null;
+  const { verbIndex } = gitGlobalOptions(words);
+  const end = words[verbIndex]?.startsWith("-") === true ? words.length : verbIndex;
+  for (const [j, word] of words.slice(0, end).entries()) {
+    const eq = word.indexOf("=");
+    const flag = eq === -1 ? word : word.slice(0, eq);
+    if (j === 0 || !GIT_GLOBAL_CONFIG_FLAGS.has(flag)) continue;
+    const assignment = eq === -1 ? words[j + 1] : word.slice(eq + 1);
+    if (assignment === undefined) continue;
+    const key = configuredKey(flag, assignment);
+    const spelled = shellValue(assignment);
+    const valueAt = spelled.indexOf("=");
+    const value = flag === "--config-env" ? null : valueAt === -1 ? "true" : readable(spelled.slice(valueAt + 1));
+    const entry = gitProgramKey(key);
+    if (entry !== null && runsChosenProgram(entry, value)) {
+      return { target: key, reason: `${flag} sets ${key}, which chooses a program git runs, ${PROGRAM_BECAUSE}` };
+    }
+  }
+  const sections = words.slice(verbIndex + 1).some((word) => GIT_CONFIG_SECTION_ACTIONS.has(shellValue(word)));
+  const written = gitConfigWrittenKeys(words, verbIndex).find((key) =>
+    sections ? sectionHoldsProgramKey(key) : gitProgramKey(key) !== null,
+  );
+  return written === undefined
+    ? null
+    : {
+        target: written,
+        reason: `${written} writes a program git runs for the lines after this one, so a later git line runs a program this one chose`,
+      };
 }
 
 /** An entry as Claude Code writes them: `Read`, `Bash(git status:*)`, `Bash(ls)`. */
@@ -1357,16 +1677,33 @@ function decide(
     }
   }
 
-  // A git pointed at a repository or a config file the line picks, whose
-  // aliases the line does not show; a second line at the hook, as the alias
-  // rule is. After the
-  // credential rule, so a credential key written into such a repository is
-  // named as the credential it is. The environment is
-  // judged on any line that runs git anywhere — `export HOME=/tmp/h; git x` —
-  // since an assignment in one segment is the environment of the next.
+  // Whether the line runs git anywhere: an assignment in one segment is the
+  // environment of the next — `export HOME=/tmp/h; git x` — so the rules
+  // below that read a variable only git reads that way judge it on such a line.
   const lineRunsGit = everySegment(inspection.segments).some((segment) =>
     [segment.text, ...segment.invocations].some(runsGit),
   );
+
+  // A program git runs that the line chooses — a pager, an editor, a hook
+  // directory, a diff or filter driver — set through `-c`, `--config-env` or
+  // git's config variables for the one command, written with `git config`,
+  // or named by a variable git reads. Not the credential rule: `git -c
+  // core.pager=cat log` and `GIT_PAGER=cat git log` run nothing and stay
+  // admitted, so the refusal is keyed on the key and its value. Read in every
+  // segment the line holds, as the credential rule is; `PROGRAM_ENV` only on
+  // a line that runs git.
+  for (const inner of everySegment(inspection.segments)) {
+    for (const text of [inner.text, ...inner.invocations]) {
+      const chosen = gitProgramChoice(text, lineRunsGit || runsGit(text));
+      if (chosen !== null) return denied(ADMISSION_RULES.git_program_config, chosen.target, chosen.reason);
+    }
+  }
+
+  // A git pointed at a repository or a config file the line picks, whose
+  // aliases the line does not show; a second line at the hook, as the alias
+  // rule is. After the credential rule, so a credential key written into
+  // such a repository is named as the credential it is. The environment is
+  // judged on any line that runs git anywhere.
   for (const segment of inspection.segments) {
     for (const inner of everySegment([segment])) {
       for (const text of [inner.text, ...inner.invocations]) {
