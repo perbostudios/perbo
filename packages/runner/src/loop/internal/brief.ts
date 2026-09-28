@@ -163,6 +163,9 @@ export async function briefRound(args: {
     if (state.kind === "execute") {
       return executorPrompt(contract, {
         principles: args.principles,
+        // D-132: a person's answers to the review this fresh run's branch
+        // moved past, as data.
+        answeredBefore: state.answeredBefore,
         resumed:
           resumedHere !== null && resumeOutcome !== null && resumeOutcome.state !== "dropped"
             ? {
@@ -170,6 +173,9 @@ export async function briefRound(args: {
                 bundle_id: resumedHere.bundle_id,
                 termination: resumedHere.termination,
                 committed_at: committedAt,
+                model: resumedHere.model,
+                this_model: config.model,
+                limit: resumedHere.limit,
               }
             : null,
       });

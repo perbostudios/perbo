@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { hostname } from "node:os";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -10,6 +10,8 @@ import {
   type MaterializationManifest,
   type PlanContract,
   type ReviewArtifact,
+  type UsageLimit,
+  usageLimitStop,
 } from "@perbo/contracts";
 import type { Model } from "@perbo/model";
 import { runReview } from "@perbo/review";
@@ -1027,12 +1029,15 @@ describe("a review that did not complete", () => {
     });
   };
 
+  /** The connection a refused review below ran on, as its transport records it. */
+  const REVIEWER = { provider: "anthropic", model_id: "claude-fable-5-1" };
   const outage = (message: string) => ({
     artifact: makeReview({
       review_id: "rev_0000000000000001",
       decision: "error",
       coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
       error: { kind: "provider_unavailable", message, attempts: 1, unresolved_criteria: ["ac_1"], reading: [] },
+      model: REVIEWER,
     }),
     bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
   });
@@ -1090,6 +1095,46 @@ describe("a review that did not complete", () => {
     expect(result.detail).toContain("HTTP 529 again");
     expect(waited).toEqual([TRANSPORT_RETRY_DELAY_MS]);
     expect(double.judged).toHaveLength(2);
+    // An outage that stated no reset is no usage limit: nothing says whose
+    // connection to carry the review on from, and nothing is on the record.
+    const judged = result.rounds[0]!.attempt;
+    expect(judged.usage_limit).toBeNull();
+    expect(usageLimitStop(judged, result.rounds[0]!.review)).toBeNull();
+  }, 60_000);
+
+  /**
+   * D-NEW-pass-a-limited-loop-on: a review refused again after it waited out
+   * the reset its provider stated ends on that provider's usage limit. The
+   * attempt it judged was written, carrying the wait, before the run slept,
+   * and a record on disk is never rewritten, so the wait and the refused
+   * review are what say it.
+   */
+  it("ends on the reviewer's usage limit when the review is refused again after its wait", async () => {
+    const { contract, config, agent } = setUp();
+    const RESETS_AT = "2026-09-04T03:30:00.000Z";
+    const double = scripted([
+      () => outage("429 rate limited · resets 4:30am (Europe/London)"),
+      () => outage("429 rate limited · resets 4:30am (Europe/London)"),
+    ]);
+    const result = await runTicket({
+      config,
+      contract,
+      now: () => new Date("2026-09-04T00:15:00.000Z"),
+      sleep: async () => {},
+      hooks: { agent: agent.run as never, review: double.review },
+    });
+
+    expect(result.outcome).toBe("review_failed");
+    const judged = result.rounds[0]!.attempt;
+    expect(judged.wait?.until).toBe(RESETS_AT);
+    expect(judged.usage_limit).toBeNull();
+    expect(usageLimitStop(judged, result.rounds[0]!.review)).toMatchObject({
+      role: "reviewer",
+      provider: REVIEWER.provider,
+      model: REVIEWER.model_id,
+      until: RESETS_AT,
+      waited: true,
+    });
   }, 60_000);
 
   it("waits for the reset a rate limit states, recorded on the run lock while it waits", async () => {
@@ -1146,6 +1191,24 @@ describe("a review that did not complete", () => {
     expect(result.detail).toContain("(currently 3600000 ms)");
     expect(waited).toEqual([]);
     expect(double.judged).toHaveLength(1);
+    // D-NEW-pass-a-limited-loop-on: the run ended on the reviewer's usage
+    // limit, and the attempt the review judged says whose, on the ticket's
+    // record as well as in the result.
+    const limit = {
+      role: "reviewer",
+      provider: REVIEWER.provider,
+      model: REVIEWER.model_id,
+      until: "2026-09-04T03:30:00.000Z",
+      zone: "Europe/London",
+      quoted: expect.stringContaining("resets 4:30am"),
+    };
+    const judged = result.rounds[0]!.attempt;
+    expect(judged.usage_limit).toEqual(limit);
+    expect(usageLimitStop(judged, result.rounds[0]!.review)).toEqual({ ...limit, waited: false });
+    const onDisk = JSON.parse(
+      readFileSync(join(config.state_root, `${contract.ticket_id}.attempts.json`), "utf8"),
+    ) as { attempts: Array<{ usage_limit: unknown }> };
+    expect(onDisk.attempts.map((attempt) => attempt.usage_limit)).toEqual([limit]);
   }, 60_000);
 
   /**
@@ -2826,6 +2889,115 @@ describe("a run a provider's session limit cut", () => {
     expect(result.detail).toContain(RESETS_AT);
   }, 60_000);
 
+  /**
+   * D-NEW-pass-a-limited-loop-on, end to end: an attempt that did work and
+   * then met its provider's usage limit, with the reset past the bound, stops
+   * the ticket with the limit on its record; a run on another model resumes
+   * from that work, its executor is told whose work it is and how it ended,
+   * and the record names both models.
+   */
+  it("stops on a limit past the bound, and a run on another model carries its work on", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    config.limits = LimitsTableSchema.parse({
+      organisation: "test",
+      limits: { concurrent_local_attempts: 4, wait_for_provider_ms: 3_600_000 },
+    });
+    const LIMITED_MODEL = "claude-opus-5-5";
+    const CARRYING_MODEL = "claude-sonnet-5";
+    const WORK = "export const started = 'before the limit';\n";
+    const agent = fakeAgent(scratch, [
+      { kind: "session_limit", message: SESSION_LIMIT, file: "src/started.ts", contents: WORK },
+      { kind: "succeed", file: "src/feature.ts", contents: "export const total = (n) => n.length;\n" },
+    ]);
+    config.agent_binary = agent.binary;
+    config.model = LIMITED_MODEL;
+
+    const stopped = await runTicket({ config, contract, now: () => NOW, sleep: async () => {}, hooks: { review: approve } });
+    expect(stopped.outcome).toBe("terminated");
+    const [limited] = attemptsOnDisk(config, contract.ticket_id) as unknown as Array<{
+      attempt_id: string;
+      termination: { reason: string };
+      wait: null;
+      usage_limit: UsageLimit | null;
+      agent: { model: string };
+    }>;
+    expect(limited!.termination.reason).toBe("transport_unavailable");
+    expect(limited!.wait).toBeNull();
+    expect(limited!.usage_limit).toEqual({
+      role: "executor",
+      provider: "claude-cli",
+      model: LIMITED_MODEL,
+      until: RESETS_AT,
+      zone: "Europe/London",
+      quoted: expect.stringContaining("resets 4:30am"),
+    });
+    expect(usageLimitStop(limited!, null)).toMatchObject({ role: "executor", provider: "claude-cli", waited: false });
+    const execution = new BundleStore({ root: config.bundle_root, retainContext: true })
+      .list()
+      .find((bundle) => bundle.kind === "execution" && bundle.subject_id === limited!.attempt_id)!;
+    expect(execution.artifacts.map((artifact) => artifact.name)).toContain("change.diff");
+
+    // The person carries it on to another model, from the stopped attempt's work.
+    // Published, so the pull request's body can be read: the runner's own
+    // push, open and merge steps replaced by ones that record it.
+    const opened: string[] = [];
+    const carried = await runTicket({
+      config: { ...config, model: CARRYING_MODEL, resume_from: execution.bundle_id, publish: true },
+      contract,
+      now: () => NOW,
+      sleep: async () => {},
+      hooks: {
+        review: (async () => ({
+          artifact: makeReview({
+            review_id: "rev_0000000000000194",
+            decision: "approve",
+            model: { provider: "codex-cli", model_id: "gpt-5.5" },
+          }),
+          bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+        })) as never,
+        push: (async () => ({ pushed: true, detail: "recorded" })) as never,
+        open: (async (request: { body: string }) => {
+          opened.push(request.body);
+          return { url: "https://example.invalid/pull/194", number: 194 };
+        }) as never,
+        merge: (async () => ({ merged: false, stop: null, head_sha: null, detail: "a person merges" })) as never,
+      },
+    });
+    expect(carried.outcome).toBe("approved");
+    // The pull request lists both attempts, both runs, in order: the limited
+    // one, and the one another model ran after the limit, with its review.
+    const listed = (opened[0] ?? "").split("## Attempts")[1]?.split("## Rollout")[0] ?? "";
+    expect(listed.split("\n").filter((line) => line.startsWith("| "))).toEqual([
+      "| # | run | round | executor | ended | review |",
+      `| 1 | 1 | 0 | Claude Code · \`${LIMITED_MODEL}\` | stopped by the usage limit on Claude Code until ` +
+        `${RESETS_AT} (Europe/London) | none |`,
+      `| 2 | 2 | 0 | Claude Code · \`${CARRYING_MODEL}\` — another connection or model than Claude Code · ` +
+        `\`${LIMITED_MODEL}\`, after the usage limit on Claude Code | completed | Codex · \`gpt-5.5\`: approve |`,
+    ]);
+    const [, second] = agent.invocations();
+    // The work the limited attempt wrote is carried on the branch the new
+    // model's work is sealed on.
+    expect(git(repo.dir, "show", `${carried.workspace.branch}:src/started.ts`)).toBe(WORK);
+    const argv = second!.argv;
+    expect(argv[argv.indexOf("--model") + 1]).toBe(CARRYING_MODEL);
+    // A new session on whatever runs it: nothing of the old one is resumed.
+    expect(argv.some((arg) => arg === "--resume" || arg === "--continue")).toBe(false);
+    const brief = argv.find((arg) => arg.includes("previous attempt of this same ticket")) ?? "";
+    expect(brief).toContain("was stopped part-way by its provider's usage limit (it ended `transport_unavailable`)");
+    expect(brief).toContain(`That attempt ran on another model, \`${LIMITED_MODEL}\`; you are \`${CARRYING_MODEL}\``);
+
+    const record = attemptsOnDisk(config, contract.ticket_id) as unknown as Array<{
+      attempt_id: string;
+      agent: { model: string };
+      resumed_from: { bundle_id: string } | null;
+    }>;
+    expect(record.map((attempt) => attempt.agent.model)).toEqual([LIMITED_MODEL, CARRYING_MODEL]);
+    expect(record[1]!.resumed_from?.bundle_id).toBe(execution.bundle_id);
+  }, 90_000);
+
   it("honours a park a killed run left on the record", async () => {
     const repo = runnerRepository(scratch);
     const contract = makeContract();
@@ -3497,45 +3669,63 @@ describe("a scope escape handed back to a remediation round", () => {
     expect(bundle?.versions).toMatchObject({ model: "none", prompt: "none" });
     expect(bundle?.replayability).toBe("exact");
     // The review stays on record, anchored on the commit it judged, with the
-    // refusal's open set: a later run finds the review and sees the branch has
-    // moved past what was judged.
-    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id, history: [] });
+    // refusal's open set, and the branch is back at that commit: the refused
+    // commit is on the record, never at the branch's head.
+    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id, history: [], declines: [] });
     expect(judged?.review.review_id).toBe("rev_0000000000000196");
     expect(judged?.head_commit).toBe(first.final_review!.target.head_commit);
     expect(judged?.head_commit).not.toBe(round.attempt.head_commit);
     expect(judged?.openKeys).toEqual(new Set([scopeFinding.key]));
-
-    // Run 3 on the widened branch: nothing judged that commit, so the run
-    // reviews it afresh rather than continuing from the refusal.
-    const reviewed: unknown[] = [];
+    const branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome });
+    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged!.head_commit);
+    expect(repo.git("cat-file", "-t", round.attempt.head_commit!).trim()).toBe("commit");
+    const sealedBundle = store.forTicket(contract.ticket_id).find((entry) => entry.subject_id === round.attempt.attempt_id)!;
+    expect(store.artifact(sealedBundle, "change.diff")).toContain("test/extra.test.ts");
+    // The refused finding is the person's now (D-132): their answer runs one
+    // round on the judged commit with their words, verified, and no review.
+    const verified: Array<{ findings: Array<{ key: string }> }> = [];
+    const closesEverything = (seen: Array<{ findings: Array<{ key: string }> }>) =>
+      (async (input: { findings: Array<{ key: string }> }) => {
+        seen.push(input);
+        const keys = input.findings.map((entry) => entry.key);
+        return {
+          prompt_version: "closure_verify_v1",
+          per_finding: keys.map((finding_key) => ({ finding_key, status: "closed", pointer: "src/feature.ts" })),
+          deterministic_failure: null,
+          all_closed: true,
+          open_keys: [],
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          cost_micros: 30,
+          cost_basis: "provider_list_estimate",
+        };
+      }) as never;
+    const agent = agentDouble((worktree) => {
+      writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 2;\n");
+    });
     const third = await runTicket({
       config,
       contract,
+      decided: [
+        {
+          finding_key: scopeFinding.key,
+          choice: "approach",
+          review_id: null,
+          note: "Keep the change inside src/ and drop the extra test file.",
+          author: "Owen <owen@example.com>",
+          decided_at: new Date().toISOString(),
+        },
+      ],
       hooks: {
-        agent: agentDouble((worktree) => {
-          rmSync(join(worktree, "test", "extra.test.ts"));
-        }).run as never,
-        review: (async (input: Record<string, unknown>) => {
-          reviewed.push(input);
-          return {
-            artifact: makeReview({
-              review_id: "rev_0000000000000197",
-              decision: "approve" as const,
-              findings: [],
-              head_commit: input.head_commit as string,
-              changeset_id: (input.changeset as { changeset_id: string }).changeset_id,
-            }),
-            bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
-          };
+        agent: agent.run as never,
+        review: (async () => {
+          throw new Error("the person's answer acts on the judged commit, never a fresh review");
         }) as never,
-        verify: (async () => {
-          throw new Error("a widened branch is reviewed afresh, never verified against the refusal");
-        }) as never,
+        verify: closesEverything(verified),
       },
     });
-    expect(reviewed).toHaveLength(1);
-    expect(third.rounds[0]!.kind).toBe("execute");
-    expect(third.detail).not.toContain("widened the change set");
+    expect(third.rounds.map((entry) => entry.kind)).toEqual(["remediate"]);
+    expect(agent.calls[0]).toContain("Keep the change inside src/ and drop the extra test file.");
+    expect(verified.map((input) => input.findings.map((entry) => entry.key))).toEqual([[scopeFinding.key]]);
     expect(third.outcome).toBe("approved");
   }, 90_000);
 });

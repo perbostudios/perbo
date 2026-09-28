@@ -402,7 +402,7 @@ describe("the steps a run goes through", () => {
     detail.attempts = [];
     detail.ticket.history = [{ at: minute(2.5), from: "ready", to: "provisioning", note: "worktree provisioned and materialized" }];
   };
-  const STAGES = ["Review round 1", "Running check Tests", "Sealing the change set", "Executing", "Provisioning the worktree"];
+  const STAGES = ["Independent review", "Running check Tests", "Sealing the change set", "Executing", "Provisioning the worktree"];
 
   afterEach(() => {
     vi.useRealTimers();

@@ -3,7 +3,7 @@ import {
   answersReview,
   decidable,
   decisionChoicesFor,
-  leftToPrinciple,
+  declinesOnRecord,
   loopOnRecord,
   NOTHING_TRIED,
   owedAnswers,
@@ -12,6 +12,7 @@ import {
   type HistoryRow,
   type LoopOnReview,
   type RecordedBundle,
+  type RecordedDecline,
 } from "@perbo/contracts/browser";
 import type { Finding, ReviewArtifact, Ticket } from "@perbo/contracts";
 import type { AttemptView, DecisionQuestion } from "./protocol.js";
@@ -35,9 +36,11 @@ import type { AttemptView, DecisionQuestion } from "./protocol.js";
  * `closure: "human"` stays in its own right: the reviewer naming a person as
  * the closer is a direct answer to this question, whatever the routing beside
  * it. `advisory` and `waived` are not here because neither closes a gate, and
- * `remediable` is here only once a run ended stalled or exhausted on the
- * review (`routedToPerson`, from `settled.loop`): until then the executor is
- * answering it, and after it every one a round did not close is the person's.
+ * `remediable` is here only once the loop has finished trying it — a run ended
+ * stalled or exhausted on the review, the executor declined it, or the runner
+ * refused the round given it (`routedToPerson`, from `settled.loop`): until
+ * then the executor is answering it, and after it every one a round did not
+ * close is the person's.
  *
  * A finding `routedToPerson` on a `decidable` review — the predicates `perbo
  * verdict --decide` and the loop read too — takes one of the answers that
@@ -48,9 +51,6 @@ import type { AttemptView, DecisionQuestion } from "./protocol.js";
  * (D-132). Such a finding in
  * `settled` is not asked again. Every other question takes no choice: its
  * answer is recorded as a principle for the executor (D-065) and nothing else.
- * A finding the executor declined (`leftToPrinciple`) is not asked at all: a
- * principle is its answer, added with `perbo principle add` (D-065), and the
- * stopped page names it and that command.
  *
  * A finding the last round's verification left open on its deterministic
  * evidence — a check the round failed, or a scope it widened — is asked with
@@ -77,7 +77,6 @@ export function decisionQuestions(
     .filter(
       (finding) =>
         finding.status === "open" &&
-        !leftToPrinciple(finding, settled.loop) &&
         (decides(finding)
           ? !settled.keys.has(finding.key)
           : routedToPerson(finding, settled.loop) || finding.closure === "human"),
@@ -92,6 +91,7 @@ export function decisionQuestions(
         .filter((text) => text.trim().length > 0)
         .map(asSentence)
         .join(" "),
+      declined: settled.loop.declined.get(finding.key) ?? [],
       choices: decides(finding) ? decisionChoicesFor(finding.rule_id) : [],
     }));
 }
@@ -180,6 +180,9 @@ export function settledFindings(detail: {
     review_id: review.review_id,
     bundles: detail.attempts.flatMap((attempt) => attempt.bundles),
     history: detail.ticket.history,
+    declines: declinesOnRecord(
+      detail.attempts.map((attempt) => ({ created_at: attempt.startedAt, declines: attempt.declines })),
+    ),
     verdicts: detail.verdicts,
     verification: verified.at(-1) ?? null,
   });
@@ -197,10 +200,17 @@ export function settledOnRecord(input: {
   review_id: string;
   bundles: readonly RecordedBundle[];
   history: readonly HistoryRow[];
+  /** What the ticket's attempts declined (`declinesOnRecord`). */
+  declines: readonly RecordedDecline[];
   verdicts: readonly unknown[];
   verification: { open_keys: readonly string[]; deterministic_failure: string | null } | null;
 }): SettledFindings {
-  const onRecord = loopOnRecord({ review_id: input.review_id, bundles: input.bundles, history: input.history });
+  const onRecord = loopOnRecord({
+    review_id: input.review_id,
+    bundles: input.bundles,
+    history: input.history,
+    declines: input.declines,
+  });
   if (onRecord === null) return NOTHING_SETTLED;
   const answered = input.verdicts.flatMap((row) => {
     const parsed = AnsweredSchema.safeParse(row);

@@ -22,6 +22,22 @@ export type {
   TerminationReason,
   VerifiedCommit,
 } from "./attempt.js";
+export {
+  USAGE_LIMIT_ROLES,
+  UsageLimitRoleSchema,
+  UsageLimitSchema,
+  usageLimitHolds,
+  usageLimitStop,
+} from "./usage-limit.js";
+export type {
+  UsageLimit,
+  UsageLimitAttempt,
+  UsageLimitReview,
+  UsageLimitRole,
+  UsageLimitStop,
+} from "./usage-limit.js";
+export { attemptEnding, connectionName, stoppedBy } from "./ending.js";
+export type { EndingAttempt } from "./ending.js";
 export { AuthoredAttemptSchema, issueAuthoredAttempts } from "./authored.js";
 export type { AuthoredAttempt } from "./authored.js";
 export {
@@ -317,9 +333,9 @@ export {
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
+  declinesOnRecord,
   FINISHED_TRYING,
   judgedCommit,
-  leftToPrinciple,
   loopOnRecord,
   loopOnReview,
   NEVER_HANDED_FAMILIES,
@@ -327,7 +343,7 @@ export {
   owedAnswers,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle, RecordedDecline } from "./decision.js";
 export { compareLevels, deriveActualRisk, derivePlannedRisk, maxLevel } from "./risk.js";
 export type { RiskDerivation } from "./risk.js";
 export { bundleId, BundleIdSchema, computeReplayability, RunBundleSchema } from "./runbundle.js";

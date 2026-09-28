@@ -54,13 +54,32 @@ measurement, not an edit.
 ([D-132](../../docs/11-open-decisions.md)): the three
 choices and the words each carries where the person typed none, `loopOnRecord`, which reads what the
 loop has done on a review — whether a run since it ended stalled or exhausted, what each
-finding's last closure verification left open, and what the executor declined — `routedToPerson`, which says which findings take
-one, `leftToPrinciple`, which says which a principle answers, `decidable`, which says only a review that judged the whole change and stopped for a person, or
+finding's last closure verification left open, which rounds the runner refused, and what the executor
+declined since (`declinesOnRecord` reads those off the attempts' records) — `routedToPerson`, which says which findings take
+one, a declined one included, `decidable`, which says only a review that judged the whole change and stopped for a person, or
 one the loop has finished trying, takes any, `answersReview`, which says which review an answer
 answers, `owedAnswers`, which says which a run would start without,
 `judgedCommit`, which says which commit the branch has to be at for a run to act on that record, and `decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
+
+`usage-limit.ts` is the single home for a provider's usage limit that ended a run
+([D-NEW-pass-a-limited-loop-on](../../docs/11-open-decisions.md)): the two roles a limit can stop,
+the executor's attempt or the review of its work, the limit the runner records on the attempt it
+stopped after (`UsageLimitSchema`), `usageLimitStop`, which says from the attempt's typed record and
+its review's whether a run ended on one and whose, and `usageLimitHolds`, which says whether the
+reset the provider stated has passed. `perbo run`, `perbo inspect`, the pull request's list of
+attempts and the desktop's stopped page read the same rule, never a log line or a model's words
+([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)); the renderer takes it from
+`@perbo/contracts/browser`.
+
+`ending.ts` is the single home for how an attempt ended and the connection that ran it, in Perbo's
+words: `connectionName`, the name a person knows a connection by, `stoppedBy`, who or what stopped
+an attempt part-way, which the resumed executor's brief says, and `attemptEnding`, the phrase the
+pull request's list of attempts carries for each. Every word is read from the records the runner wrote, never
+from a termination's detail or anything a model wrote
+([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)); the renderer takes it from
+`@perbo/contracts/browser`.
 
 `opencode.ts` is the single home for how every role Perbo runs on OpenCode starts it
 ([D-134](../../docs/11-open-decisions.md)): the argv, the permission rules
@@ -99,8 +118,8 @@ screen says it; it imports only the ticket's types, so the renderer takes it fro
 `ticket-transitions.ts` is the single home for the ticket lifecycle's rows, `TICKET_TRANSITIONS`:
 `transition` in `ticket.ts` refuses a move with no row, `perbo run` walks and reopens a ticket along
 them, and the desktop's sample host moves its tickets by the same rows. It imports only the ticket's
-types, `gateClosedNote`, the note an escalated run's row is guarded on, and `ANSWERS_OWED_NOTE`,
-the note the same row takes back a ticket the loop refused on, so the renderer takes it
+types and `ANSWERS_OWED_NOTE`, the note the row from `provisioning` back to `changes_requested` is
+guarded on, which takes back a ticket the loop refused on, so the renderer takes it
 from `@perbo/contracts/browser`.
 
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived

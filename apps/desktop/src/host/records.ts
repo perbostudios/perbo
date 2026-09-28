@@ -17,6 +17,7 @@ import {
   FINDING_ROUTINGS,
   ReviewDecisionSchema,
   costOf,
+  declinesOnRecord,
   judgedCommit,
   loopOnRecord,
   parseUnifiedDiff,
@@ -56,6 +57,8 @@ export const StoredAttemptSchema = z.looseObject({
     })
     .optional(),
   termination: z.looseObject({ reason: z.string() }).optional(),
+  /** What the attempt declined (D-065), with the reason it gave; absent where the record does not say. */
+  declines: z.array(z.looseObject({ finding_key: z.string(), reason: z.string() })).optional(),
 });
 export type StoredAttempt = z.infer<typeof StoredAttemptSchema>;
 const AttemptsRecordSchema = z.looseObject({
@@ -576,6 +579,8 @@ export function reviewOnRecord(input: {
   ticket: Pick<Ticket, "ticket_id" | "history">;
   objectsDirectory: string;
   verdictsPath: string;
+  /** The ticket's attempts record, whose declines make a finding the person's (D-065). */
+  attemptsPath: string;
 }): { review: FindingsOnRecord; settled: SettledFindings; judged: string | null } | null {
   const review = findingsOnRecord(input.bundles, input.ticket.ticket_id, input.objectsDirectory);
   if (review === null) return null;
@@ -591,15 +596,21 @@ export function reviewOnRecord(input: {
       ? [{ kind: bundle.kind, subject_id: bundle.subject_id, created_at: bundle.created_at, inputs: bundle.inputs ?? {} } as RecordedBundle]
       : [],
   );
+  const declines = declinesOnRecord(
+    readAttempts(input.attemptsPath).attempts.flatMap((attempt) =>
+      attempt.created_at === undefined ? [] : [{ created_at: attempt.created_at, declines: attempt.declines }],
+    ),
+  );
   const settled = settledOnRecord({
     ticket_id: input.ticket.ticket_id,
     review_id: review.review_id,
     bundles: recorded,
     history: input.ticket.history,
+    declines,
     verdicts,
     verification: null,
   });
-  const onRecord = loopOnRecord({ review_id: review.review_id, bundles: recorded, history: input.ticket.history });
+  const onRecord = loopOnRecord({ review_id: review.review_id, bundles: recorded, history: input.ticket.history, declines });
   const judged =
     onRecord === null || review.target === undefined ? null : judgedCommit(review.target.head_commit, onRecord.verifications);
   return { review, settled, judged };

@@ -672,6 +672,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
       usage: { cost_micros: 0 },
     };
     const body = pullRequestBody({
+      attempt_list: [],
       contract: contract as never,
       attempt: attempt as never,
       review: makeReview({
@@ -688,6 +689,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     // A ticket that started here has no source line at all: "none" is a fact,
     // not a gap to fill with a dash.
     const started = pullRequestBody({
+      attempt_list: [],
       contract: contract as never,
       attempt: attempt as never,
       review: makeReview({

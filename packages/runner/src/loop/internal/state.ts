@@ -1,6 +1,7 @@
 import type {
   AttemptWait,
   CheckResult,
+  DecisionChoice,
   ExecutionAttempt,
   Finding,
   IncompleteReviewPath,
@@ -174,6 +175,16 @@ export interface ConflictInterruption {
   resume_kind: RoundKind;
 }
 
+/** A person's answer to a finding of an earlier review, as a fresh review's run carries it. */
+export interface EarlierAnswer {
+  finding_key: string;
+  /** The finding as that review stated it. */
+  statement: string;
+  choice: DecisionChoice;
+  /** Their words, or the words their choice stands for. */
+  words: string;
+}
+
 /** The remediation a run continues, as `remediationToContinue` reports it. */
 export type Continuation = NonNullable<ReturnType<typeof remediationToContinue>>;
 
@@ -300,6 +311,15 @@ export interface RoundState {
    */
   readonly directions: readonly Direction[];
   /**
+   * A person's answers to the last review on record, where this run reviews
+   * afresh because the branch moved past the commit that review judged — a
+   * commit made outside the run (D-132): what they decided on which finding,
+   * in their words. The executor's first round carries them as data; they are
+   * never an instruction or a parameter (ADR-0023). Empty where no answer
+   * stands on that review.
+   */
+  readonly answeredBefore: readonly EarlierAnswer[];
+  /**
    * SCP-154: what a resumed round did with the retained diff — applied, held
    * by the branch already, or dropped — and null where the round resumes
    * nothing. Held here so the further attempts of that round, which do not
@@ -371,7 +391,11 @@ export type Retry = Extract<Step, { next: "retry" }>;
 export type Advance = Extract<Step, { next: "advance" }>;
 
 /** The state the first round of a run enters with. */
-export function initialRoundState(workspace: Workspace, continuing: Continuation | null): RoundState {
+export function initialRoundState(
+  workspace: Workspace,
+  continuing: Continuation | null,
+  answeredBefore: readonly EarlierAnswer[] = [],
+): RoundState {
   return {
     round: continuing === null ? 0 : 1,
     remediationRound: continuing === null ? 0 : 1,
@@ -392,6 +416,7 @@ export function initialRoundState(workspace: Workspace, continuing: Continuation
     conflict: null,
     continuing,
     directions: continuing?.directions ?? [],
+    answeredBefore,
     resumeOutcome: null,
   };
 }
