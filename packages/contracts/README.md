@@ -63,24 +63,6 @@ answers, `owedAnswers`, which says which a run would start without,
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
 
-`usage-limit.ts` is the single home for a provider's usage limit that ended a run
-([D-NEW-pass-a-limited-loop-on](../../docs/11-open-decisions.md)): the two roles a limit can stop,
-the executor's attempt or the review of its work, the limit the runner records on the attempt it
-stopped after (`UsageLimitSchema`), `usageLimitStop`, which says from the attempt's typed record and
-its review's whether a run ended on one and whose, and `usageLimitHolds`, which says whether the
-reset the provider stated has passed. `perbo run`, `perbo inspect`, the pull request's list of
-attempts and the desktop's stopped page read the same rule, never a log line or a model's words
-([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)); the renderer takes it from
-`@perbo/contracts/browser`.
-
-`ending.ts` is the single home for how an attempt ended and the connection that ran it, in Perbo's
-words: `connectionName`, the name a person knows a connection by, `stoppedBy`, who or what stopped
-an attempt part-way, which the resumed executor's brief says, and `attemptEnding`, the phrase the
-pull request's list of attempts carries for each. Every word is read from the records the runner wrote, never
-from a termination's detail or anything a model wrote
-([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)); the renderer takes it from
-`@perbo/contracts/browser`.
-
 `opencode.ts` is the single home for how every role Perbo runs on OpenCode starts it
 ([D-134](../../docs/11-open-decisions.md)): the argv, the permission rules
 each role runs under, the whole configuration, the directories that stand for OpenCode's own, the

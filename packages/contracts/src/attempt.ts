@@ -13,7 +13,6 @@ import {
 } from "./ids.js";
 import { PlanLevelSchema } from "./plan.js";
 import { BundleIdSchema } from "./runbundle.js";
-import { UsageLimitSchema } from "./usage-limit.js";
 import {
   AutonomyClassSchema,
   NeutralisationRecordSchema,
@@ -621,16 +620,6 @@ export const ExecutionAttemptSchema = z.strictObject({
    * record written before parking existed parses.
    */
   wait: AttemptWaitSchema.nullable().default(null),
-  /**
-   * The provider usage limit the run stopped on after this attempt
-   * (D-NEW-pass-a-limited-loop-on): whose connection refused — the executor's
-   * or its review's — the reset the provider stated, and its own words. The
-   * runner writes it where a stated reset ended the run rather than parking
-   * it, and `usageLimitStop` is what reads it. Null where no limit ended the
-   * run here, and defaulted, so a record written before the field existed
-   * parses.
-   */
-  usage_limit: UsageLimitSchema.nullable().default(null),
   /**
    * The findings this attempt declined (D-065), recorded at the seal: empty
    * where it declined none, which is every round that was handed no finding.

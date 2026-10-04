@@ -43,7 +43,6 @@ const bodyWith = (findings: Finding[]): string => {
   const review = makeReview({ review_id: "rev_0000000000000001", decision: "changes_requested" });
   const attempt = { attempt_id: "att_1", base_commit: "abc1234", head_commit: "def5678", usage: { cost_micros: 0 } };
   return pullRequestBody({
-    attempt_list: [],
     contract: makeContract() as unknown as PlanContractWithCriteria,
     attempt: attempt as never,
     review: { ...review, findings } as unknown as ReviewArtifact,
@@ -117,7 +116,6 @@ describe("the pull request tells a person what is waiting on them", () => {
     };
 
     const body = pullRequestBody({
-      attempt_list: [],
       contract: makeContract() as unknown as PlanContractWithCriteria,
       attempt: second as never,
       review: review as unknown as ReviewArtifact,
@@ -154,7 +152,6 @@ describe("the pull request tells a person what is waiting on them", () => {
     };
 
     const body = pullRequestBody({
-      attempt_list: [],
       contract: makeContract() as unknown as PlanContractWithCriteria,
       attempt: attempt as never,
       review: review as unknown as ReviewArtifact,
@@ -183,7 +180,6 @@ describe("the pull request tells a person what is waiting on them", () => {
     };
 
     const body = pullRequestBody({
-      attempt_list: [],
       contract: makeContract() as unknown as PlanContractWithCriteria,
       attempt: stopped as never,
       review: review as unknown as ReviewArtifact,
@@ -205,7 +201,6 @@ describe("a declined finding reaches the person as their decision (D-065)", () =
     const review = makeReview({ review_id: "rev_0000000000000003", decision: "changes_requested" });
     const attempt = { attempt_id: "att_1", base_commit: "abc1234", head_commit: "def5678", usage: { cost_micros: 0 } };
     const body = pullRequestBody({
-      attempt_list: [],
       contract: makeContract() as unknown as PlanContractWithCriteria,
       attempt: attempt as never,
       review: { ...review, findings: [routed] } as unknown as ReviewArtifact,
@@ -266,7 +261,6 @@ describe("every stop is answerable with one click (D-060, measured live)", () =>
     const review = makeReview({ review_id: "rev_0000000000000006", decision: "changes_requested" });
     const attempt = { attempt_id: "att_1", base_commit: "abc1234", head_commit: "def5678", usage: { cost_micros: 0 } };
     const body = pullRequestBody({
-      attempt_list: [],
       contract: makeContract() as unknown as PlanContractWithCriteria,
       attempt: attempt as never,
       review: { ...review, findings: [declined, stop] } as unknown as ReviewArtifact,

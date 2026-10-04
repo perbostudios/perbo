@@ -173,9 +173,6 @@ export async function briefRound(args: {
                 bundle_id: resumedHere.bundle_id,
                 termination: resumedHere.termination,
                 committed_at: committedAt,
-                model: resumedHere.model,
-                this_model: config.model,
-                limit: resumedHere.limit,
               }
             : null,
       });

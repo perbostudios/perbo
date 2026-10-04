@@ -5,7 +5,6 @@ import {
   LEAVE_IT_TO_THE_INTERVIEW,
   PART_LETTERS,
   answersGroup,
-  connectionName,
   groupAnswers,
   planNodes,
   sameQuestion,
@@ -27,8 +26,8 @@ import {
 import { specSlugOf } from "./spec-slug.js";
 import type {
   Detail, Draft, DraftEdit, EditingChange, EditingForm, EditingOperation, EditingSession,
-  EditingTarget, InterviewEntry, Job, LegacyEditing, ModelProvider, OpenDraft, PlanningPane, PlanPromise,
-  Request, SpecSections, TaskModels,
+  EditingTarget, InterviewEntry, Job, LegacyEditing, OpenDraft, PlanningPane, PlanPromise, Request,
+  SpecSections, TaskModels,
 } from "./protocol.js";
 
 type EditingRequest = Extract<
@@ -1690,10 +1689,16 @@ export function architectRule(
 
 /**
  * The name a person reads for a model provider, wherever the desktop names
- * one: a picker's option, the Architect's section and the chat's header — the
- * name the pull request's list of attempts gives it too (`connectionName`).
+ * one: a picker's option, the Architect's section and the chat's header.
  */
-export const providerName = (id: ModelProvider): string => connectionName(id);
+export const providerName = (id: string): string =>
+  id === "codex-cli"
+    ? "Codex"
+    : id === "opencode-cli"
+      ? "OpenCode"
+      : id === "anthropic"
+        ? "Anthropic API"
+        : "Claude Code";
 
 /** The sessions `perbo interview --provider` names. */
 export type InterviewProviderName = "claude" | "codex" | "opencode";

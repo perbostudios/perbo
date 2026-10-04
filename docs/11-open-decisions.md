@@ -408,15 +408,6 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Why: the founder's ruling. A repository's own tooling reaches for hosts outside the defaults, and an attempt that stops on the first of them leaves the person nothing to do but add the host and run again; a question while the call is held is one press. One question a run keeps the person from being asked host after host, and a refusal that closes the network tells the executor to stop reaching for it rather than trying the next mirror.
 - Changes if: runs wait on questions a person almost always refuses, or a host allowed this way is reached for something other than what the command showed.
 
-### D-NEW-pass-a-limited-loop-on — A run a usage limit ended carries on on another connection
-
-- Owner: Founder
-- Decision: a run a provider's usage limit ended carries on from the stopped attempt's work on the connection and model the person chooses. A usage limit is a connection's — every model a Claude Code login, a Codex login, an OpenCode login or an Anthropic API key reaches — so the person chooses another connection for the role that was limited, the executor's or the reviewer's, and the limited connection is offered for that role only once the reset its provider stated has passed. What counts as ended on a usage limit is read from the records by one function, `usageLimitStop` in `@perbo/contracts`, which the CLI and the desktop both read: the runner's `usage_limit` on the attempt the run stopped after, written where a provider's stated reset ended the run — an attempt refused with a reset past `wait_for_provider_ms`, or stated again by the attempt after a retry, and a review refused with one it would not wait for — and, for a review that parked on a stated reset and was refused again after it, whose attempt was written before the wait and is never rewritten, that attempt's wait and the review's recorded decision and error kind. Never a termination's detail, a log line or anything a model wrote ([ADR-0023](adr/0023-untrusted-context-boundary.md)). The models the person chooses become the ticket's models; they are not part of the approved contract, which stays as it is (ADR-0016). Where the reviewer is carried on, which model reviews stays the person's choice ([D-010](11-open-decisions.md)), and its model is part of what the review's evidence records. The pull request's body names the connection and model of every attempt and every review of the ticket, in order over all its runs, so a change two models made says so where it is merged. No default changes.
-- Why: the founder asked that a loop a usage limit ended can be passed on to another model, and that the person selects the connection, because a usage limit covers the whole connection. Nothing about the plan or the work stands in the way: the work is sealed on the branch and in its execution bundle, and `--resume-from` already starts an attempt from it whatever model runs it.
-- Changes if: a provider's limit becomes a model's rather than its connection's, which would offer that connection's other models at once.
-- Built: the runner writing `usage_limit` on the attempt (the role, the connection in the run configuration's words, the model, the reset as an instant, its zone and the provider's sentence); `usageLimitStop` and `usageLimitHolds` in `@perbo/contracts`; the resumed executor's brief (`executor_resumed_v4`) saying which model wrote the work where another did, and how the prior attempt ended, a usage limit's included; `perbo run` printing the limit and the command that carries the work on where a run ends on one, `perbo inspect` the same under the attempt and `usage_limit` in its JSON, and `perbo run --provider`, `--model`, `--reviewer-provider` and `--reviewer-model` over the run configuration, a connection changed this way taking its own binary and defaults with it; on the desktop, the stopped page's sentence, **Continue on another model** opening the contract's model picker for the limited role on the other connections signed in for it, the limited connection marked and held until its reset, the choice written to the ticket's models and the run started from the stopped attempt's work, and **Continue the task** held until the reset, the host refusing other models for a run no usage limit ended and the limited connection for the limited role before its reset. The pull request's body lists every attempt of the ticket in order over all its runs, from its attempts record and review bundles: the connection and model that ran each executor and each review, how each attempt ended in the words `ending.ts` in `@perbo/contracts` holds for the brief and the body alike (`stoppedBy`, `attemptEnding`), and where the connection or model changed, why; a publishing run and `--publish-retained` write it the same. A resumed attempt is a new session of whatever connection runs it; no session id crosses from the stopped attempt.
-- Not built: a run the person stopped while it was parked on a provider's reset carries on as any stop of theirs does, on the models the ticket holds.
-
 ### D-036 — A worktree is materialized, not merely provisioned
 
 - Owner: Founder
@@ -953,7 +944,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
   page's ended card is, the whole of each behind an `i` — and its three ways out — **Delete this
   work**, **Plan it again** and **Continue the task** — as buttons named and nothing else, beside
   **View the paused loop**, which opens the ticket's loop page and has the way back, and which says
-  **View the loop** after any stop but the person's own, Perbo closing or a provider's usage limit. The progress
+  **View the loop** after any stop but the person's own or Perbo closing. The progress
   wheel — the ring on a Home card and the bar on the loop page, which read one fill — has six stages
   in equal slices, in the order the loop runs them: contract, which fills nothing; execution, which
   holds the worktree, the executor, sealing and the deterministic checks; review, the ticket's first
@@ -973,11 +964,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
   happened listed once, whether the records or a run's log says it, refinement rounds and
   verification passes counted over the ticket, and each decision the person took a step where they
   took it, "You answered 3 findings", with the answers behind its `i`.
-  **Continue the task** is offered only after the person's own stop, Perbo closing while the run
-  was going — quit or crashed, one event, recorded `interrupted` either way — or a provider's usage
-  limit, held then until the provider's stated reset, beside **Continue on another model**
-  ([D-NEW-pass-a-limited-loop-on](11-open-decisions.md)), and carries on where they left off; after
-  any other stop — a limit, a refusal, an error — it is disabled, saying that
+  **Continue the task** is offered only after the person's own stop or Perbo closing while the run
+  was going — quit or crashed, one event, recorded `interrupted` either way — and carries on where
+  they left off; after any other stop — a limit, a refusal, an error — it is disabled, saying that
   another attempt at the same plan meets the same reason again and pointing to **Plan it again**,
   which is the way to change the spec or the plan and start the loop over, and where the record of
   how the run ended is gone it says it cannot tell which stop it was. A run that ends on a verdict

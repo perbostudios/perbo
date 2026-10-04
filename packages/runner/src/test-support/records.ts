@@ -179,7 +179,6 @@ export function makeAttempt(input: {
     base_verification: null,
     provisioning_verify: null,
     wait: null,
-    usage_limit: null,
   } satisfies ExecutionAttempt);
 }
 
@@ -232,8 +231,6 @@ export function makeReview(overrides: {
    * attempt it judged, which is a property of the double and not of the loop.
    */
   changeset_id?: string;
-  /** The connection and model the review ran on, as its transport records them. */
-  model?: { provider: string; model_id: string };
 } = {}): ReviewArtifact {
   return ReviewArtifactSchema.parse({
     schema_version: 1,
@@ -283,8 +280,8 @@ export function makeReview(overrides: {
     cost_micros: 1000,
     latency_ms: 100,
     model: {
-      provider: overrides.model?.provider ?? "stub",
-      model_id: overrides.model?.model_id ?? "stub",
+      provider: "stub",
+      model_id: "stub",
       prompt_version: "reviewer_v2",
       input_tokens: 1,
       output_tokens: 1,

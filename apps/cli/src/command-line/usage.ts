@@ -34,8 +34,6 @@ export const USAGE = `perbo — contract to pull request, locally
       printed, whatever the provider echoes back.
 
   perbo run --ticket PRB-1 [--publish] [--resume-from <bundle_id>]
-            [--provider <name>] [--model <id>]
-            [--reviewer-provider <name>] [--reviewer-model <id>]
   perbo run --ticket PRB-1 --relevel [--publish]
   perbo run --ticket PRB-1 --publish-retained
   perbo run --contract c.json --config run.json [--publish]
@@ -120,17 +118,6 @@ export const USAGE = `perbo — contract to pull request, locally
       and the run's log and the attempt's record say so. The bundle it reads is
       never rewritten.
       \`perbo inspect <ticket>\` names the bundle of every attempt on record.
-
-      A run that ended on a provider's usage limit — the executor's attempt, or
-      the review, refused with a stated reset the run would not wait for, or
-      refused again after it waited — says whose connection it was, the reset,
-      and the command that carries the work on. A usage limit is a
-      connection's, so the work goes on with another one: --provider and
-      --model name the executor's connection and model for this run,
-      --reviewer-provider and --reviewer-model the reviewer's, over the run
-      configuration. A connection changed this way starts at its own default
-      model and effort unless a model is named with it. The contract is not
-      touched: the models are not part of it.
 
   perbo review --contract c.json --diff change.diff --checks checks.json --repo .
   git diff main... | perbo review --contract c.json --diff - --checks checks.json
@@ -732,12 +719,6 @@ For run and doctor
   --resume-from <bundle>  run only: start the attempt from that execution
                           bundle's retained change.diff, as a continuation of
                           the attempt it records
-  --provider <name>       run only: the executor's connection for this run —
-                          'claude-cli', 'codex-cli' or 'opencode-cli'
-  --model <id>            run only: the executor's model for this run
-  --reviewer-provider <name>  run only: the reviewer's connection for this run —
-                          'claude-cli', 'codex-cli', 'opencode-cli' or 'anthropic'
-  --reviewer-model <id>   run only: the reviewer's model for this run
   --outcome <sentence>    run only: the contract for a run with nothing admitted
   --criterion <text [:: assertion [:: kind]]>   repeatable; needs --outcome
   --path <glob>           repeatable. What the change may touch; without it,

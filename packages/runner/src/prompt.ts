@@ -2,11 +2,9 @@ import {
   EXECUTOR_ACCOUNT_MAX_CHARS,
   admittedWriteGlobs,
   redactCredentials,
-  stoppedBy,
   type AcceptanceCriterion,
   type Finding,
   type PlanContractWithCriteria,
-  type UsageLimitRole,
 } from "@perbo/contracts";
 import { EXECUTOR_ACCOUNT_HEADING } from "./account.js";
 import { PERBO_AGENT_ROLES } from "./agents.js";
@@ -121,7 +119,7 @@ export const EXECUTOR_PROMPT_VERSION = "executor_v15";
  * different documents — a record that called them both the same would say the
  * executor was told the same thing when it was not.
  */
-export const RESUMED_EXECUTOR_PROMPT_VERSION = "executor_resumed_v4";
+export const RESUMED_EXECUTOR_PROMPT_VERSION = "executor_resumed_v3";
 
 /**
  * The prior attempt a resumed one is briefed about, every field from the
@@ -138,55 +136,32 @@ export interface ResumedWork {
    * worktree and is uncommitted.
    */
   committed_at: string | null;
-  /** The model the prior attempt ran on, as its bundle recorded it. */
-  model: string;
-  /** The model this attempt runs on, from the run configuration. */
-  this_model: string;
-  /**
-   * Whose provider's usage limit ended the prior attempt's run, as its record
-   * says (D-NEW-pass-a-limited-loop-on); null where no limit did.
-   */
-  limit: UsageLimitRole | null;
 }
 
-/** Who or what ended the prior attempt, in the words the brief states it in. */
-function howItEnded(resumed: ResumedWork): string {
-  const { termination, limit } = resumed;
-  if (limit === "reviewer" || termination === "completed") {
-    return (
-      "finished its work, and no review judged it: " +
-      (limit === "reviewer"
-        ? "the reviewer's provider refused the review on a usage limit"
-        : "the run stopped before the review")
-    );
-  }
-  if (termination === null) return "was stopped part-way, not by a judgement";
-  const by = stoppedBy(termination, limit);
-  return `was stopped part-way${by === null ? "" : ` by ${by}`} (it ended \`${termination}\`), not by a judgement`;
-}
-
-/**
- * Whose work it is, where another model wrote it: the person carried the
- * ticket on to another model, and the executor reading the draft is not the
- * one that wrote it. Both names are the run's own records.
- */
-function whoWroteIt(resumed: ResumedWork): string {
-  if (resumed.model === resumed.this_model) return "";
-  return ` That attempt ran on another model, \`${resumed.model}\`; you are \`${resumed.this_model}\`, and the work is yours to carry on from here.`;
+/** Who or what stopped the prior attempt, in the words the brief states it in. */
+function howItEnded(termination: string | null): string {
+  if (termination === null) return "was stopped part-way";
+  const by =
+    termination === "cancelled"
+      ? " by a person"
+      : termination.endsWith("_exceeded")
+        ? " by a ceiling"
+        : "";
+  return `was stopped part-way${by} (it ended \`${termination}\`)`;
 }
 
 /**
  * What a resumed attempt is told about the prior attempt's work in its tree.
  *
- * The framing is the whole point. The previous attempt ended before its work
- * was judged — a ceiling cut it, a person stopped it, a provider's usage limit
- * refused it or its review: the work was never reviewed, and where it was cut
- * part-way the model that wrote it did not get to the end of its own
- * reasoning. Handing that over as "here is the work so far" invites the
- * executor to treat an unverified draft as ground truth and to spend its round
- * decorating it. So it arrives as a draft to audit, where it actually is —
- * committed on the branch, or applied and uncommitted — and the ids and model
- * names come from the runner: no prose from the previous attempt reaches here.
+ * The framing is the whole point. The previous attempt ended in the middle of
+ * its work — a ceiling cut it, or a person stopped it: the work was never
+ * checked against the criteria and never reviewed, and the model that wrote it
+ * did not get to the end of its own reasoning. Handing that over as "here is
+ * the work so far" invites the executor to treat an unverified draft as ground
+ * truth and to spend its round decorating it. So it arrives as a draft to
+ * audit, where it actually is — committed on the branch, or applied and
+ * uncommitted — and the ids come from the runner: no prose from the previous
+ * attempt reaches here.
  */
 function resumedWorkBlock(resumed: ResumedWork | null | undefined): string {
   if (!resumed) return "";
@@ -195,22 +170,18 @@ function resumedWorkBlock(resumed: ResumedWork | null | undefined): string {
       ? `# The worktree already contains unfinished work
 
 A previous attempt of this same ticket — ${resumed.attempt_id}, recorded in
-${resumed.bundle_id} — ${howItEnded(resumed)}.${whoWroteIt(resumed)} Its
+${resumed.bundle_id} — ${howItEnded(resumed.termination)}, not by a judgement. Its
 change set has been applied into this worktree and is uncommitted, so
 \`git status\` and \`git diff\` show it.`
       : `# The branch already carries unfinished work
 
 A previous attempt of this same ticket — ${resumed.attempt_id}, recorded in
-${resumed.bundle_id} — ${howItEnded(resumed)}.${whoWroteIt(resumed)} Its
+${resumed.bundle_id} — ${howItEnded(resumed.termination)}, not by a judgement. Its
 change set is committed on this branch, at ${resumed.committed_at}, so
 \`git status\` shows none of it: \`git log\` and \`git show\` do.`;
-  const never =
-    resumed.limit === "reviewer" || resumed.termination === "completed"
-      ? "It was never reviewed by anyone."
-      : "It was never finished, never checked and never reviewed by anyone.";
   return `
 
-${where} ${never}
+${where} It was never finished, never checked and never reviewed by anyone.
 
 Treat it as a draft to check, not as work to trust or build on unread. Read it
 first; keep what is right, fix what is wrong, and delete what should not be

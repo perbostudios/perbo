@@ -5,10 +5,8 @@ import {
   AttemptWaitSchema,
   VerifiedCommitSchema,
   attemptId,
-  UsageLimitSchema,
   type AttemptWait,
   type ExecutionAttempt,
-  type UsageLimitRole,
   type VerifiedCommit,
   sameCommit,
 } from "@perbo/contracts";
@@ -382,28 +380,4 @@ export function specCommitOnRecord(record: AttemptsRecord | null): string | null
     if (parsed.success && parsed.data.spec_commit) return parsed.data.spec_commit;
   }
   return null;
-}
-
-/**
- * Whose provider's usage limit ended the run after the attempt `attemptId`,
- * as the ticket's record says (D-NEW-pass-a-limited-loop-on): the usage limit
- * the runner put on it, or — for a review that parked on its provider's stated
- * reset, which wrote the attempt before the wait, so nothing after it is on
- * the record — the reviewer's, where that attempt's work was finished and it
- * carries the wait. Null where the record holds no such attempt, or nothing
- * that says a limit ended its run.
- */
-export function limitRoleOf(record: AttemptsRecord | null, attemptId: string): UsageLimitRole | null {
-  const entry = record?.attempts.find((attempt) => attempt.attempt_id === attemptId);
-  if (entry === undefined) return null;
-  const parsed = z
-    .looseObject({
-      termination: z.looseObject({ reason: z.string() }),
-      wait: AttemptWaitSchema.nullable().optional(),
-      usage_limit: UsageLimitSchema.nullable().optional(),
-    })
-    .safeParse(entry);
-  if (!parsed.success) return null;
-  if (parsed.data.usage_limit) return parsed.data.usage_limit.role;
-  return parsed.data.termination.reason !== "transport_unavailable" && parsed.data.wait ? "reviewer" : null;
 }

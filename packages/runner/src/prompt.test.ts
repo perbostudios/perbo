@@ -344,40 +344,6 @@ describe("the executor's brief names the subagents it may start", () => {
   });
 });
 
-describe("the resumed brief says whose work it carries on and how it ended (D-NEW-pass-a-limited-loop-on)", () => {
-  const resumed = {
-    attempt_id: "att_0000000000000001",
-    bundle_id: "bundle_0000000000000001",
-    committed_at: "abc1234",
-    model: "claude-opus-5-5",
-    this_model: "gpt-5.5",
-  };
-
-  it("names the other model and the executor's usage limit", () => {
-    const brief = executorPrompt(contract, {
-      resumed: { ...resumed, termination: "transport_unavailable", limit: "executor" },
-    });
-    expect(brief).toContain(
-      "was stopped part-way by its provider's usage limit (it ended `transport_unavailable`), not by a judgement.",
-    );
-    expect(brief).toContain("That attempt ran on another model, `claude-opus-5-5`; you are `gpt-5.5`");
-    expect(brief).toContain("never finished, never checked and never reviewed by anyone");
-  });
-
-  it("says finished work was not reviewed where the reviewer's limit ended the run", () => {
-    const brief = executorPrompt(contract, {
-      resumed: { ...resumed, this_model: resumed.model, termination: "completed", limit: "reviewer" },
-    });
-    expect(brief).toContain(
-      "finished its work, and no review judged it: the reviewer's provider refused the review on a usage limit.",
-    );
-    expect(brief).toContain("It was never reviewed by anyone.");
-    expect(brief).not.toContain("was stopped part-way");
-    // The same executor model carries it on, so no other model is named.
-    expect(brief).not.toContain("ran on another model");
-  });
-});
-
 describe("the brief carries a person's answers to the review before as data (D-132)", () => {
   const answered = [
     { finding_key: "a".repeat(64), statement: "The lockfile is not the one the repository uses.", words: "Keep package-lock.json." },

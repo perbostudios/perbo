@@ -235,7 +235,6 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
       baseCommit: sealer!.base_commit,
     },
     attempts,
-    ticketAttempts: prior?.attempts ?? [],
     verificationCosts,
     declines,
     rootAttemptId: sealer!.attempt_id,

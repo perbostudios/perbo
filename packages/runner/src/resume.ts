@@ -1,14 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  BundleIdSchema,
-  CommitShaSchema,
-  sameCommit,
-  type ResumedFrom,
-  type RunBundle,
-  type UsageLimitRole,
-} from "@perbo/contracts";
+import { BundleIdSchema, CommitShaSchema, sameCommit, type ResumedFrom, type RunBundle } from "@perbo/contracts";
 import { git } from "@perbo/workspace";
 import { BundleStore } from "./bundle.js";
 
@@ -84,15 +77,6 @@ export interface ResumeSource {
   head_commit: string | null;
   /** How the prior attempt ended, where its bundle recorded a reason. */
   termination: string | null;
-  /** The model the prior attempt ran on, as its bundle recorded it. */
-  model: string;
-  /**
-   * Whose provider's usage limit ended the prior attempt's run, read from the
-   * ticket's attempts record (`limitRoleOf`), which holds what the bundle
-   * cannot: a reviewer's limit is put on the attempt after its bundle is
-   * written. Null where no limit did, and where the record was not read.
-   */
-  limit: UsageLimitRole | null;
 }
 
 /** What a resume did with the retained diff, which the record and the brief state. */
@@ -277,8 +261,6 @@ export function resolveResumeSource(args: {
     diff_sha256: artifact.sha256,
     head_commit: sealedHead(store, bundle),
     termination: typeof termination === "string" && termination.length > 0 ? termination : null,
-    model: bundle.versions.model,
-    limit: null,
   };
 }
 

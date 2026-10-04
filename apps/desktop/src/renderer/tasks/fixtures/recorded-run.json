@@ -49,7 +49,6 @@
         "round": 0,
         "started_at": "2026-09-27T00:37:01.000Z",
         "wait": null,
-        "usage_limit": null,
         "ended_at": "2026-09-27T00:37:03.000Z",
         "outcome": "review remediable",
         "termination": {
@@ -704,7 +703,6 @@
             "verified": true
           },
           "wait": null,
-          "usage_limit": null,
           "declines": []
         }
       },
@@ -715,7 +713,6 @@
         "round": 1,
         "started_at": "2026-09-27T00:37:06.000Z",
         "wait": null,
-        "usage_limit": null,
         "ended_at": "2026-09-27T00:37:08.000Z",
         "outcome": "carried_forward · closures verified",
         "termination": {
@@ -1296,7 +1293,6 @@
             "verified": true
           },
           "wait": null,
-          "usage_limit": null,
           "declines": []
         }
       }

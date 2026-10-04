@@ -44,7 +44,6 @@ describe("runEnding", () => {
       ceilings: [],
       review: null,
       reviewDecision: "changes_requested",
-      usageLimit: null,
       ...overrides,
     }) as AttemptView;
   const terminated = (termination: string, ceilings: AttemptView["ceilings"] = []) =>
@@ -230,7 +229,6 @@ describe("runEnding's reasons", () => {
       ceilings: [],
       review: null,
       reviewDecision: null,
-      usageLimit: null,
       ...overrides,
     }) as AttemptView;
   const reasons = (termination: string, overrides: Partial<AttemptView> = {}) =>
@@ -557,7 +555,6 @@ const recordedAttempt = (input: {
     changes: input.paths.map((path) => ({ path, change_kind: "modified", additions: 1, deletions: 0 })),
     checks: [],
     verification: null,
-    usageLimit: null,
     bundles: [
       bundle("execution", input.id, input.execution),
       ...(input.review ? [bundle("review", `rev_${input.id}`, input.review)] : []),

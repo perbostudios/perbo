@@ -176,7 +176,7 @@ describe("the stopped page", () => {
     expect(behind().every((text) => text.length > 0)).toBe(true);
     expect(carryOn().disabled).toBe(true);
     expect(carryOn().title).toBe(
-      `Continue the task carries on only from a stop you made, from Perbo closing or from a provider's usage limit, and this run stopped for ${listed.length === 1 ? "the reason" : "the reasons"} listed, ` +
+      `Continue the task carries on only from a stop you made or from Perbo closing, and this run stopped for ${listed.length === 1 ? "the reason" : "the reasons"} listed, ` +
         "which another attempt at the same plan would meet again. Plan it again to change the spec or the plan and start the loop over.",
     );
     // Plan it again is the way on, where the record is spent.
@@ -202,7 +202,7 @@ describe("the stopped page", () => {
     expect(reasons()).toEqual(["Perbo holds no record of how this run ended."]);
     expect(carryOn().disabled).toBe(true);
     expect(carryOn().title).toBe(
-      "Continue the task carries on only from a stop you made, from Perbo closing or from a provider's usage limit, and Perbo holds no record of " +
+      "Continue the task carries on only from a stop you made or from Perbo closing, and Perbo holds no record of " +
         "how this run ended, so it cannot tell which this was. Plan it again to change the spec or the plan and start the loop over.",
     );
     expect(carryOn().title).not.toMatch(/meet again/);
@@ -514,196 +514,5 @@ describe("Plan it again's confirmation", () => {
         "recorded and the evidence those attempts sealed are discarded. The spec is kept and planned again, and " +
         "nothing the runs built is carried into the new plan. Continue the task keeps that work instead.",
     );
-  });
-});
-
-/**
- * D-NEW-pass-a-limited-loop-on on the sample host: a run a provider's usage
- * limit ended says so with the reset the provider stated, and carries on two
- * ways — on another connection at once, through the contract's model picker
- * for the role that was limited, or on the same connection once the reset has
- * passed.
- */
-describe("a run a provider's usage limit ended", () => {
-  beforeEach(() => {
-    if (!HTMLDialogElement.prototype.showModal) {
-      HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) { this.setAttribute("open", ""); };
-      HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) { this.removeAttribute("open"); };
-    }
-  });
-  const QUOTED = "You've hit your session limit · resets 4:30am (Europe/London)";
-  /** A reset still ahead, and its label in the zone the provider stated. */
-  const AHEAD = { until: "2099-01-02T04:30:00.000Z", label: "Fri 2 Jan, 04:30 (Europe/London)" };
-  const PASSED = { until: "2020-01-03T04:30:00.000Z", label: "Fri 3 Jan, 04:30 (Europe/London)" };
-  function limited(
-    role: "executor" | "reviewer",
-    provider: string,
-    until: string,
-    waited = false,
-  ): { workspace: Snapshot; detail: Detail } {
-    return stopped(
-      { state: "failed", error: "the whole run log" },
-      {
-        termination: role === "executor" ? `transport_unavailable: the provider refused: ${QUOTED}` : "completed: done",
-        reviewDecision: role === "executor" ? null : "error",
-        review: role === "executor" ? null : sample.detail.attempts.at(-1)!.review,
-        usageLimit: { role, provider, model: "sonnet-class", until, zone: "Europe/London", quoted: QUOTED, waited },
-      },
-    );
-  }
-  const foot = (): string[] =>
-    [...page().querySelectorAll(".stopped-actions button")].map((button) => button.textContent ?? "");
-  const passOn = (): HTMLButtonElement =>
-    screen.getByRole("button", { name: "Continue on another model" }) as HTMLButtonElement;
-  const option = (name: RegExp): HTMLElement => screen.getByRole("option", { name });
-  /** The run requests the page sends, the sample host answering them. */
-  const sent = () => {
-    const original = bridge.request.bind(bridge);
-    return vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
-      original(request)) as typeof bridge.request);
-  };
-  const runs = (spy: ReturnType<typeof sent>) =>
-    spy.mock.calls.map(([request]) => request).filter((request) => request.kind === "run");
-
-  it("says the executor's limit in one sentence, and carries the work on to another connection", async () => {
-    const run = limited("executor", "claude-cli", AHEAD.until);
-    const bundle = run.detail.attempts.at(-1)!.bundles.find((entry) => entry.kind === "execution")!;
-    const before = await sampleBridge.request({ kind: "detail", repoId: sample.repoId, key: "PRB-415" });
-    mount(run);
-    expect(reasons()).toEqual([
-      `Claude Code, the executor's connection, reached its usage limit, which the provider says resets ${AHEAD.label}.`,
-    ]);
-    expect(behind()[0]).toContain(QUOTED);
-    // Two ways on, the other connection the highlighted one at the far right.
-    await waitFor(() => expect(passOn().disabled).toBe(false));
-    expect(foot()).toEqual([
-      "Delete this work",
-      "Plan it again",
-      "View the paused loop",
-      "Continue the task",
-      "Continue on another model",
-    ]);
-    expect(page().querySelector(".stopped-actions")!.lastElementChild).toBe(passOn());
-    expect(passOn().className).toContain("button--primary");
-    // The same connection is offered, and held until the reset the provider stated.
-    expect(carryOn().disabled).toBe(true);
-    expect(carryOn().className).not.toContain("button--primary");
-    expect(carryOn().title).toContain(`The usage limit on Claude Code holds until ${AHEAD.label}`);
-
-    fireEvent.click(passOn());
-    const dialog = await screen.findByRole("dialog", { name: "Continue on another model" });
-    expect(dialog.textContent).toContain(`Claude Code reached its usage limit, which covers every model it runs until ${AHEAD.label}`);
-    expect(dialog.textContent).not.toContain("The reviewer's model is part of");
-    // The executor's picker, open on another connection signed in for it.
-    const picker = within(dialog).getByRole("group", { name: "executor model selection" });
-    expect(within(picker).getByRole("combobox", { name: "executor provider" }).textContent).toContain("Codex");
-    fireEvent.click(within(picker).getByRole("combobox", { name: "executor provider" }));
-    // The limited connection is there, marked, and not to be chosen — nor any of its models.
-    const held = option(/^Claude Code/);
-    expect(held.textContent).toBe(`Claude Code · subscription · limited until ${AHEAD.label}`);
-    expect(held.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(held);
-    expect(within(picker).getByRole("combobox", { name: "executor provider" }).textContent).toContain("Codex");
-    fireEvent.click(option(/^OpenCode/));
-    await waitFor(() => expect(within(picker).getByRole("combobox", { name: "Model" }).textContent).toContain("Big Pickle"));
-    fireEvent.click(within(picker).getByRole("combobox", { name: "Model" }));
-    expect(screen.queryByRole("option", { name: /Sonnet|Opus 5\.5/ })).toBeNull();
-    fireEvent.click(option(/^Claude Opus 5$/));
-    fireEvent.click(within(picker).getByRole("button", { name: "Done" }));
-
-    const spy = sent();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Continue on OpenCode" }));
-    await waitFor(() => expect(runs(spy)).toHaveLength(1));
-    expect(runs(spy)[0]).toMatchObject({
-      kind: "run",
-      key: "PRB-415",
-      approve: false,
-      resumeFrom: bundle.bundle_id,
-      models: { executorProvider: "opencode-cli", executorModel: "opencode/claude-opus-5", reviewerProvider: "codex-cli" },
-    });
-    // Written to the ticket's models; the contract is as it was approved.
-    const after = await sampleBridge.request({ kind: "snapshot" });
-    expect(after.taskModels?.[sample.repoId + ":PRB-415"]).toMatchObject({
-      executorProvider: "opencode-cli",
-      executorModel: "opencode/claude-opus-5",
-    });
-    const kept = await sampleBridge.request({ kind: "detail", repoId: sample.repoId, key: "PRB-415" });
-    expect(kept.contract).toEqual(before.contract);
-    expect(kept.digest).toBe(before.digest);
-  });
-
-  it("opens the reviewer's picker for a review its provider refused, saying its model is part of the review's evidence", async () => {
-    mount(limited("reviewer", "codex-cli", AHEAD.until));
-    expect(reasons()).toEqual([
-      `Codex, the reviewer's connection, reached its usage limit, which the provider says resets ${AHEAD.label}.`,
-    ]);
-    await waitFor(() => expect(passOn().disabled).toBe(false));
-    fireEvent.click(passOn());
-    const dialog = await screen.findByRole("dialog", { name: "Continue on another model" });
-    expect(dialog.textContent).toContain(
-      "The reviewer's model is part of what the review's evidence records: the review this run takes is recorded " +
-        "as the model you choose here.",
-    );
-    const picker = within(dialog).getByRole("group", { name: "reviewer model selection" });
-    expect(within(dialog).queryByRole("group", { name: "executor model selection" })).toBeNull();
-    fireEvent.click(within(picker).getByRole("combobox", { name: "reviewer provider" }));
-    expect(option(/^Codex/).getAttribute("aria-disabled")).toBe("true");
-    expect(option(/^Codex/).textContent).toContain(`limited until ${AHEAD.label}`);
-    fireEvent.click(option(/^Claude Code/));
-    // The connection's own catalog, Opus 5.5 first where it is offered (D-093).
-    await waitFor(() => expect(within(picker).getByRole("combobox", { name: "Model" }).textContent).toContain("Opus 5.5"));
-    fireEvent.click(within(picker).getByRole("button", { name: "Done" }));
-    const spy = sent();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Continue on Claude Code" }));
-    await waitFor(() => expect(runs(spy)).toHaveLength(1));
-    expect(runs(spy)[0]).toMatchObject({
-      resumeFrom: expect.stringMatching(/^bundle_/),
-      models: { reviewerProvider: "claude-cli", reviewerModel: "claude-opus-5-5", executorProvider: "claude-cli" },
-    });
-  });
-
-  it("says a review refused again after its reset in its own sentence, the same connection free to carry on", async () => {
-    mount(limited("reviewer", "codex-cli", PASSED.until, true));
-    expect(reasons()).toEqual([
-      `Codex, the reviewer's connection, refused the review again after its usage limit reset ${PASSED.label}.`,
-    ]);
-    await waitFor(() => expect(passOn().disabled).toBe(false));
-    expect(carryOn().disabled).toBe(false);
-  });
-
-  it("offers Continue the task on the same connection once the stated reset has passed", async () => {
-    mount(limited("executor", "claude-cli", PASSED.until));
-    await waitFor(() => expect(passOn().disabled).toBe(false));
-    expect(carryOn().disabled).toBe(false);
-    expect(carryOn().title).toBe("");
-  });
-
-  it("says where no other connection runs the role, and offers only Continue the task after the reset", async () => {
-    const original = bridge.request.bind(bridge);
-    vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
-      request.kind === "providers"
-        ? original(request).then((providers) =>
-            (providers as Array<{ id: string }>).filter((provider) => provider.id === "claude"),
-          )
-        : original(request)) as typeof bridge.request);
-    mount(limited("executor", "claude-cli", AHEAD.until));
-    expect(
-      await screen.findByText(
-        `No other connection that runs the executor is signed in, so the task carries on on Claude Code once its limit resets ${AHEAD.label}.`,
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Continue on another model" })).toBeNull();
-    expect(page().querySelector(".stopped-actions")!.lastElementChild).toBe(carryOn());
-    expect(carryOn().className).toContain("button--primary");
-    expect(carryOn().disabled).toBe(true);
-  });
-
-  it("offers neither for a stop that was not a usage limit", async () => {
-    mount(stopped({ state: "failed", error: "the whole run log" }, { termination: "transport_unavailable: HTTP 529 overloaded", reviewDecision: null, review: null }));
-    expect(reasons()).toEqual(["The model provider was unavailable, so the attempt ended without doing the work."]);
-    expect(screen.queryByRole("button", { name: "Continue on another model" })).toBeNull();
-    expect(screen.queryByText(/No other connection/)).toBeNull();
-    expect(carryOn().disabled).toBe(true);
-    expect(carryOn().title).toMatch(/^Continue the task carries on only from a stop you made/);
   });
 });

@@ -889,10 +889,6 @@ async function runLockedTicket(
         contract,
         state,
         attempts: delivered,
-        // Every attempt of the ticket: what earlier runs left on its record,
-        // then this run's, whose parked ones are on disk already but not in
-        // the record this run read.
-        ticketAttempts: [...(priorAttempts?.attempts ?? []), ...ledger.attempts],
         verificationCosts: ledger.verificationCosts,
         declines: ledger.declines,
         rootAttemptId: deliveredUnder,

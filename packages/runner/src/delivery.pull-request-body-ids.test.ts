@@ -102,7 +102,6 @@ const first = {
 function body(over: { merge?: MergeMode; costBasis?: "provider_list_estimate" | "unavailable" } = {}): string {
   const review = makeReview({ review_id: "rev_0000000000000001", decision: "changes_requested" });
   return pullRequestBody({
-    attempt_list: [],
     contract: makeContract() as unknown as PlanContractWithCriteria,
     attempt: attempt as never,
     review: {

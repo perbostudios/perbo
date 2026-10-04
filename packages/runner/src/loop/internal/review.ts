@@ -14,7 +14,6 @@ import {
   type ReviewArtifact,
   type SealedCommit,
   type SecretIndex,
-  type UsageLimit,
   type VerifiedCommit,
 } from "@perbo/contracts";
 import {
@@ -27,7 +26,7 @@ import {
 } from "@perbo/review";
 import { createModel, type Model } from "@perbo/model";
 import type { BundleStore } from "../../bundle.js";
-import { resetInText, TRANSPORT_RETRY_DELAY_MS } from "../../transport.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "../../transport.js";
 import { providerPark } from "./attempt.js";
 import type { SealResult } from "../../seal.js";
 import type { TicketRunConfig } from "./config.js";
@@ -581,31 +580,6 @@ export function reviewRetry(args: { message: string; waitBoundMs: number; clock:
   };
 }
 
-/**
- * The reviewer's usage limit a refused review ends the run on, or null: the
- * reset its provider stated, read from the transport's own sentence as a
- * wait is, where it is still ahead. The connection and the model are the
- * refused review's own artifact's, which the reviewer's transport wrote.
- */
-export function reviewerUsageLimit(args: {
-  message: string;
-  provider: string;
-  model: string;
-  clock: () => Date;
-}): UsageLimit | null {
-  const now = args.clock();
-  const reset = resetInText(args.message, now);
-  if (reset === null || reset.until.getTime() <= now.getTime()) return null;
-  return {
-    role: "reviewer",
-    provider: args.provider,
-    model: args.model,
-    until: reset.until.toISOString(),
-    zone: reset.zone,
-    quoted: reset.quoted,
-  };
-}
-
 /** What the round's independent review came to, and the state it leaves. */
 export interface Reviewed {
   state: RoundState;
@@ -725,24 +699,6 @@ export async function reviewRound(args: {
     } else {
       unwaited = retry.unwaited;
     }
-  }
-  // D-NEW-pass-a-limited-loop-on: a review its provider refused with a stated
-  // reset still ahead, and not taken again before it, ends the run on that
-  // provider's usage limit, and the attempt it judged says whose. A review
-  // that parked first has already written that attempt, and its wait says it.
-  const finalRefusal = graphOutcome.combined;
-  if (
-    finalRefusal.decision === "error" &&
-    finalRefusal.error?.kind === "provider_unavailable" &&
-    attempt.wait === null
-  ) {
-    const limit = reviewerUsageLimit({
-      message: finalRefusal.error.message,
-      provider: finalRefusal.model.provider,
-      model: finalRefusal.model.model_id,
-      clock,
-    });
-    if (limit !== null) attempt = args.ledger.limitAfter(attempt.attempt_id, limit);
   }
   const reviewOutcome = graphOutcome.overall;
 

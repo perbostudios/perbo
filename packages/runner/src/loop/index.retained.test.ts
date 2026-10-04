@@ -515,8 +515,6 @@ describe("publishing a retained branch after a remediation round with a decline"
       contract,
       state: { workspace: { path: repo.dir, branch, base_commit: base }, baseCommit: base },
       attempts: ledger.attempts,
-      // The ticket's attempts as the run would pass them: its record held none before this run.
-      ticketAttempts: ledger.attempts,
       verificationCosts: ledger.verificationCosts,
       declines: ledger.declines,
       rootAttemptId: first.rounds[0]!.attempt.root_attempt_id,
@@ -549,9 +547,6 @@ describe("publishing a retained branch after a remediation round with a decline"
     expect(retained).toContain("### No determinable practice — for you to decide");
     expect(retained).toContain(`the executor declares **no determinable practice**: ${reason}`);
     expect(retained).toContain("closure verification 0.0123 USD");
-    // D-NEW-pass-a-limited-loop-on: the same list of the ticket's attempts, one row each.
-    const listed = retained.split("## Attempts")[1]?.split("## Rollout")[0] ?? "";
-    expect(listed.split("\n").filter((line) => /^\| \d+ \|/.test(line))).toHaveLength(run.first.rounds.length);
   }, 90_000);
 
   it("refuses an escalated run whose remediation attempt's record does not say what it declined", async () => {

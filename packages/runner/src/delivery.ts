@@ -32,7 +32,6 @@ import {
 import { gh, git, githubCredentialOverlay, isAttemptBranch } from "@perbo/workspace";
 import { requireGithubCredential } from "./github-credential.js";
 import { isDecided } from "./decisions.js";
-import type { AttemptRow } from "./attempt-list.js";
 
 /**
  * Publishing a pull request through local `git` and `gh` (SCP-020).
@@ -257,12 +256,6 @@ export function pullRequestBody(args: {
    * pull request this body has ever described was waiting for.
    */
   merge?: MergeMode;
-  /**
-   * Every attempt of the ticket, in order over all its runs, with the
-   * connection and model that ran each and each review's
-   * (D-NEW-pass-a-limited-loop-on): the body's list of attempts, written whole.
-   */
-  attempt_list: readonly AttemptRow[];
 }): string {
   const { contract, attempt, review } = args;
   const coverage = review.coverage
@@ -513,7 +506,6 @@ export function pullRequestBody(args: {
         ]
       : []),
     "",
-    ...attemptsSection(args.attempt_list),
     `## Rollout`,
     "",
     rollout,
@@ -543,44 +535,6 @@ export function pullRequestBody(args: {
     // are rather than in a document they do not have.
     `<!-- perbo:answered-by-convention ${ANSWERED_BY_CONVENTION} -->`,
   ].join("\n");
-}
-
-/** A value a table cell carries: its own pipes escaped, its line breaks read as spaces. */
-const cell = (text: string): string => text.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
-
-/**
- * The body's list of attempts (D-NEW-pass-a-limited-loop-on): every attempt
- * of the ticket in order over all its runs — its run and round, the
- * connection and model that ran its executor, how it ended, and each review's
- * connection, model and verdict — with where the executor or the reviewer ran
- * on another connection or model than before, and why. Written whole, however
- * long; empty where no attempt is on record.
- */
-export function attemptsSection(rows: readonly AttemptRow[]): string[] {
-  if (rows.length === 0) return [];
-  const model = (connection: string, id: string): string => `${cell(connection)} · \`${cell(id)}\``;
-  return [
-    "## Attempts",
-    "",
-    "| # | run | round | executor | ended | review |",
-    "|---|---|---|---|---|---|",
-    ...rows.map((row, index) => {
-      const executor =
-        row.executor === null
-          ? "not recorded"
-          : model(row.executor.connection, row.executor.model) +
-            (row.executorChanged === null ? "" : ` — ${cell(row.executorChanged)}`);
-      const reviews =
-        row.reviews.length === 0
-          ? "none"
-          : row.reviews.map((review) => `${model(review.connection, review.model)}: ${cell(review.decision)}`).join("; ") +
-            (row.reviewerChanged === null ? "" : ` — ${cell(row.reviewerChanged)}`);
-      return (
-        `| ${index + 1} | ${row.run} | ${row.round ?? "not recorded"} | ${executor} | ${cell(row.ended)} | ${reviews} |`
-      );
-    }),
-    "",
-  ];
 }
 
 /** Only what the stop marker's regex accepts; anything else becomes `_`. */
