@@ -112,6 +112,21 @@ describe("the opencode-cli reviewer transport", () => {
   );
 
   it(
+    "keeps the answer of a turn the model ended itself after a refused call, and prompts it no further",
+    async () => {
+      const fake = fakeOpenCodeReviewer([{ permission: true, carriesOn: true, text: verdict }, { text: read }]);
+      const turn = await openCodeCliModel({ submitSchema, binary: fake.binary }).turn(request());
+      expect(turn.toolCalls).toEqual([{ id: "cli_submit", name: "submit_review", input: { ok: true } }]);
+      const { lines } = logOf(fake.log);
+      expect(lines.filter((line) => line["id"] === "ask").map((line) => line["result"])).toEqual([
+        { outcome: { outcome: "selected", optionId: "reject" } },
+      ]);
+      expect(lines.filter((line) => line["method"] === "session/prompt")).toHaveLength(1);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "never lets a tool run: every call refused, never allowed or saved, and the session's directory left empty",
     async () => {
       const fake = fakeOpenCodeReviewer([{ permission: true }, { permission: true }, { text: verdict }]);

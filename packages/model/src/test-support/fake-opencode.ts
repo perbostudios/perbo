@@ -10,7 +10,9 @@ import { join } from "node:path";
  * first, as OpenCode 2.0.14 does: the call is announced, then asked about. On
  * `once` the fake runs it — writes a file into the session's directory and
  * logs `executed` — and the turn goes on; on anything else the call fails and
- * the turn ends `cancelled`, as OpenCode ends one a client refused a call in.
+ * the turn ends `cancelled`, as OpenCode ends one a client refused a call in,
+ * unless the reply `carriesOn`: then the model answers anyway, and the turn
+ * ends with the reply's words and stop reason.
  * A reply with `ran` reports that many tool calls completed that nothing was
  * asked about, each announced under `title` (`read` where none is given), and
  * the last one's completion reported twice. A reply with `error` answers the
@@ -28,6 +30,7 @@ export interface FakeOpenCodeReply {
   cost?: number;
   stopReason?: string;
   permission?: boolean;
+  carriesOn?: boolean;
   ran?: number;
   title?: string;
   usage?: Record<string, number>;
@@ -96,7 +99,7 @@ export function fakeOpenCodeReviewer(
       "      finish(p.id, p.reply, p.sessionId);",
       "    } else {",
       "      update(p.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 't' + turn, status: 'failed' });",
-      "      finish(p.id, { usage: p.reply.usage, stopReason: 'cancelled' }, p.sessionId);",
+      "      finish(p.id, p.reply.carriesOn ? p.reply : { usage: p.reply.usage, stopReason: 'cancelled' }, p.sessionId);",
       "    }",
       "    return;",
       "  }",

@@ -883,6 +883,27 @@ describe("a round the runner refused", () => {
     const made = second.rounds[0]!.attempt.head_commit!;
     expect(repo.git("rev-parse", `${made}^`).trim()).toBe(judged);
   }, 120_000);
+
+  it("puts the finding to the person on the refused round alone: no run finished trying and nothing was declined", async () => {
+    const { config, contract, first, history } = await refusedRun();
+    // The run ended `changes_requested`, which is not one of FINISHED_TRYING,
+    // and the round declined nothing: the refusal is the only route left.
+    expect(first.outcome).toBe("changes_requested");
+    const judged = judgedOnRecord({
+      bundles: new BundleStore({ root: config.bundle_root, retainContext: true }),
+      ticket_id: contract.ticket_id,
+      history,
+      declines: declinesOfRecord(readAttemptsRecord(join(config.state_root, `${contract.ticket_id}.attempts.json`))),
+    });
+    expect(judged!.loop.finished).toBe(false);
+    expect(judged!.loop.declined.size).toBe(0);
+    expect(judged!.loop.closed.has(scope.key)).toBe(false);
+    expect([...judged!.loop.refused]).toEqual([scope.key]);
+
+    const owed = runTicket({ config, contract, history, decided: [], hooks: noModel });
+    await expect(owed).rejects.toBeInstanceOf(AnswersOwedError);
+    await expect(owed).rejects.toThrow(`left 1 finding(s) for you to answer (${scope.key.slice(0, 12)})`);
+  }, 120_000);
 });
 
 describe("the findings a stalled refinement left open", () => {

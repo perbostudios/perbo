@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { NEVER_HANDED_FAMILIES, SecretIndex, type ReviewArtifact } from "@perbo/contracts";
 import { isRemediableFamily } from "@perbo/review";
+import { initRepository } from "@perbo/test-support";
 import { BundleStore } from "../../bundle.js";
-import { decidedDelivery, judgedOnRecord, remediationToContinue } from "./continuation.js";
+import { decidedDelivery, judgedOnRecord, remediationToContinue, restoreJudgedCommit } from "./continuation.js";
 import { finding, makeReview } from "../../test-support/records.js";
 
 const TICKET = "tkt_scp194";
@@ -369,5 +370,56 @@ describe("the answers a finding takes", () => {
     for (const family of ["scope", "changeset", "check", "legibility", "criterion", "evidence"]) {
       expect(isRemediableFamily(`${family}.x`), family).toBe(true);
     }
+  });
+});
+
+/**
+ * SCP-194: after a refused round the branch goes back to the commit last
+ * judged, and only the ticket's own branch moves. A worktree on any other
+ * branch, or on none, is left where it is.
+ */
+describe("the branch a refused round is put back on", () => {
+  const BRANCH = "perbo/prb-194-tkt_scp194";
+
+  /** A worktree on the ticket's branch: the judged commit, and a refused one on it. */
+  function refusedBranch() {
+    const dir = mkdtempSync(join(tmpdir(), "perbo-restore-"));
+    scratch.push(dir);
+    const repo = initRepository(dir, { files: { "src/index.ts": "export const version = 1;\n" } });
+    repo.git("checkout", "-q", "-b", BRANCH);
+    const judged = repo.commit({ "src/index.ts": "export const version = 2;\n" }, "judged");
+    const refused = repo.commit({ "test/extra.test.ts": "// widened\n" }, "refused");
+    const bundles = store();
+    writeReview(
+      bundles,
+      makeReview({ decision: "changes_requested", findings: [finding()], head_commit: judged }),
+      "2026-08-27T00:00:00.000Z",
+    );
+    const restore = () => restoreJudgedCommit({ worktree: dir, branch: BRANCH, bundles, ticket_id: TICKET });
+    const at = (ref: string) => repo.git("rev-parse", ref).trim();
+    return { repo, judged, refused, restore, at };
+  }
+
+  it("moves the ticket's branch back to the judged commit", async () => {
+    const { judged, restore, at } = refusedBranch();
+    expect(await restore()).toBe(judged);
+    expect(at(`refs/heads/${BRANCH}`)).toBe(judged);
+  });
+
+  it("moves nothing where the worktree is on another branch", async () => {
+    const { repo, refused, restore, at } = refusedBranch();
+    repo.git("checkout", "-q", "-b", "someone-else");
+    expect(await restore()).toBeNull();
+    expect(at("refs/heads/someone-else")).toBe(refused);
+    expect(at(`refs/heads/${BRANCH}`)).toBe(refused);
+    expect(at("HEAD")).toBe(refused);
+  });
+
+  it("moves nothing where the worktree is on no branch", async () => {
+    const { repo, refused, restore, at } = refusedBranch();
+    repo.git("checkout", "-q", "--detach");
+    expect(await restore()).toBeNull();
+    expect(at("HEAD")).toBe(refused);
+    expect(at(`refs/heads/${BRANCH}`)).toBe(refused);
   });
 });

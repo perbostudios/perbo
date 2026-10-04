@@ -218,6 +218,9 @@ function criteriaBlock(contract: PlanContractWithCriteria): string {
   return contract.acceptance_criteria.map(criterionLines).join("\n");
 }
 
+/** Both earlier-review blocks' tags, which each body there is defanged against. */
+const EARLIER_TAGS = "perbo:earlier-(?:findings|decisions)";
+
 /**
  * A person's answers to the review before this change moved past it (D-132),
  * in two blocks keyed alike. The findings are the reviewer's words, which quote
@@ -225,9 +228,9 @@ function criteriaBlock(contract: PlanContractWithCriteria): string {
  * repository-trust data. The answers are the person's own words, quoted back
  * as their decisions on a remediation round are: user-trust, and still data.
  * Nothing in either widens the scope, changes a check or approves anything,
- * each is defanged against its own closing tag, and credentials in both are
- * redacted before they are written here (D-063, ADR-0023). Empty where no
- * answer stands.
+ * each is defanged against both blocks' tags, so a statement cannot close its
+ * own block nor open the person's, and credentials in both are redacted before
+ * they are written here (D-063, ADR-0023). Empty where no answer stands.
  */
 function answeredBeforeBlock(
   answers: ReadonlyArray<{ finding_key: string; statement: string; words: string }> | undefined,
@@ -241,14 +244,14 @@ function answeredBeforeBlock(
 <perbo:earlier-findings trust="repo">
 ${defangTag(
   answers.map((answer) => `- finding_key: ${answer.finding_key}\n  ${line(answer.statement)}`).join("\n"),
-  "perbo:earlier-findings",
+  EARLIER_TAGS,
 )}
 </perbo:earlier-findings>
 
 <perbo:earlier-decisions trust="user">
 ${defangTag(
   answers.map((answer) => `- finding_key: ${answer.finding_key}\n  decided: ${line(answer.words)}`).join("\n"),
-  "perbo:earlier-decisions",
+  EARLIER_TAGS,
 )}
 </perbo:earlier-decisions>
 

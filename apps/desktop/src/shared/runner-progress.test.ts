@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
-import { furthestAt, readStage, runnerProgress, runnerStages, runnerTally, spokenByAttempt, WHEEL_STEPS, wheelFill, wheelStep } from "./runner-progress.js";
+import { furthestAt, overTheTicket, readStage, runnerProgress, runnerStages, runnerTally, spokenByAttempt, WHEEL_STEPS, wheelFill, wheelStep } from "./runner-progress.js";
 
 describe("readStage", () => {
   it("reads each stage the runner announces, and only the number or name the line states", () => {
@@ -97,6 +97,31 @@ describe("runnerStages", () => {
     expect(runnerStages(log)).toEqual([
       { stage: { kind: "review", round: 0 }, findings: 2, settled: true },
       { stage: { kind: "verify", round: 1 }, findings: 0, settled: false },
+    ]);
+  });
+});
+
+describe("overTheTicket", () => {
+  it("counts a verification announced again within one round once, and the next round's as the next pass", () => {
+    expect(
+      overTheTicket([
+        { kind: "worktree" },
+        { kind: "review", round: 0 },
+        { kind: "remediation", round: 1 },
+        { kind: "verify", round: 1 },
+        // The same round's verification taken again: a transport retry.
+        { kind: "verify", round: 1 },
+        { kind: "remediation", round: 2 },
+        { kind: "verify", round: 2 },
+      ]),
+    ).toEqual([
+      { kind: "worktree" },
+      { kind: "review", round: 0 },
+      { kind: "remediation", round: 1 },
+      { kind: "verify", round: 1 },
+      { kind: "verify", round: 1 },
+      { kind: "remediation", round: 2 },
+      { kind: "verify", round: 2 },
     ]);
   });
 });

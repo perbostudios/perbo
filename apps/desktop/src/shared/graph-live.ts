@@ -148,11 +148,14 @@ export function assembleLiveGraph(
     attempt: records.attempt,
     nodes: nodes.map((node): GraphNodeLive => {
       const touched = changed.filter((path) => matchesAny(path, node.paths)).sort();
-      // A run the loop could not narrow to this node is the whole command with
-      // the node's name on it: the loop runs every pinned check once per node
-      // for every node, so a node the change never reached has one, it passes,
-      // and counting it would read that node as further along than a node the
-      // change did reach (D-107).
+      // A result the loop did not narrow to this node is the whole-change
+      // result with the node's name on it, not run again: every node carries
+      // one for each pinned check it was not narrowed for, a node the change
+      // never reached included, and it passes or fails as the pinned command
+      // did, so counting it would read the node by the whole change rather
+      // than by anything of its own. A narrowed result carries the pinned
+      // command's status too, the node's own run being evidence in its
+      // summary (D-107).
       const ran = records.checks
         .filter((check) => check.node?.id === node.id && check.node.scope === "files")
         .map((check) => ({ name: check.name, status: check.status }));

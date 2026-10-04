@@ -739,6 +739,7 @@ learning curve is allowed 1.25×, every confounder, and a verdict of `pass`, `fa
 | `1` | Usage or input error: bad flags, an unreadable contract, a verdict naming a `criterion_id` absent from the plan |
 | `2` | `changes_requested`, `escalate` or `remediable` — the review completed and the gate is closed |
 | `3` | `error` or `incomplete` — the review did not complete |
+| `4` | A command other than `review` whose model provider refused the request Perbo sent; `review` exits `3` with its error's kind `request_refused` |
 
 `2` and `3` are separate because they fail differently. A caller treating every non-zero code as
 blocking is correct; a caller checking only for `2` merges changes whose review never ran.

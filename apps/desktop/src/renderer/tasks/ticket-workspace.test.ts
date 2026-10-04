@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { TicketStateSchema } from "@perbo/contracts";
-import { COMPLETED, homeOrder, homeRows, homeTally, homeTone, projectTicket, stageOf, unseenAttention } from "./ticket-workspace.js";
+import { COMPLETED, homeOrder, homeRows, homeTally, homeTone, judgedReview, projectTicket, stageOf, unseenAttention } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { egressQuestionLine, egressSettledLine } from "@perbo/contracts";
 import type { Job } from "../../shared/protocol.js";
@@ -662,5 +662,53 @@ describe("the evidence the results page reads after a refinement round", () => {
     const replanned = { ...row, ticket: { ...row.ticket, plan_version: row.ticket.plan_version + 1 } };
     const other = { ...detail, ticket: replanned.ticket, contract: { ...detail.contract, version: replanned.ticket.plan_version } };
     expect(projectTicket(workspace, replanned, other).evidence).toMatchObject({ review: undefined, verified: null });
+  });
+});
+
+describe("the review the results page reads each criterion from", () => {
+  /** The sample's reviewed attempt, its review holding two open findings, and a verification that judged some of them. */
+  async function judged() {
+    const { detail } = await fixture();
+    const reviewed = detail.attempts.findLast((attempt) => attempt.review)!;
+    const base = reviewed.review!.findings[0]!;
+    const review = {
+      ...reviewed.review!,
+      findings: [
+        { ...base, key: "first", status: "open" as const },
+        { ...base, key: "second", status: "open" as const },
+      ],
+    };
+    const contract = { plan_id: review.plan_id, plan_version: review.plan_version };
+    const verification = (id: string, per_finding: Array<[string, "closed" | "not_closed"]>) => ({
+      ...reviewed,
+      id,
+      review: null,
+      reviewDecision: null,
+      verification: {
+        all_closed: per_finding.every(([, status]) => status === "closed"),
+        deterministic_failure: null,
+        open_keys: per_finding.filter(([, status]) => status !== "closed").map(([key]) => key),
+        per_finding: per_finding.map(([finding_key, status]) => ({ finding_key, status, pointer: "src/result.ts:2" })),
+      },
+    });
+    return { reviewed: { ...reviewed, review }, contract, verification };
+  }
+
+  const statuses = (review: ReturnType<typeof judgedReview>) => review!.findings.map((finding) => [finding.key, finding.status]);
+
+  it("reads a finding open where a later verification left it open, though an earlier one closed it", async () => {
+    const { reviewed, contract, verification } = await judged();
+    const attempts = [
+      reviewed,
+      verification("round-1", [["first", "closed"], ["second", "closed"]]),
+      verification("round-2", [["first", "not_closed"]]),
+    ];
+    expect(statuses(judgedReview(attempts, contract))).toEqual([["first", "open"], ["second", "resolved"]]);
+  });
+
+  it("reads nothing a verification before the review judged", async () => {
+    const { reviewed, contract, verification } = await judged();
+    const attempts = [verification("before", [["first", "closed"]]), reviewed];
+    expect(statuses(judgedReview(attempts, contract))).toEqual([["first", "open"], ["second", "open"]]);
   });
 });
