@@ -362,6 +362,12 @@ export type RejectedVerdict = z.infer<typeof RejectedVerdictSchema>;
 export const ReviewErrorSchema = z.strictObject({
   kind: z.enum([
     "provider_unavailable",
+    /**
+     * The provider refused the request Perbo built (`ProviderErrorKind` in
+     * `@perbo/model`). The same request is refused again, so it is never
+     * retried and nobody is told to try again.
+     */
+    "request_refused",
     "budget_exhausted",
     "timeout",
     "malformed_verdict",
@@ -509,12 +515,18 @@ export const NodeReviewsSchema = z.array(NodeReviewSchema);
  *
  * `2` and `3` are separate because they fail differently: a caller checking
  * only for `2` merges changes whose review never ran.
+ *
+ * `4` is a command other than `review` whose model provider refused the
+ * request Perbo sent: the same request is refused again, so a caller does not
+ * run it again. `review` exits `3` for that as for every review that did not
+ * complete, and says why in its error's kind.
  */
 export const EXIT_CODES = {
   approve: 0,
   usage_or_input_error: 1,
   gate_closed: 2,
   did_not_complete: 3,
+  request_refused: 4,
 } as const;
 
 export function exitCodeForDecision(decision: ReviewDecision): number {

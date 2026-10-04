@@ -626,6 +626,7 @@ const UNPARSED: Record<ReviewError["kind"], boolean> = {
   malformed_verdict: true,
   unknown_criterion_id: true,
   provider_unavailable: false,
+  request_refused: false,
   budget_exhausted: false,
   timeout: false,
   internal: false,
@@ -877,6 +878,8 @@ export interface RunEnding {
 /** The review errors that are not an answer the reviewer gave, as the stop is said of them. */
 const UNHAD: Record<Exclude<ReviewError["kind"], "verdict_rejected" | "malformed_verdict" | "unknown_criterion_id">, string> = {
   provider_unavailable: "The reviewer's model provider was unavailable, so the change was not reviewed.",
+  request_refused:
+    "The reviewer's model provider refused the request Perbo sent, so the change was not reviewed, and reviewing again will not help.",
   budget_exhausted: "The review ran out of its budget before it reached a verdict.",
   timeout: "The review timed out before it reached a verdict.",
   internal: "The review failed inside Perbo before it reached a verdict.",

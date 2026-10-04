@@ -19,6 +19,10 @@ function fakeCodex(
     structured: unknown;
     status?: string;
     error?: string;
+    /** The turn error's structured `codexErrorInfo`. */
+    errorInfo?: unknown;
+    /** A JSON-RPC error code to answer `turn/start` with instead of a turn. */
+    rpcError?: number;
     rerouteTo?: string;
   }>,
   instructionSources: string[] = [],
@@ -88,6 +92,10 @@ function fakeCodex(
     "      send({ id: message.id, error: { code: -1, message: 'turn was not isolated' } });",
     "      return;",
     "    }",
+    "    if (selected.rpcError !== undefined) {",
+    "      send({ id: message.id, error: { code: selected.rpcError, message: 'Invalid request' } });",
+    "      return;",
+    "    }",
     "    send({ id: message.id, result: { turn: { id, status: 'inProgress' } } });",
     "    if (selected.structured !== null) {",
     "      send({ method: 'item/completed', params: { turnId: id, item: { type: 'agentMessage', text: JSON.stringify(selected.structured) } } });",
@@ -96,7 +104,7 @@ function fakeCodex(
     "    if (selected.rerouteTo) {",
     "      send({ method: 'model/rerouted', params: { threadId: 'thr_1', turnId: id, fromModel: 'gpt-5.6-terra', toModel: selected.rerouteTo, reason: 'modelUnavailable' } });",
     "    }",
-    "    send({ method: 'turn/completed', params: { turn: { id, status: selected.status ?? 'completed', error: selected.error ? { message: selected.error } : null } } });",
+    "    send({ method: 'turn/completed', params: { turn: { id, status: selected.status ?? 'completed', error: selected.error ? { message: selected.error, codexErrorInfo: selected.errorInfo ?? null } : null } } });",
     "  }",
     "});",
   ].join("\n");
@@ -248,6 +256,44 @@ describe("the codex-cli transport", () => {
       codexHome: join(scratch, "missing-auth"),
     });
     await expect(model.turn(request)).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("reads a request the provider refused from codexErrorInfo, whatever the words say", async () => {
+    const refusals: unknown[] = ["badRequest", { responseStreamConnectionFailed: { httpStatusCode: 400 } }];
+    for (const errorInfo of refusals) {
+      const model = codexCliModel({
+        submitSchema: { type: "object" },
+        binary: fakeCodex([
+          // Words that would read as a usage limit: the structured field decides.
+          { structured: null, status: "failed", error: "quota of something: Missing 'requirement_id'", errorInfo },
+        ]),
+        codexHome: authHome,
+      });
+      await expect(model.turn(request)).rejects.toMatchObject({ kind: "request_refused" });
+    }
+    const unavailable = codexCliModel({
+      submitSchema: { type: "object" },
+      binary: fakeCodex([
+        { structured: null, status: "failed", error: "upstream failed", errorInfo: { responseStreamConnectionFailed: { httpStatusCode: 503 } } },
+      ]),
+      codexHome: authHome,
+    });
+    await expect(unavailable.turn(request)).rejects.toMatchObject({ kind: "provider_unavailable" });
+  });
+
+  it("reads JSON-RPC's invalid-request and invalid-params codes as the request refused", async () => {
+    for (const [rpcError, kind] of [
+      [-32602, "request_refused"],
+      [-32600, "request_refused"],
+      [-32603, "provider_unavailable"],
+    ] as const) {
+      const model = codexCliModel({
+        submitSchema: { type: "object" },
+        binary: fakeCodex([{ structured: null, rpcError }]),
+        codexHome: authHome,
+      });
+      await expect(model.turn(request)).rejects.toMatchObject({ kind });
+    }
   });
 
   it("maps an upstream usage limit to budget exhaustion", async () => {

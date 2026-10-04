@@ -455,7 +455,11 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
           <div className="drift-body" />
           {footer()}
         </section>
-        <ReadingFailedNotice error={error} onAcknowledge={confirmedFrom} />
+        <ReadingFailedNotice
+          error={error}
+          refused={failure === null && couldNotReread === null && landed?.refused === true}
+          onAcknowledge={confirmedFrom}
+        />
       </>
     );
   // The interview's own question, ahead of everything — the next problem, the

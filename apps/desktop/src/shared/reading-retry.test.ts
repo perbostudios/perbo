@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { READING_RETRY_PAUSES_MS, untilItRuns } from "./reading-retry.js";
+import { READING_RETRY_PAUSES_MS, RefusedRequestError, untilItRuns } from "./reading-retry.js";
 
 /**
  * A reading of the plan against its spec that does not run is tried again
@@ -27,6 +27,24 @@ describe("a reading tried until it runs", () => {
     ).rejects.toThrow("try 4 failed");
     expect(tries).toBe(4);
     expect(paused).toEqual([2_000, 4_000, 8_000]);
+  });
+
+  it("never tries again a command whose model provider refused the request", async () => {
+    const paused: number[] = [];
+    let tries = 0;
+    await expect(
+      untilItRuns(
+        () => {
+          tries += 1;
+          throw new RefusedRequestError("error: `perbo drift` was refused by the model provider");
+        },
+        async (ms) => {
+          paused.push(ms);
+        },
+      ),
+    ).rejects.toBeInstanceOf(RefusedRequestError);
+    expect(tries).toBe(1);
+    expect(paused).toEqual([]);
   });
 
   it("returns what a later try gives, with no pause after it", async () => {

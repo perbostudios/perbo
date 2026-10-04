@@ -298,6 +298,26 @@ describe("settling", () => {
     expect(job.error).toContain("no ticket store here");
   });
 
+  it("marks a job whose model provider refused the request refused, from the exit code alone", async () => {
+    const refusing = runner({ code: 4, stdout: "", stderr: "error: the draft was refused by the model provider", cancelled: false });
+    const refused = refusing.jobs.start({ repo, key: "PRB-1", kind: "draft", label: "Draft" }, async (_job, context) => {
+      await context.invoke(["admit"]);
+    });
+    await quiet(refusing.jobs);
+    expect(refused.state).toBe("failed");
+    expect(refused.refused).toBe(true);
+    expect(refused.error).toContain("was refused by the model provider");
+
+    // Other failures, whatever they say, are not.
+    const failing = runner({ code: 3, stdout: "", stderr: "error: refused by the model provider", cancelled: false });
+    const failed = failing.jobs.start({ repo, key: "PRB-1", kind: "draft", label: "Draft" }, async (_job, context) => {
+      await context.invoke(["admit"]);
+    });
+    await quiet(failing.jobs);
+    expect(failed.state).toBe("failed");
+    expect(failed.refused).toBeUndefined();
+  });
+
   it("carries the command's stdout as the job's result where it is JSON", async () => {
     const w = runner({
       code: 0,

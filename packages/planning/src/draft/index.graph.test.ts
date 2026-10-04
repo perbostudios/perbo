@@ -40,8 +40,8 @@ describe("the drafter proposes an execution graph", () => {
   it("returns one contract with nodes and suggested edges, under a new prompt version", async () => {
     const model = scriptedDrafter([submits(graphedDraft)]);
     const result = await draftContract(fromSpec(model));
-    expect(DRAFT_PROMPT_VERSION).toBe("draft_v6");
-    expect(result.model.prompt_version).toBe("draft_v6");
+    expect(DRAFT_PROMPT_VERSION).toBe("draft_v7");
+    expect(result.model.prompt_version).toBe("draft_v7");
     expect(result.draft.nodes).toEqual(graphedDraft.nodes);
     expect(result.draft.edges).toEqual([{ from: 0, to: 1 }]);
     // One draft is one contract is one ticket, whatever the graph's size.
@@ -181,6 +181,28 @@ describe("the requirement a drafted criterion cites", () => {
     const result = await draftContract(fromIssue(model));
     expect(result.draft.acceptance_criteria.every((c) => c.requirement_id === undefined)).toBe(true);
   });
+
+  it("reads null as absent, which is what every transport sends for none", async () => {
+    const uncited = {
+      ...validDraft,
+      acceptance_criteria: validDraft.acceptance_criteria.map((criterion) => ({
+        ...criterion,
+        requirement_id: null,
+      })),
+    };
+    const fromAnIssue = await draftContract(fromIssue(scriptedDrafter([submits(uncited)])));
+    expect(fromAnIssue.draft.acceptance_criteria.every((c) => !("requirement_id" in c))).toBe(true);
+
+    const partly = {
+      ...graphedDraft,
+      acceptance_criteria: graphedDraft.acceptance_criteria.map((criterion, index) =>
+        index === 1 ? { ...criterion, requirement_id: null } : criterion,
+      ),
+    };
+    const fromASpec = await draftContract(fromSpec(scriptedDrafter([submits(partly)])));
+    expect(fromASpec.draft.acceptance_criteria.map((c) => c.requirement_id)).toEqual(["R1", undefined, "R4"]);
+    expect("requirement_id" in fromASpec.draft.acceptance_criteria[1]!).toBe(false);
+  });
 });
 
 describe("the spec reaches the drafter as data", () => {
@@ -229,8 +251,10 @@ describe("the JSON schema the provider enforces", () => {
     expect(scope.properties["paths_allowed"]!.minItems).toBe(1);
     expect(scope.properties["paths_allowed"]!.maxItems).toBeUndefined();
     expect((schema.properties["name"] as { maxLength: number }).maxLength).toBe(60);
-    expect(criteria.items.properties["requirement_id"]).toBeDefined();
-    expect(criteria.items.required).not.toContain("requirement_id");
+    // Required and nullable: every property of a schema sent to a provider is
+    // required, so a criterion with no requirement says null.
+    expect(criteria.items.properties["requirement_id"]).toMatchObject({ type: ["string", "null"] });
+    expect(criteria.items.required).toContain("requirement_id");
     const nodes = schema.properties["nodes"] as { items: { required: string[] } };
     expect([...nodes.items.required].sort()).toEqual(["criteria", "paths", "title"]);
   });

@@ -40,10 +40,12 @@ import { repositoryTree } from "./internal/tree.js";
  * The prompt covers an issue or a spec as the source, an execution graph of
  * nodes and suggested edges, the requirement id a criterion was drafted from,
  * as many criteria and as many allowed paths as the work has (D-100, D-103),
- * every file the drafter opens delimited by this package, and a name told
- * apart from every other ticket's, which the drafter is shown (D-127).
+ * every file the drafter opens delimited by this package, a name told apart
+ * from every other ticket's, which the drafter is shown (D-127), and a schema
+ * whose every property is required, with `null` where a criterion cites no
+ * requirement.
  */
-export const DRAFT_PROMPT_VERSION = "draft_v6";
+export const DRAFT_PROMPT_VERSION = "draft_v7";
 
 /**
  * `manual` is absent: it carries a named reviewer and a reason nobody can
@@ -52,17 +54,32 @@ export const DRAFT_PROMPT_VERSION = "draft_v6";
  */
 export const DRAFT_CRITERION_KINDS = ["test", "artifact", "query", "metric"] as const;
 
-export const DraftCriterionSchema = z.strictObject({
-  text: z.string().min(1),
-  assertion: z.string().min(1),
-  kind: z.enum(DRAFT_CRITERION_KINDS),
-  /**
-   * The spec requirement this criterion was drafted from (D-103). Only a spec
-   * has requirements, so {@link draftContract} refuses one on a draft made from
-   * an issue, and refuses an id the spec does not carry.
-   */
-  requirement_id: RequirementIdSchema.optional(),
-});
+/** One drafted criterion, as the rest of Perbo reads it. */
+export interface DraftCriterion {
+  text: string;
+  assertion: string;
+  kind: (typeof DRAFT_CRITERION_KINDS)[number];
+  requirement_id?: string;
+}
+
+export const DraftCriterionSchema = z
+  .strictObject({
+    text: z.string().min(1),
+    assertion: z.string().min(1),
+    kind: z.enum(DRAFT_CRITERION_KINDS),
+    /**
+     * The spec requirement this criterion was drafted from (D-103). Only a spec
+     * has requirements, so {@link draftContract} refuses one on a draft made from
+     * an issue, and refuses an id the spec does not carry. The transport sends
+     * `null` where there is none, because every property of a schema sent to a
+     * provider is required (`strictSchemaViolations` in `@perbo/model`); `null`
+     * reads as absent.
+     */
+    requirement_id: RequirementIdSchema.nullish(),
+  })
+  .transform(({ requirement_id, ...criterion }): DraftCriterion =>
+    requirement_id === null || requirement_id === undefined ? criterion : { ...criterion, requirement_id },
+  );
 
 /**
  * One proposed node. Its criteria are **indices** into `acceptance_criteria`:
@@ -213,8 +230,9 @@ export type ContractDraft = z.infer<typeof ContractDraftSchema>;
 
 /**
  * The same shape as JSON Schema, for the transport to enforce. Every property
- * is required and nothing else is allowed, which is what a strict tool schema
- * needs and what keeps `steps` and friends unrepresentable here too.
+ * is required, a value that may be missing is nullable, and nothing else is
+ * allowed: the one rule every transport accepts (`strictSchemaViolations` in
+ * `@perbo/model`), which also keeps `steps` and friends unrepresentable here.
  */
 const CRITERIA_JSON_SCHEMA = {
   type: "array",
@@ -224,7 +242,7 @@ const CRITERIA_JSON_SCHEMA = {
   items: {
     type: "object",
     additionalProperties: false,
-    required: ["text", "assertion", "kind"],
+    required: ["text", "assertion", "kind", "requirement_id"],
     properties: {
       text: { type: "string", description: "What must be true, in one sentence." },
       assertion: {
@@ -238,10 +256,10 @@ const CRITERIA_JSON_SCHEMA = {
           "How it will be proven. test for code; artifact for a document, diagram or record that must exist; query for a database or index fact; metric for a measured number.",
       },
       requirement_id: {
-        type: "string",
+        type: ["string", "null"],
         pattern: "^R[1-9][0-9]*$",
         description:
-          "The spec requirement this criterion is drafted from, exactly as the spec writes it. Only an id listed in the requirement_ids block, and only when drafting from a spec; leave it out for an issue.",
+          "The spec requirement this criterion is drafted from, exactly as the spec writes it. Only an id listed in the requirement_ids block, and only when drafting from a spec; null for an issue.",
       },
     },
   },
@@ -511,7 +529,7 @@ acceptance_criteria as many as the work has, and no more. Each states what must
                     query for a stored fact, metric for a measured number. When
                     you are given a spec, give each criterion the
                     requirement_id it comes from, from the ids you are shown
-                    and no others; for an issue, leave requirement_id out.
+                    and no others; for an issue, requirement_id is null.
 proposed_scope      the globs the change may touch. Narrow. Every glob names a
                     directory that appears in the repository tree you are
                     shown, unless the work plainly creates a new one — say so
