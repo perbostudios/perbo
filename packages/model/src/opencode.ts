@@ -128,10 +128,8 @@ class OpenCodeAcp {
   cost: number | null = null;
   /** The tool calls the turn in flight asked about, each refused. */
   refusedCalls = 0;
-  /** A tool OpenCode reported having run in the turn in flight, which this session never allows. */
-  ran: string | null = null;
-  /** Each tool call's name, from the update that announced it. */
-  private readonly tools = new Map<string, string>();
+  /** The tool calls OpenCode reported having run in the turn in flight, by id; this session never allows one. */
+  private readonly completed = new Set<string>();
 
   constructor(options: OpenCodeCliOptions, system: string, schema: Record<string, unknown>) {
     this.timeoutMs = options.timeoutMs ?? 600_000;
@@ -253,6 +251,11 @@ class OpenCodeAcp {
     return error instanceof Error && this.openCodeRefusals.has(error);
   }
 
+  /** How many tool calls OpenCode reported having run in the turn in flight. */
+  get ran(): number {
+    return this.completed.size;
+  }
+
   /** What the turn in flight has said last. */
   private said(): string | null {
     return this.message?.text ?? null;
@@ -262,7 +265,7 @@ class OpenCodeAcp {
   async turn(sessionId: string, prompt: string): Promise<{ message: string | null; result: PromptResult }> {
     this.message = null;
     this.refusedCalls = 0;
-    this.ran = null;
+    this.completed.clear();
     const result = (await this.request("session/prompt", {
       sessionId,
       prompt: [{ type: "text", text: prompt }],
@@ -354,10 +357,10 @@ class OpenCodeAcp {
       if (typeof cost?.amount === "number" && cost.currency === "USD") this.cost = cost.amount;
     } else if (update["sessionUpdate"] === "tool_call" || update["sessionUpdate"] === "tool_call_update") {
       const id = typeof update["toolCallId"] === "string" ? update["toolCallId"] : "";
-      if (typeof update["title"] === "string" && update["sessionUpdate"] === "tool_call") this.tools.set(id, update["title"]);
       // Every tool this session offers is asked about and refused, so one that
-      // completed ran on a rule Perbo did not write.
-      if (update["status"] === "completed") this.ran = this.tools.get(id) ?? "a tool";
+      // completed ran on a rule Perbo did not write. Only the count is kept: a
+      // call's title is the model's text, and no error repeats it.
+      if (update["status"] === "completed") this.completed.add(id);
     }
   }
 
@@ -433,8 +436,12 @@ export function openCodeCliModel(options: OpenCodeCliOptions): Model {
           usage.output_tokens += reported.outputTokens ?? 0;
           usage.cache_read_input_tokens += reported.cachedReadTokens ?? 0;
           usage.cache_creation_input_tokens += reported.cachedWriteTokens ?? 0;
-          if (server.ran !== null)
-            throw new ProviderError(`OpenCode ran ${server.ran} in the isolated reviewer`, 1, "provider_unavailable");
+          if (server.ran > 0)
+            throw new ProviderError(
+              `OpenCode ran ${server.ran} tool call(s) in the isolated reviewer`,
+              1,
+              "provider_unavailable",
+            );
           if (server.refusedCalls === 0 || result.stopReason !== "cancelled") break;
           refused += server.refusedCalls;
           if (refused > REVIEWER_REFUSED_TOOL_CALLS)

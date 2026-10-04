@@ -314,7 +314,11 @@ describe("a refinement that stalled", () => {
     expect(screen.queryByRole("heading", { name: "Paused for a decision" })).toBeNull();
     expect(screen.queryByRole("dialog", { name: "Decisions required" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Ready to recover this task" })).toBeTruthy();
-    expect(document.querySelector(".stage-labels .current")?.textContent).not.toBe("decisions required");
+    // A stop, not a decision: the stage it stopped at, under its own name, in the stopped colour.
+    const at = document.querySelector(".stage-labels .current")!;
+    expect(at.textContent).toBe("verification");
+    expect(at.classList.contains("is-stopped")).toBe(true);
+    expect(document.querySelector(".stage-labels .is-decision")).toBeNull();
     expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
     expect(context.show).not.toHaveBeenCalled();
   });

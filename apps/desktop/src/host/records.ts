@@ -26,6 +26,7 @@ import {
 import type { Cost, PlanContract, RecordedBundle, Ticket } from "@perbo/contracts";
 import { ticketBranchStillAt } from "@perbo/workspace";
 import { assembleLiveGraph } from "../shared/graph-live.js";
+import { wheelStep } from "../shared/runner-progress.js";
 import { decisionQuestions, owedQuestions, settledOnRecord, type SettledFindings } from "../shared/decisions.js";
 import type { LiveCheck, LiveNodeInput, LiveReview } from "../shared/graph-live.js";
 import type {
@@ -406,6 +407,63 @@ const monthOf = (value: string | undefined): string | null => {
     date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0")
   );
 };
+/**
+ * How far a ticket's journey has reached on its records (`TaskRow.reached`),
+ * read from the bundles and the attempts record of the contract the ticket
+ * holds as the loop page reads the same attempts (`recordedRunnerStages`,
+ * `projectTicket`): an attempt executed is the execution, a remediation round
+ * the refinement, the ticket's first review the review, and a review of a
+ * later attempt or a closure verification the verification. `approved` says
+ * the last attempt's review approved the change, or its closure verification
+ * closed every finding it was given with no deterministic failure. Null where
+ * no attempt of the contract is on record.
+ */
+export function reachedOnRecord(input: {
+  ticket: Pick<Ticket, "ticket_id" | "plan_id" | "plan_version">;
+  attempts: readonly StoredAttempt[];
+  bundles: readonly BundleManifest[];
+}): { stage: number; approved: boolean } | null {
+  const { ticket } = input;
+  const mine = input.bundles.filter((bundle) => bundle.ticket_id === ticket.ticket_id);
+  const executions = mine.filter(
+    (bundle) =>
+      bundle.kind === "execution" &&
+      bundle.inputs?.["plan_id"] === ticket.plan_id &&
+      bundle.inputs?.["plan_version"] === ticket.plan_version,
+  );
+  if (executions.length === 0) return null;
+  const ids = new Set(executions.map((bundle) => bundle.subject_id));
+  const reviews = mine.filter(
+    (bundle) =>
+      bundle.kind === "review" &&
+      bundle.subject_id.startsWith("rev_") &&
+      ids.has(String(bundle.inputs?.["attempt_id"] ?? "")),
+  );
+  const verifications = mine.filter(
+    (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("cv_") && ids.has(bundle.subject_id.slice(3)),
+  );
+  const reviewed = new Set(reviews.map((bundle) => String(bundle.inputs?.["attempt_id"])));
+  const stage = Math.max(
+    wheelStep("execution"),
+    ...(executions.some((bundle) => bundle.inputs?.["round_kind"] === "remediate") ? [wheelStep("refinement")] : []),
+    ...(reviewed.size > 0 ? [wheelStep("review")] : []),
+    ...(reviewed.size > 1 || verifications.length > 0 ? [wheelStep("verification")] : []),
+  );
+  const latest = input.attempts.at(-1)?.attempt_id;
+  const approved =
+    latest !== undefined &&
+    ids.has(latest) &&
+    (reviews.findLast((bundle) => bundle.inputs?.["attempt_id"] === latest)?.inputs?.["decision"] === "approve" ||
+      verifications.some(
+        (bundle) =>
+          bundle.subject_id === `cv_${latest}` &&
+          bundle.inputs?.["all_closed"] === true &&
+          (bundle.inputs["deterministic_failure"] ?? null) === null &&
+          (bundle.inputs["findings_open"] ?? "") === "",
+      ));
+  return { stage, approved };
+}
+
 export const currentMonth = (now = new Date()): string =>
   now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
 

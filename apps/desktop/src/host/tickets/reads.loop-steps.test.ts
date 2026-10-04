@@ -87,19 +87,17 @@ describe("the loop page, live from the run's log and rebuilt from its records", 
 });
 
 describe("the declines each attempt recorded", () => {
-  it("carry to the page with their reasons, from the attempt's own record before its transcript (D-065)", () => {
+  it("carry to the page with their reasons from the attempt's own record, and from nowhere else (D-065)", () => {
     const report = structuredClone(captured.report) as { attempts: Array<Record<string, unknown>> };
     const declined = "a".repeat(64);
     const last = report.attempts.at(-1)!;
+    // A decline the transcript reports and the record does not hold is not counted.
     last["declines"] = [{ finding_key: declined, reason: "read from the transcript" }];
-    // A record that does not say what it declined: the transcript's words stand.
     const unsaid = { ...(last["record"] as Record<string, unknown>) };
     delete unsaid["declines"];
     last["record"] = unsaid;
-    expect(attemptViews(ReportSchema.parse(report)).at(-1)!.declines).toEqual([
-      { finding_key: declined, reason: "read from the transcript" },
-    ]);
-    last["record"] = { ...(last["record"] as object), declines: [{ finding_key: declined, reason: "as the loop recorded it" }] };
+    expect(attemptViews(ReportSchema.parse(report)).at(-1)!.declines).toBeUndefined();
+    last["record"] = { ...unsaid, declines: [{ finding_key: declined, reason: "as the loop recorded it" }] };
     const attempts = attemptViews(ReportSchema.parse(report));
     expect(attempts.at(-1)!.declines).toEqual([{ finding_key: declined, reason: "as the loop recorded it" }]);
     expect(attempts.slice(0, -1).every((attempt) => (attempt.declines ?? []).length === 0)).toBe(true);

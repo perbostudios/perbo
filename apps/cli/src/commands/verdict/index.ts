@@ -822,7 +822,8 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
         `${finding.review_decision}: ` +
         (finding.review_decision === "incomplete" || finding.review_decision === "error"
           ? "it did not judge the whole change, so an answer would settle a finding on a change nobody finished judging, and it takes none"
-          : "its findings are the executor's until a run ends remediation_stalled or remediation_exhausted, and it takes no answer before then") +
+          : "its findings are the executor's until a run ends remediation_stalled or remediation_exhausted, the executor declines one of them, " +
+            "or the runner refuses a round given one, and it takes no answer before then") +
         ". `perbo principle add` carries your words to the executor",
     );
   }

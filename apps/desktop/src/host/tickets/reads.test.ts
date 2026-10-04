@@ -302,6 +302,36 @@ describe("one repository's row on Home", () => {
     expect(snapshot.errors).toEqual([]);
   });
 
+  it("carries how far each journey reached on its records, and nothing for one with none", async () => {
+    const repo = repository();
+    mkdirSync(bundlesPath(repo), { recursive: true });
+    const bundle = (name: string, manifest: Record<string, unknown>) =>
+      writeFileSync(join(bundlesPath(repo), `${name}.json`), JSON.stringify({ ticket_id: "ticket_1", artifacts: [], ...manifest }));
+    bundle("execution", {
+      bundle_id: "bundle_0000000000000001",
+      kind: "execution",
+      subject_id: "att_1",
+      inputs: { plan_id: "plan_00000000000001", plan_version: 1, round_kind: "execute" },
+    });
+    bundle("review", {
+      bundle_id: "bundle_0000000000000002",
+      kind: "review",
+      subject_id: "rev_0000000000000001",
+      inputs: { attempt_id: "att_1", decision: "approve" },
+    });
+    mkdirSync(join(repo.path, ".perbo", "state"), { recursive: true });
+    writeFileSync(attemptsPath(repo, "ticket_1"), JSON.stringify({ ticket_id: "ticket_1", attempts: [{ attempt_id: "att_1" }] }));
+    const w = reads(
+      { list: ok(JSON.stringify({ tickets: [ticket(), ticket({ ticket_id: "ticket_2", key: "PRB-2" })] })) },
+      repo,
+    );
+    const snapshot = await w.tickets.repositorySnapshot(repoId);
+    expect(snapshot.tasks.map((row) => [row.ticket.key, row.reached])).toEqual([
+      ["PRB-1", { stage: 3, approved: true }],
+      ["PRB-2", undefined],
+    ]);
+  });
+
   it("keeps the repository on Home when Git could not read it, with the reason", async () => {
     const repo = repository();
     const w = reads(

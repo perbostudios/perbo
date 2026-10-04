@@ -377,8 +377,9 @@ function widenedVerification(toVerify: readonly Finding[], refusal: string): Clo
  *
  * The verifier's bundle names the commit it judged as `head_commit`, which is
  * what a later run continues from. A refusal judged no tree, so it names the
- * commit it refused as `refused_head_commit` instead and anchors nothing: a
- * re-run of a widened branch reviews it afresh.
+ * commit it refused as `refused_head_commit` instead and anchors nothing: the
+ * runner resets the branch to the commit last judged (`restoreJudgedCommit`),
+ * and a later run continues from there.
  */
 function recordVerification(
   args: Pick<

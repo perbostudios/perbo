@@ -259,7 +259,10 @@ describe("the stopped page", () => {
       "The refinement stalled: a round closed none of the findings it was given.",
     ]);
     expect(behind()[0]).toMatch(/Nothing on its record is left for you to answer/);
-    expect(wheel()).not.toBe("decisions required");
+    // A stop, not a decision: the stage it stopped at, under its own name, in the stopped colour.
+    expect(wheel()).toBe("review");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+    expect(document.querySelector(".stage-labels .is-decision")).toBeNull();
     expect(carryOn().title).toMatch(/for the reason listed/);
   });
 
@@ -462,13 +465,30 @@ describe("the stopped page", () => {
     const log =
       "  worktree /tmp/w on ayo/task at 123\n  executing\n  sealing the change set\n  check test: passed\n  review round 0\n" +
       "  remediation round 1 of at most 6\n  sealing the change set\n  check test: passed\n  review round 1\n";
-    mount(stopped({ state: "cancelled", log }));
+    // The attempts on record are an earlier run's: this run's log is what says how far it went.
+    mount(stopped({ state: "cancelled", log }, { startedAt: "2026-09-08T04:09:00.000Z" }));
     expect(wheel()).toBe("verification");
     expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
     expect(document.querySelectorAll(".stage-labels .complete")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: "View the paused loop" }));
     expect(wheel()).toBe("verification");
     expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+  });
+  it("marks the stage the loop was at when it stopped, behind the fill at the furthest stage it reached", () => {
+    const log =
+      "  worktree /tmp/w on ayo/task at 123\n  executing\n  sealing the change set\n  check test: passed\n  review round 0\n" +
+      "  remediation round 1 of at most 6\n  sealing the change set\n  check test: passed\n  review round 1\n" +
+      "  remediation round 2 of at most 6\n";
+    // The attempts on record are an earlier run's: this run's log is what says how far it went.
+    mount(stopped({ state: "cancelled", log }, { startedAt: "2026-09-08T04:09:00.000Z" }));
+    expect(wheel()).toBe("refinement");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+    expect([...document.querySelectorAll(".stage-labels .complete")].map((step) => step.textContent)).toEqual([
+      "contract",
+      "execution",
+      "review",
+    ]);
+    expect((document.querySelector(".progress-track > span") as HTMLElement).style.width).toBe("80%");
   });
 });
 

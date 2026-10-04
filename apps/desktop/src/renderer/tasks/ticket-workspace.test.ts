@@ -74,7 +74,9 @@ describe("ticket workspace projection", () => {
     workspace.jobs = [job];
     detail.attempts.push({ ...detail.attempts[0]!, id: "later", review: null, reviewDecision: null, checks: [], verification: null });
     const result = projectTicket(workspace, row, detail);
-    expect(result).toMatchObject({ resultReady: false, recoverable: true, evidence: { ready: false, verified: null, kind: "not-retained" } });
+    expect(result).toMatchObject({ resultReady: false, recoverable: true, evidence: { ready: false, kind: "not-retained" } });
+    // Its criteria still read as the review on record left them; nothing says the attempt passed.
+    expect(result.evidence.review?.review_id).toBe(detail.attempts[0]!.review!.review_id);
     expect(result.primary.label).toBe("See the stopped run");
   });
 
@@ -87,14 +89,16 @@ describe("ticket workspace projection", () => {
     expect(projectTicket(workspace, row, detail).evidence).toMatchObject({ kind: "stale", ready: false });
   });
 
-  it("recognises closure verification without manufacturing a fresh criterion review", async () => {
+  it("recognises closure verification, reading the criteria from the review before it rather than a fresh one", async () => {
     const { workspace, row, detail } = await fixture();
     row.ticket.state = "pr_open";
     row.ticket.delivery.pull_request_url = null;
     const prior = detail.attempts[0]!;
     detail.attempts.push({ ...prior, id: "closure", review: null, reviewDecision: null, checks: [{ name: "test", status: "passed", detail: "" }], verification: { all_closed: true, deterministic_failure: null, open_keys: [], per_finding: [{ finding_key: "finding", status: "closed", pointer: "src/result.ts:2" }] } });
     const result = projectTicket(workspace, row, detail);
-    expect(result).toMatchObject({ primary: { label: "Review result" }, evidence: { kind: "closure", ready: true, verified: null, review: undefined, priorReview: prior.review, closuresVerified: true } });
+    expect(result).toMatchObject({ primary: { label: "Review result" }, evidence: { kind: "closure", ready: true, priorReview: prior.review, closuresVerified: true } });
+    expect(result.evidence.review?.review_id).toBe(prior.review!.review_id);
+    expect(result.evidence.review?.coverage).toEqual(prior.review!.coverage);
     expect(projectTicket(workspace, row, detail, "output").screen).toBe("output");
   });
 
@@ -308,8 +312,8 @@ describe("ticket workspace projection", () => {
 
   /**
    * A run still going that waits on the person's answer about a host off the
-   * allow-list is paused for them: yellow, the wheel at the decisions, until
-   * the answer is printed, when the wheel goes back to the step the log names.
+   * allow-list is paused for them: yellow, the stage it asked at waiting on
+   * them, until the answer is printed, when the loop carries on at that stage.
    */
   it("shows the stage a run waiting on an unlisted host's answer is at as waiting on the person, until it is answered", async () => {
     const { workspace, row, detail, job } = await fixture();
@@ -606,5 +610,57 @@ describe("a Home ticket's claim on the person", () => {
     expect(unseenAttention(workspace, row)).toBe(true);
     workspace.lastOpened = { [row.repoId + ":" + row.ticket.key]: "2026-09-10T10:01:00.000Z" };
     expect(unseenAttention(workspace, row)).toBe(false);
+  });
+});
+
+describe("how far the host read a journey reached on its records (TaskRow.reached)", () => {
+  it("fills Home's wheel, which holds no detail, to that stage and never back", async () => {
+    const { workspace, row } = await fixture();
+    workspace.refreshingRepos = [];
+    row.ticket.state = "changes_requested";
+    expect(projectTicket(workspace, row).stage).toBe(3);
+    expect(projectTicket(workspace, { ...row, reached: { stage: 5, approved: false } }).stage).toBe(5);
+    // A ticket whose state names an earlier stage keeps the stage its records reached.
+    row.ticket.state = "executing";
+    expect(projectTicket(workspace, { ...row, reached: { stage: 4, approved: false } }).stage).toBe(4);
+  });
+
+  it("counts a journey whose last attempt the records approved as completed, as the loop page does", async () => {
+    const { workspace, row } = await fixture();
+    workspace.refreshingRepos = [];
+    row.ticket.state = "ready";
+    expect(projectTicket(workspace, { ...row, reached: { stage: 3, approved: false } })).toMatchObject({ resultReady: false, stage: 3 });
+    expect(projectTicket(workspace, { ...row, reached: { stage: 3, approved: true } })).toMatchObject({
+      resultReady: true,
+      stage: COMPLETED,
+    });
+  });
+});
+
+describe("the evidence the results page reads after a refinement round", () => {
+  it("counts the criteria the review before the round directly verified, and nothing where no review is on record", async () => {
+    const { workspace, row, detail } = await fixture();
+    workspace.refreshingRepos = [];
+    const reviewed = detail.attempts.findLast((attempt) => attempt.review)!;
+    const met = reviewed.review!.coverage.filter(
+      (entry) => entry.status === "met" && entry.verification_strength === "directly_verified",
+    ).length;
+    expect(met).toBeGreaterThan(0);
+    detail.attempts.push({
+      ...reviewed,
+      id: "refinement-round-1",
+      round: 1,
+      review: null,
+      reviewDecision: null,
+      verification: { all_closed: true, deterministic_failure: null, open_keys: [], per_finding: [] },
+    });
+    const { evidence } = projectTicket(workspace, row, detail);
+    expect(evidence.kind).toBe("closure");
+    expect(evidence.verified).toBe(met);
+    expect(evidence.review?.review_id).toBe(reviewed.review!.review_id);
+    // A review of another version of the contract is not this contract's.
+    const replanned = { ...row, ticket: { ...row.ticket, plan_version: row.ticket.plan_version + 1 } };
+    const other = { ...detail, ticket: replanned.ticket, contract: { ...detail.contract, version: replanned.ticket.plan_version } };
+    expect(projectTicket(workspace, replanned, other).evidence).toMatchObject({ review: undefined, verified: null });
   });
 });

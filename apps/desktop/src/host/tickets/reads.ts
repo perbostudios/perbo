@@ -20,6 +20,7 @@ import {
   listBundles,
   owedOnBranch,
   questionsOnFiles,
+  reachedOnRecord,
   readAttempts,
   readDraftEditRecordsOrNone,
   reviewOnRecord,
@@ -245,18 +246,26 @@ export class TicketReads {
         if (listing.status === "rejected") throw listing.reason;
         const list = listing.value;
         // What a ticket waiting on the person asks them, as its decision card
-        // asks it, so Home is yellow only where there is a question.
-        const bundles = list.tickets.some((ticket) => ticket.state === "changes_requested")
-          ? await this.bundles(repo)
-          : [];
+        // asks it, so Home is yellow only where there is a question; and how
+        // far each journey has reached on its records, so Home's wheel is the
+        // loop page's.
+        const bundles = await this.bundles(repo);
         return {
           repository,
-          tasks: list.tickets.map((ticket) => ({
-            repoId,
-            repository: repo.name,
-            ticket,
-            ...(ticket.state === "changes_requested" ? this.questionsOf(repo, ticket, bundles) : {}),
-          })),
+          tasks: list.tickets.map((ticket) => {
+            const reached = reachedOnRecord({
+              ticket,
+              attempts: readAttempts(attemptsPath(repo, ticket.ticket_id)).attempts,
+              bundles,
+            });
+            return {
+              repoId,
+              repository: repo.name,
+              ticket,
+              ...(ticket.state === "changes_requested" ? this.questionsOf(repo, ticket, bundles) : {}),
+              ...(reached === null ? {} : { reached }),
+            };
+          }),
           errors: [],
         };
       } catch (error) {

@@ -781,7 +781,8 @@ describe("a round the runner refused", () => {
     statement: "The change set touches a path the contract does not admit.",
   });
 
-  it("leaves the branch at the judged commit, and the person's answer acts on it", async () => {
+  /** Run 1: the review routes the scope finding to the executor, and its round widens and is refused. */
+  async function refusedRun() {
     const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
@@ -806,25 +807,21 @@ describe("a round the runner refused", () => {
         }) as never,
       },
     });
-    expect(first.outcome).toBe("changes_requested");
-    expect(first.detail).toContain("widened the change set");
     const judged = first.final_review!.target.head_commit;
-    const refused = first.rounds.at(-1)!.attempt.head_commit!;
     const branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome });
-    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged);
-    expect(refused).not.toBe(judged);
-    const store = new BundleStore({ root: config.bundle_root, retainContext: true });
-    const refusal = store.forTicket(contract.ticket_id).find((bundle) => bundle.subject_id.startsWith("cv_"))!;
-    expect(refusal.inputs["refused_head_commit"]).toBe(refused);
+    const history = [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }];
+    return { repo, contract, config, first, judged, branch, history };
+  }
 
-    // This time the round stays inside the change set the review judged.
+  /** Run 2: the person's answer runs one round on the judged commit, which stays inside the change set. */
+  async function answeredRun(run: Awaited<ReturnType<typeof refusedRun>>) {
     const agent = agentDouble((worktree) => writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 2;\n"));
     const verifications: string[][] = [];
     const reviews: unknown[] = [];
     const second = await runTicket({
-      config,
-      contract,
-      history: [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }],
+      config: run.config,
+      contract: run.contract,
+      history: run.history,
       decided: [decision(scope.key, "Keep every change under src/ and drop the extra test file.", new Date(), "approach")],
       hooks: {
         agent: agent.run as never,
@@ -848,11 +845,43 @@ describe("a round the runner refused", () => {
         }) as never,
       },
     });
+    return { second, agent, verifications, reviews };
+  }
+
+  it("leaves the branch at the judged commit, and the person's answer acts on it", async () => {
+    const run = await refusedRun();
+    const { repo, config, contract, first, judged, branch } = run;
+    expect(first.outcome).toBe("changes_requested");
+    expect(first.detail).toContain("widened the change set");
+    const refused = first.rounds.at(-1)!.attempt.head_commit!;
+    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged);
+    expect(refused).not.toBe(judged);
+    const store = new BundleStore({ root: config.bundle_root, retainContext: true });
+    const refusal = store.forTicket(contract.ticket_id).find((bundle) => bundle.subject_id.startsWith("cv_"))!;
+    expect(refusal.inputs["refused_head_commit"]).toBe(refused);
+
+    const { second, agent, verifications, reviews } = await answeredRun(run);
     expect(reviews).toEqual([]);
     expect(second.rounds.map((round) => round.kind)).toEqual(["remediate"]);
     expect(agent.calls[0]).toContain("Keep every change under src/ and drop the extra test file.");
     expect(verifications).toEqual([[scope.key]]);
     expect(second.outcome).toBe("approved");
+  }, 120_000);
+
+  it("refuses the next run while the finding is unanswered, and continues at the judged commit once it is answered", async () => {
+    const run = await refusedRun();
+    const { repo, config, contract, judged, branch, history } = run;
+    const owed = runTicket({ config, contract, history, decided: [], hooks: noModel });
+    await expect(owed).rejects.toBeInstanceOf(AnswersOwedError);
+    await expect(owed).rejects.toThrow(`left 1 finding(s) for you to answer (${scope.key.slice(0, 12)})`);
+    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged);
+
+    const { second, reviews } = await answeredRun(run);
+    expect(reviews).toEqual([]);
+    expect(second.outcome).toBe("approved");
+    // The answered round's commit sits on the judged one, not on the refused one.
+    const made = second.rounds[0]!.attempt.head_commit!;
+    expect(repo.git("rev-parse", `${made}^`).trim()).toBe(judged);
   }, 120_000);
 });
 

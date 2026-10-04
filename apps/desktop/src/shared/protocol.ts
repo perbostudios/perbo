@@ -1530,6 +1530,16 @@ export interface TaskRow {
    * every other state, which the host does not count.
    */
   questions?: number;
+  /**
+   * How far the ticket's journey has reached on its records, as the host reads
+   * its bundles and attempts (`reachedOnRecord`): the furthest wheel stage an
+   * attempt of the contract it holds went through, and whether the last
+   * attempt was approved. `projectTicket` fills the wheel to no less than this
+   * stage and counts the journey completed on this approval, so Home, which
+   * holds no detail, shows the wheel the loop page shows and never moves it
+   * back. Absent where no attempt of the contract is on record.
+   */
+  reached?: { stage: number; approved: boolean };
 }
 /** Whether the machine is being held awake for a live run (S6F, Away from keyboard). */
 export interface PowerState {

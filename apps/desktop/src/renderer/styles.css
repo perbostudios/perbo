@@ -3009,7 +3009,7 @@ textarea {
   height: 10px;
 }
 .loop-stages .progress-track > span {
-  background: var(--amber);
+  background: var(--ink);
 }
 .stage-labels {
   display: flex;
@@ -3024,8 +3024,8 @@ textarea {
   height: 11px;
 }
 .stage-labels .current i {
-  background: var(--amber);
-  border-color: var(--amber);
+  background: var(--ink);
+  border-color: var(--ink);
   width: 8px;
   height: 8px;
 }
@@ -3033,6 +3033,11 @@ textarea {
    colour; a stopped run's stage, in the stopped colour (D-129). */
 .stage-labels .current.is-decision {
   color: var(--amber);
+}
+.stage-labels .current.is-decision i,
+.loop-stages--decision .progress-track > span {
+  background: var(--amber);
+  border-color: var(--amber);
 }
 .stage-labels .current.is-stopped {
   color: var(--red);

@@ -386,10 +386,11 @@ describe("a Home card", () => {
     expect(pill("Ticket 5 changes_requested")).toBe("decision required");
   });
 
-  it("fills the ring of a pull request waiting on the merge decision, completed, and a paused loop's at the stage that asked", () => {
+  it("fills the ring of a pull request waiting on the merge decision, review ready, and a paused loop's at the stage that asked", () => {
     home(board([["pr_open", pr], ["changes_requested", null], ["executing", null]]));
     const ring = (name: string): HTMLElement => card(name).querySelector<HTMLElement>(".stage-ring")!;
-    expect(ring("Ticket 0 pr_open").getAttribute("aria-label")).toBe("Completed");
+    // Completed is a decided merge alone (D-097).
+    expect(ring("Ticket 0 pr_open").getAttribute("aria-label")).toBe("Review ready");
     expect(ring("Ticket 0 pr_open").getAttribute("style")).toContain("var(--ink) 0 100%,");
     expect(card("Ticket 0 pr_open").querySelector(".stage-pill")!.textContent).toBe("review ready");
     // A loop paused for the person sits at the review that asked, two fifths round.

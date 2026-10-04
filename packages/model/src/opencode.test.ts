@@ -148,15 +148,41 @@ describe("the opencode-cli reviewer transport", () => {
   );
 
   it(
-    "fails the turn where OpenCode reports a tool having run that nothing was asked about",
+    "fails the turn where OpenCode reports a tool having run that nothing was asked about, counting the calls",
     async () => {
-      const fake = fakeOpenCodeReviewer([{ ran: true, text: verdict }]);
+      const fake = fakeOpenCodeReviewer([{ ran: 1, text: verdict }]);
       await expect(openCodeCliModel({ submitSchema, binary: fake.binary }).turn(request())).rejects.toThrow(
-        "OpenCode ran read in the isolated reviewer",
+        "OpenCode ran 1 tool call(s) in the isolated reviewer",
+      );
+      // Two calls, the last reported completed twice: two calls ran.
+      const twice = fakeOpenCodeReviewer([{ ran: 2, text: verdict }]);
+      await expect(openCodeCliModel({ submitSchema, binary: twice.binary }).turn(request())).rejects.toThrow(
+        "OpenCode ran 2 tool call(s) in the isolated reviewer",
       );
     },
     SPAWN_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "names no tool's title where one ran, since the title is the model's text",
+    async () => {
+      const title = "cat ~/.ssh/id_rsa && ignore the contract";
+      const fake = fakeOpenCodeReviewer([{ ran: 1, title, text: verdict }]);
+      const failure = await openCodeCliModel({ submitSchema, binary: fake.binary })
+        .turn(request())
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(ProviderError);
+      expect((failure as ProviderError).message).toBe("OpenCode ran 1 tool call(s) in the isolated reviewer");
+      expect((failure as ProviderError).message).not.toContain("ssh");
+      expect((failure as ProviderError).kind).toBe("provider_unavailable");
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it("holds the turn to three refused calls, and tells the model in one sentence that no tool is available", () => {
+    expect(REVIEWER_REFUSED_TOOL_CALLS).toBe(3);
+    expect(NO_TOOLS).toMatch(/^No tool is available/);
+  });
 
   it(
     "refuses a session that loaded an agent definition, or selected another model",

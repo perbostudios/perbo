@@ -37,14 +37,24 @@ export function TaskHeader(context: TaskContext) {
 }
 /**
  * The progress bar: its stages (`WHEEL_STEPS`) in equal slices, filled as far
- * as `wheelFill` says, those passed ticked and the one reached marked; at
- * completed every stage is ticked and the bar is full. Where the loop waits on
- * the person the stage that asked is shown in the decision colour and its
- * label reads "Decision required"; a stopped run's stage is shown in the
- * stopped colour (`projectTicket`).
+ * as `wheelFill` says for `stage`, the furthest stage the journey reached, and
+ * the stage the loop is at, `at`, marked; every other stage below `stage` is
+ * ticked. At completed every stage is ticked, the bar is full and nothing is
+ * marked. Where the loop waits on the person the marked stage is shown in the
+ * decision colour and its label reads "Decision required"; a stopped run's
+ * marked stage is shown in the stopped colour (`projectTicket`).
  */
-export function LoopStages({ stage, mark = null }: { stage: number; mark?: "decision" | "stopped" | null }) {
-  const done = (number: number): boolean => number < stage || stage === COMPLETED;
+export function LoopStages({
+  stage,
+  at = stage,
+  mark = null,
+}: {
+  stage: number;
+  at?: number;
+  mark?: "decision" | "stopped" | null;
+}) {
+  const current = (number: number): boolean => number === at && stage !== COMPLETED;
+  const done = (number: number): boolean => stage === COMPLETED || (number < stage && !current(number));
   return (
     <div className={cx("loop-stages", mark && "loop-stages--" + mark)}>
       <div className="progress-track">
@@ -59,12 +69,12 @@ export function LoopStages({ stage, mark = null }: { stage: number; mark?: "deci
           <span
             key={number}
             className={cx(
-              done(number) ? "complete" : number === stage && "current",
-              number === stage && !done(number) && mark && "is-" + mark,
+              done(number) ? "complete" : current(number) && "current",
+              current(number) && mark && "is-" + mark,
             )}
           >
             {done(number) ? <InkIcon name="approve" size={14} /> : <i />}
-            {number === stage && mark === "decision" ? "Decision required" : stageName(number)}
+            {current(number) && mark === "decision" ? "Decision required" : stageName(number)}
           </span>
         ))}
       </div>
@@ -219,7 +229,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             </p>
           </div>
         </div>
-        <LoopStages stage={stage} mark={recoverable ? "stopped" : waiting ? "decision" : null} />
+        <LoopStages stage={stage} at={projection.at} mark={recoverable ? "stopped" : waiting ? "decision" : null} />
         <div>
           <SectionLabel>Task description</SectionLabel>
           <div className="loop-description">

@@ -16,7 +16,9 @@ import {
   readAttempts,
   readLatestDraftEdit,
   questionsOnFiles,
+  reachedOnRecord,
   summariseTicket,
+  type BundleManifest,
   type StoredAttempt,
 } from "./records.js";
 import { InterviewEditSchema } from "../shared/protocol.js";
@@ -514,5 +516,67 @@ describe("a finding the executor declined, on the files the loop wrote", () => {
     expect(questions?.map((question) => [question.id, question.declined, question.choices])).toEqual([
       [declined, [REASON], ["approach", "let_it_decide", "ship_as_is"]],
     ]);
+  });
+});
+
+describe("how far a ticket's journey has reached on its records (TaskRow.reached)", () => {
+  const contract = { ticket_id: "ticket_1", plan_id: "plan_00000000000001", plan_version: 2 };
+  const execution = (attempt: string, round_kind = "execute", plan_version = 2): BundleManifest => ({
+    bundle_id: `bundle_x_${attempt}`,
+    kind: "execution",
+    ticket_id: "ticket_1",
+    subject_id: attempt,
+    inputs: { plan_id: contract.plan_id, plan_version, round_kind },
+    artifacts: [],
+  });
+  const review = (attempt: string, decision: string): BundleManifest => ({
+    bundle_id: `bundle_r_${attempt}`,
+    kind: "review",
+    ticket_id: "ticket_1",
+    subject_id: `rev_${attempt}`,
+    inputs: { attempt_id: attempt, decision },
+    artifacts: [],
+  });
+  const verification = (attempt: string, inputs: Record<string, unknown>): BundleManifest => ({
+    bundle_id: `bundle_v_${attempt}`,
+    kind: "review",
+    ticket_id: "ticket_1",
+    subject_id: `cv_${attempt}`,
+    inputs: { all_closed: true, deterministic_failure: null, findings_open: "", ...inputs },
+    artifacts: [],
+  });
+  const attempts = (...ids: string[]): StoredAttempt[] => ids.map((attempt_id) => ({ attempt_id }));
+  const read = (bundles: BundleManifest[], ids: string[]) => reachedOnRecord({ ticket: contract, attempts: attempts(...ids), bundles });
+
+  it("is the execution, the review, the refinement and the verification as the attempts went through them", () => {
+    expect(read([execution("a1")], ["a1"])).toEqual({ stage: 2, approved: false });
+    expect(read([execution("a1"), review("a1", "remediable")], ["a1"])).toEqual({ stage: 3, approved: false });
+    expect(read([execution("a1"), review("a1", "remediable"), execution("a2", "remediate")], ["a1", "a2"])).toEqual({
+      stage: 4,
+      approved: false,
+    });
+    const verified = [execution("a1"), review("a1", "remediable"), execution("a2", "remediate"), verification("a2", { all_closed: false, findings_open: "k" })];
+    expect(read(verified, ["a1", "a2"])).toEqual({ stage: 5, approved: false });
+    // A fresh review of a later attempt is a verification as well.
+    expect(read([execution("a1"), review("a1", "remediable"), execution("a2"), review("a2", "remediable")], ["a1", "a2"])).toEqual({
+      stage: 5,
+      approved: false,
+    });
+  });
+
+  it("is approved where the last attempt's review approved, or its verification closed all it was given", () => {
+    expect(read([execution("a1"), review("a1", "approve")], ["a1"])).toEqual({ stage: 3, approved: true });
+    const refined = [execution("a1"), review("a1", "remediable"), execution("a2", "remediate")];
+    expect(read([...refined, verification("a2", {})], ["a1", "a2"])).toEqual({ stage: 5, approved: true });
+    expect(read([...refined, verification("a2", { deterministic_failure: "check test failed" })], ["a1", "a2"])?.approved).toBe(false);
+    expect(read([...refined, verification("a2", { findings_open: "k" })], ["a1", "a2"])?.approved).toBe(false);
+    // An approval of an earlier attempt is not the last attempt's.
+    expect(read([execution("a1"), review("a1", "approve"), execution("a2")], ["a1", "a2"])?.approved).toBe(false);
+  });
+
+  it("counts only the contract the ticket holds, and is null where none of its attempts is on record", () => {
+    expect(read([execution("a1", "execute", 1), review("a1", "approve")], ["a1"])).toBeNull();
+    expect(read([], [])).toBeNull();
+    expect(read([{ ...execution("a1"), ticket_id: "ticket_2" }], ["a1"])).toBeNull();
   });
 });

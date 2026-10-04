@@ -11,7 +11,9 @@ import { join } from "node:path";
  * `once` the fake runs it — writes a file into the session's directory and
  * logs `executed` — and the turn goes on; on anything else the call fails and
  * the turn ends `cancelled`, as OpenCode ends one a client refused a call in.
- * A reply with `ran` reports a read completed that nothing was asked about.
+ * A reply with `ran` reports that many tool calls completed that nothing was
+ * asked about, each announced under `title` (`read` where none is given), and
+ * the last one's completion reported twice.
  * After every prompt the fake logs what the session's directory holds. Every
  * line it receives, and the argv, environment and instructions it was started
  * with, go to `log`. With `exit`, the process ends with code 3 and a line on
@@ -24,7 +26,8 @@ export interface FakeOpenCodeReply {
   cost?: number;
   stopReason?: string;
   permission?: boolean;
-  ran?: boolean;
+  ran?: number;
+  title?: string;
   usage?: Record<string, number>;
 }
 
@@ -110,11 +113,17 @@ export function fakeOpenCodeReviewer(
       "  if (m.method === 'session/prompt') {",
       "    const reply = replies[turn++] ?? {};",
       "    const sessionId = m.params.sessionId;",
-      "    if (reply.permission || reply.ran) {",
+      "    const ran = reply.ran ?? 0;",
+      "    if (reply.permission || ran > 0) {",
       "      update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: 'r' + turn, content: { type: 'text', text: 'I will read src/a.ts first.' } });",
-      "      update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 't' + turn, title: 'read', kind: 'read', status: 'pending' });",
+      "      update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 't' + turn, title: reply.title ?? 'read', kind: 'read', status: 'pending' });",
       "    }",
-      "    if (reply.ran) update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 't' + turn, status: 'completed' });",
+      "    for (let call = 0; call < ran; call++) {",
+      "      const toolCallId = 't' + turn + (call === 0 ? '' : '_' + call);",
+      "      if (call > 0) update(sessionId, { sessionUpdate: 'tool_call', toolCallId, title: reply.title ?? 'read', kind: 'read', status: 'pending' });",
+      "      update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });",
+      "      if (call === ran - 1) update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });",
+      "    }",
       "    if (reply.permission) { pendingPrompt = { id: m.id, reply, sessionId }; send({ id: 'ask', method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 't' + turn, title: 'src/a.ts', kind: 'read', rawInput: { filePath: 'src/a.ts' }, locations: [{ path: 'src/a.ts' }] }, options: [] } }); return; }",
       "    finish(m.id, reply, sessionId);",
       "  }",

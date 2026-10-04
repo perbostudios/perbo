@@ -291,10 +291,44 @@ export const stoppedByPerson = (jobs: readonly Job[]): boolean => {
 export const carriesOn = (jobs: readonly Job[]): boolean =>
   stoppedByPerson(jobs) || jobs.filter(isRun).at(-1)?.state === "interrupted";
 
+/**
+ * The review the results page reads each criterion from: the last independent
+ * review on record for the contract the ticket holds, with every finding a
+ * closure verification after it closed read as resolved, the last
+ * verification given a finding deciding it. A refinement round is judged by a
+ * closure verification, which judges no criterion, so its criteria stand as
+ * that review left them. Undefined where no review of this contract is on
+ * record.
+ */
+export function judgedReview(
+  attempts: readonly AttemptView[],
+  contract: { plan_id: string; plan_version: number },
+): AttemptView["review"] | undefined {
+  const at = attempts.findLastIndex(
+    (attempt) =>
+      attempt.review !== null &&
+      attempt.review.plan_id === contract.plan_id &&
+      attempt.review.plan_version === contract.plan_version,
+  );
+  if (at < 0) return undefined;
+  const review = attempts[at]!.review!;
+  const verified = new Map<string, string>();
+  for (const attempt of attempts.slice(at + 1)) {
+    const closure = closureSchema.safeParse(attempt.verification);
+    if (closure.success) for (const row of closure.data.per_finding) verified.set(row.finding_key, row.status);
+  }
+  return {
+    ...review,
+    findings: review.findings.map((finding) =>
+      finding.status === "open" && verified.get(finding.key) === "closed" ? { ...finding, status: "resolved" } : finding,
+    ),
+  };
+}
+
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
 export function projectTicket(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
-  row: Pick<TaskRow, "repoId" | "ticket" | "questions">,
+  row: Pick<TaskRow, "repoId" | "ticket" | "questions" | "reached">,
   detail?: Detail,
   requested: TaskView = "auto",
   refreshing = workspace.refreshingRepos?.includes(row.repoId) ?? false,
@@ -328,11 +362,17 @@ export function projectTicket(
   const checksPassed = Boolean(latest && latest.checks.length > 0 && latest.checks.every((check) => check.status === "passed"));
   const approved = Boolean((currentReview?.decision === "approve" || latest?.reviewDecision === "approve") &&
     !currentReview?.findings.some((finding) => finding.blocking && finding.status === "open"));
-  const resultReady = !active && !refreshing && (ticket.state === "pr_open" || (ticket.state === "ready" && (approved || closuresVerified)));
+  // The host's read of the same records (`TaskRow.reached`) says whether the
+  // last attempt was approved, for Home, which holds no detail.
+  const resultReady =
+    !active &&
+    !refreshing &&
+    (ticket.state === "pr_open" || (ticket.state === "ready" && (approved || closuresVerified || row.reached?.approved === true)));
+  const judged = currentDetail ? judgedReview(detail.attempts, ticket) : undefined;
   const evidence = {
     kind: !detail ? "unloaded" : !currentDetail ? "stale" : closure ? "closure" : currentReview ? "review" : "not-retained",
-    latest, review: currentReview, priorReview: currentReview ? undefined : review, closure, checksPassed, closuresVerified,
-    verified: currentReview?.coverage.filter((entry) => entry.status === "met" && entry.verification_strength === "directly_verified").length ?? null,
+    latest, review: judged, priorReview: currentReview ? undefined : review, closure, checksPassed, closuresVerified,
+    verified: judged?.coverage.filter((entry) => entry.status === "met" && entry.verification_strength === "directly_verified").length ?? null,
     ready: !active && !refreshing && ["pr_open", "ready", "merged"].includes(ticket.state) && checksPassed && (approved || closuresVerified),
   };
   const attempts = currentDetail && detail ? detail.attempts : [];
@@ -342,15 +382,19 @@ export function projectTicket(
   const observed = announced === 0 ? null : wheelAt(ticketStages(jobs, active, attempts).slice(-announced));
   const tone = homeTone(workspace, counted);
   // A journey that ended, waiting on the person to check it and decide the
-  // merge, is completed. Otherwise the wheel stands at the furthest stage the
-  // journey reached, and never goes back (D-129): a stopped run keeps it, a
-  // decision is no stage — the loop waits on the person at the stage that
-  // asked (D-132) — and a run continued after one says what it is doing in
-  // its title and steps while the wheel stays where it was.
+  // merge, is completed. Otherwise the wheel fills to the furthest stage the
+  // journey reached, over this page's records and logs and the host's read of
+  // the records (`TaskRow.reached`), and never goes back (D-129): a stopped
+  // run keeps it, a decision is no stage — the loop waits on the person at the
+  // stage that asked (D-132) — and a run continued after one says what it is
+  // doing in its title and steps while the fill stays where it was.
   const stage = resultReady
     ? COMPLETED
-    : Math.max(stageReached(jobs, active, attempts) ?? 0, stageOf(ticket.state));
-  // The loop waits on the person at that stage.
+    : Math.max(stageReached(jobs, active, attempts) ?? 0, stageOf(ticket.state), row.reached?.stage ?? 0);
+  // The stage the loop is at, which the wheel marks: the last stage its loop
+  // went through, behind the fill where a run went back to an earlier stage.
+  const at = wheelAt(ticketStages(jobs, active, attempts))?.stage ?? stage;
+  // The loop waits on the person at the stage it is at.
   const deciding = paused || asking;
   // Continue the task is offered only after the person's own stop, taken or
   // still settling, or Perbo closing mid-run.
@@ -412,5 +456,5 @@ export function projectTicket(
   const description = stopped ? `The run stopped. Its work and evidence have been retained — ${continuable ? "carry on with the task, plan it again," : "plan it again"} or delete it.` :
     refreshing ? "Reading the task's recorded outcome…" :
     descriptions[paused ? "changes_requested" : (observed?.state ?? ticket.state)] ?? "Open the ticket to see its contract, latest state and retained evidence.";
-  return { jobs, active, busy, held, recoverable, continuable, paused, asking, deciding, resultReady, refreshing, attention, tone, primary, screen, stage, description, observed, latest, review, evidence };
+  return { jobs, active, busy, held, recoverable, continuable, paused, asking, deciding, resultReady, refreshing, attention, tone, primary, screen, stage, at, description, observed, latest, review, evidence };
 }

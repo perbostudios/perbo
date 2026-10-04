@@ -100,7 +100,8 @@ function StageRing({
   return (
     <span
       className={cx("stage-ring", tone && "stage-ring--" + tone)}
-      aria-label={stage === COMPLETED ? "Completed" : `Stage ${stage} of ${COMPLETED}`}
+      // Completed on the wheel and the merge not yet decided: the review is ready (D-097).
+      aria-label={stage === COMPLETED ? "Review ready" : `Stage ${stage} of ${COMPLETED}`}
       style={{
         background: `conic-gradient(var(--ink) 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
       }}
