@@ -1,6 +1,14 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import { matchesAny } from "@perbo/contracts";
+import {
+  isTestFile,
+  narrowedArgv,
+  runnerIn,
+  runnerNamedBy,
+  type RunnerReading,
+  type TestRunner,
+} from "./runner.js";
 
 /**
  * Reading a test runner's own output, and turning what it names into a second
@@ -249,10 +257,12 @@ export interface RerunPlan {
 /**
  * What to run again, once, to find out whether the failure reproduces.
  *
- * The narrow form runs the failing files in the package that owns them. It
- * needs a package this worktree has and files this worktree holds; without
- * either, the whole check runs again and the record says which was missing —
- * a re-run of the wrong thing would answer a question nobody asked.
+ * The narrow form runs the failing files in the package that owns them, with
+ * the check's own runner (`runnerIn`). It needs a package this worktree has,
+ * files this worktree holds, and a runner with a narrow form in every package
+ * the failures name; without any of those, the whole check runs again and the
+ * record says which was missing — a re-run of the wrong thing would answer a
+ * question nobody asked.
  */
 export function planRerun(args: {
   command: readonly string[];
@@ -287,30 +297,20 @@ export function planRerun(args: {
     );
   }
 
-  return {
-    steps: [...byPackage].map(([cwd, files]) => narrowedStep(cwd, files)),
-    scope: "files",
-    note: null,
-  };
+  const steps: RerunStep[] = [];
+  for (const [cwd, files] of byPackage) {
+    const reading = runnerIn({ command: args.command, packageDir: cwd, worktree: args.worktree });
+    if (reading.runner === null) return whole(reading.note);
+    steps.push(narrowedStep(reading.runner, cwd, files));
+  }
+  return { steps, scope: "files", note: null };
 }
 
-/** The narrow form: vitest, told exactly which files to run, and nothing else. */
-const VITEST_RUN = ["pnpm", "exec", "vitest", "run"] as const;
-
-/** That form, aimed at one package: the only place the argv is composed. */
-const narrowedStep = (cwd: string, files: readonly string[]): RerunStep => ({
-  argv: [...VITEST_RUN, ...files],
+/** The narrow form, aimed at one package: the check's own runner, told exactly which files to run. */
+const narrowedStep = (runner: TestRunner, cwd: string, files: readonly string[]): RerunStep => ({
+  argv: narrowedArgv(runner, files),
   cwd,
 });
-
-/**
- * A file the narrow form can be told to run: what vitest itself collects,
- * `*.test.*` and `*.spec.*` on a JavaScript or TypeScript extension. A test
- * under a `test/` folder without that suffix, a helper beside the tests, or a
- * test for another runner is not one, and a node whose changed tests are only
- * those runs the check's whole command instead.
- */
-const TEST_FILE = /(^|\/)[^/]+\.(test|spec)\.[cm]?[jt]sx?$/;
 
 export interface NodeRunPlan extends RerunPlan {
   /** The worktree-relative files the run was narrowed to; empty for `task`. */
@@ -321,13 +321,14 @@ export interface NodeRunPlan extends RerunPlan {
  * What one node of an execution graph runs a check as (D-107).
  *
  * The narrow form is the failed check's re-run: the test files in the package
- * that owns them, run as that package's own vitest invocation. What differs is
- * where the files come from — the sealed change set, filtered to the node's
- * paths, rather than a runner's own report of what failed. Without a changed
- * test file inside those paths, or with none this worktree can place in a
- * package and find on disk, the check's whole command runs for the node
- * instead and the note says which: a narrowed run of the wrong files would
- * answer a question nobody asked.
+ * that owns them, run with the check's own runner in that package. What
+ * differs is where the files come from — the sealed change set, filtered to
+ * the node's paths and to the files that runner collects, rather than a
+ * runner's own report of what failed. Without a changed test file inside
+ * those paths, with none this worktree can place in a package and find on
+ * disk, or with a runner that has no narrow form, the plan is the check's
+ * whole command and the note says which: a narrowed run of the wrong files, or
+ * through the wrong runner, would answer a question nobody asked.
  */
 export function planNodeRun(args: {
   command: readonly string[];
@@ -343,43 +344,56 @@ export function planNodeRun(args: {
   });
 
   const inside = args.changed_files.filter((file) => matchesAny(file, args.paths));
-  const tests = inside.filter((file) => TEST_FILE.test(file));
-  if (tests.length === 0) {
-    return whole(
-      inside.length === 0
-        ? "the change touched no file inside the node's paths"
-        : "no changed file inside the node's paths is a test file the narrow form runs",
-    );
-  }
+  if (inside.length === 0) return whole("the change touched no file inside the node's paths");
 
   const directories = [...workspacePackages(args.worktree).values()];
-  const byPackage = new Map<string, string[]>();
+  const readings = new Map<string, RunnerReading>();
+  const named = runnerNamedBy(args.command);
+  const byPackage = new Map<string, { runner: TestRunner; files: string[] }>();
   const placed: string[] = [];
-  for (const file of tests) {
+  /** Changed test files the narrow form would run but cannot: in no package, or not on disk. */
+  const unplaced: string[] = [];
+  let noForm: string | null = null;
+  for (const file of inside) {
     const dir = owningPackage(file, args.worktree, directories);
-    if (dir === null) continue;
-    const inPackage = safeRelativePath(
-      relative(dir, join(args.worktree, file)).split(sep).join("/"),
-      dir,
-    );
-    if (inPackage === null) continue;
-    const files = byPackage.get(dir) ?? [];
-    if (!files.includes(inPackage)) {
-      files.push(inPackage);
+    if (dir === null) {
+      if (named !== null && isTestFile(named, file)) unplaced.push(file);
+      continue;
+    }
+    const reading =
+      readings.get(dir) ?? runnerIn({ command: args.command, packageDir: dir, worktree: args.worktree });
+    readings.set(dir, reading);
+    if (reading.runner === null) {
+      noForm ??= reading.note;
+      continue;
+    }
+    const inPackage = relative(dir, join(args.worktree, file)).split(sep).join("/");
+    if (!isTestFile(reading.runner, inPackage)) continue;
+    const safe = safeRelativePath(inPackage, dir);
+    if (safe === null) {
+      unplaced.push(file);
+      continue;
+    }
+    const entry = byPackage.get(dir) ?? { runner: reading.runner, files: [] };
+    if (!entry.files.includes(safe)) {
+      entry.files.push(safe);
       placed.push(file);
     }
-    byPackage.set(dir, files);
+    byPackage.set(dir, entry);
   }
 
   if (byPackage.size === 0) {
-    return whole(
-      "the node's changed test files are in no package of this worktree, or are no longer " +
-        `on disk: ${tests.join(", ")}`,
-    );
+    if (unplaced.length > 0) {
+      return whole(
+        "the node's changed test files are in no package of this worktree, or are no longer " +
+          `on disk: ${unplaced.join(", ")}`,
+      );
+    }
+    return whole(noForm ?? "no changed file inside the node's paths is a test file the check's runner collects");
   }
 
   return {
-    steps: [...byPackage].map(([cwd, files]) => narrowedStep(cwd, files)),
+    steps: [...byPackage].map(([cwd, { runner, files }]) => narrowedStep(runner, cwd, files)),
     scope: "files",
     note: null,
     files: placed,

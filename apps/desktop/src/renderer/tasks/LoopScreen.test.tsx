@@ -373,6 +373,46 @@ describe("the loop page", () => {
   });
 });
 
+describe("the wheel", () => {
+  it("marks the stage a stopped loop is at in the stopped colour, the fill staying at the furthest stage it reached", () => {
+    // Stopped in its second refinement round, after the first round's verification.
+    const log =
+      "  worktree /tmp/w on ayo/task at 123\n  executing\n  check test: passed\n  review round 0\n" +
+      "  remediation round 1 of at most 6\n  check test: passed\n  review round 1\n  remediation round 2 of at most 6\n";
+    mount(
+      context(
+        [failedRun({ state: "cancelled", startedAt: "2026-09-30T09:00:00.000Z", endedAt: "2026-09-30T09:10:00.000Z", log, error: null })],
+        (detail) => {
+          detail.ticket.state = "executing";
+        },
+      ),
+    );
+    expect(screen.getByRole("heading", { name: "Ready to recover this task" })).toBeTruthy();
+    const at = document.querySelector(".stage-labels .current")!;
+    expect(at.textContent).toBe("refinement");
+    expect(at.classList.contains("is-stopped")).toBe(true);
+    expect(document.querySelector(".loop-stages")!.classList.contains("loop-stages--stopped")).toBe(true);
+    expect(document.querySelector(".stage-labels .is-decision")).toBeNull();
+    expect([...document.querySelectorAll(".stage-labels .complete")].map((step) => step.textContent)).toEqual([
+      "contract",
+      "execution",
+      "review",
+    ]);
+    expect((document.querySelector(".progress-track > span") as HTMLElement).style.width).toBe("80%");
+  });
+
+  it("fills in ink and marks in ink, in the decision colour only where the loop waits on the person", () => {
+    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
+    const rule = (selector: string): string =>
+      new RegExp(`(?:^|\\n)${selector.replace(/[.>*]/g, (c) => `\\${c}`)} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+    expect(rule(".loop-stages .progress-track > span")).toMatch(/background: var\(--ink\);/);
+    expect(rule(".stage-labels .current i")).toMatch(/background: var\(--ink\);/);
+    expect(rule(".stage-labels .current.is-decision i,\n.loop-stages--decision .progress-track > span")).toMatch(
+      /background: var\(--amber\);/,
+    );
+  });
+});
+
 describe("the steps a run goes through", () => {
   const start = Date.parse("2026-09-08T09:40:00.000Z");
   const minute = (n: number): string => new Date(start + n * 60_000).toISOString();
@@ -402,7 +442,7 @@ describe("the steps a run goes through", () => {
     detail.attempts = [];
     detail.ticket.history = [{ at: minute(2.5), from: "ready", to: "provisioning", note: "worktree provisioned and materialized" }];
   };
-  const STAGES = ["Review round 1", "Running check Tests", "Sealing the change set", "Executing", "Provisioning the worktree"];
+  const STAGES = ["Independent review", "Running check Tests", "Sealing the change set", "Executing", "Provisioning the worktree"];
 
   afterEach(() => {
     vi.useRealTimers();

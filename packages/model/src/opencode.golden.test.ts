@@ -60,7 +60,10 @@ describe("the requests the opencode-cli transport sends", () => {
           project_config_off: start.env["OPENCODE_DISABLE_PROJECT_CONFIG"],
           instructions: start.instructions,
         },
-        ...lines.map((line) => JSON.parse(normalise(line)) as unknown),
+        // What the transport sent, not the fake's own notes of its directory.
+        ...lines
+          .map((line) => JSON.parse(normalise(line)) as Record<string, unknown>)
+          .filter((line) => !("listing" in line) && !("executed" in line)),
       ]);
     },
     SPAWN_TEST_TIMEOUT_MS,

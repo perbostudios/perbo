@@ -327,8 +327,9 @@ describe("a Home card", () => {
     home(workspace);
     expect(screen.getByText(/one waiting on your merge decision/)).toBeTruthy();
     expect(screen.queryByText(/completed/)).toBeNull();
+    // Completed on the wheel, waiting on the merge decision: no check of a decided merge.
     const ring = card("Ticket 0 pr_open").querySelector<HTMLElement>(".stage-ring")!;
-    expect(ring.getAttribute("aria-label")).not.toBe("Completed");
+    expect(ring.classList.contains("stage-ring--decided")).toBe(false);
     expect(within(card("Ticket 0 pr_open")).queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
@@ -382,18 +383,20 @@ describe("a Home card", () => {
     // Mid-run with nothing running it: a stop too.
     expect(pill("Ticket 3 executing")).toBe("loop stopped");
     expect(pill("Ticket 4 merged")).toBe("completed");
-    expect(pill("Ticket 5 changes_requested")).toBe("decisions required");
+    expect(pill("Ticket 5 changes_requested")).toBe("decision required");
   });
 
-  it("fills the ring of a pull request waiting on the merge decision, every step done", () => {
-    home(board([["pr_open", pr], ["changes_requested", null]]));
+  it("fills the ring of a pull request waiting on the merge decision, review ready, and a paused loop's at the stage that asked", () => {
+    home(board([["pr_open", pr], ["changes_requested", null], ["executing", null]]));
     const ring = (name: string): HTMLElement => card(name).querySelector<HTMLElement>(".stage-ring")!;
-    expect(ring("Ticket 0 pr_open").getAttribute("aria-label")).toBe("Every step done");
+    // Completed is a decided merge alone (D-097).
+    expect(ring("Ticket 0 pr_open").getAttribute("aria-label")).toBe("Review ready");
     expect(ring("Ticket 0 pr_open").getAttribute("style")).toContain("var(--ink) 0 100%,");
-    expect(ring("Ticket 1 changes_requested").getAttribute("style")).not.toContain("var(--ink) 0 100%,");
     expect(card("Ticket 0 pr_open").querySelector(".stage-pill")!.textContent).toBe("review ready");
-    // A loop paused for the person sits at its step.
-    expect(ring("Ticket 1 changes_requested").getAttribute("aria-label")).toBe("Stage 5 of 6");
+    // A loop paused for the person sits at the review that asked, two fifths round.
+    expect(ring("Ticket 1 changes_requested").getAttribute("aria-label")).toBe("Stage 3 of 6");
+    expect(ring("Ticket 1 changes_requested").getAttribute("style")).toContain("var(--ink) 0 40%,");
+    expect(card("Ticket 1 changes_requested").querySelector(".stage-pill")!.textContent).toBe("decision required");
   });
 
   it("calls only a decided merge completed: a cancelled or rolled-back ticket a run carries keeps its stage and its ring", () => {

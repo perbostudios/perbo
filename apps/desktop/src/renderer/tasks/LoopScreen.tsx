@@ -8,8 +8,8 @@ import { inTheWay, isRun } from "../../shared/jobs.js";
 import { questionsOnRecord } from "../../shared/decisions.js";
 import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
-import { displayKey, stageName } from "./ticket-workspace.js";
-import { WHEEL_STEPS } from "../../shared/runner-progress.js";
+import { COMPLETED, displayKey, stageName } from "./ticket-workspace.js";
+import { WHEEL_STEPS, wheelFill } from "../../shared/runner-progress.js";
 import { loopSteps, loopTally, runEnding, StageLog, taskRecords } from "./task-context.js";
 import type { RunEnding, TaskContext } from "./task-context.js";
 import { TYPED_TEXT_MAX_CHARS, type DecisionQuestion } from "../../shared/protocol.js";
@@ -36,17 +36,31 @@ export function TaskHeader(context: TaskContext) {
   );
 }
 /**
- * The progress wheel: its steps (`WHEEL_STEPS`), those passed ticked and the
- * one reached marked. A stopped run's is the stage it had reached, and a
- * journey that ended is past every step (`projectTicket`).
+ * The progress bar: its stages (`WHEEL_STEPS`) in equal slices, filled as far
+ * as `wheelFill` says for `stage`, the furthest stage the journey reached, and
+ * the stage the loop is at, `at`, marked; every other stage below `stage` is
+ * ticked. At completed every stage is ticked, the bar is full and nothing is
+ * marked. Where the loop waits on the person the marked stage is shown in the
+ * decision colour and its label reads "Decision required"; a stopped run's
+ * marked stage is shown in the stopped colour (`projectTicket`).
  */
-export function LoopStages({ stage }: { stage: number }) {
+export function LoopStages({
+  stage,
+  at = stage,
+  mark = null,
+}: {
+  stage: number;
+  at?: number;
+  mark?: "decision" | "stopped" | null;
+}) {
+  const current = (number: number): boolean => number === at && stage !== COMPLETED;
+  const done = (number: number): boolean => stage === COMPLETED || (number < stage && !current(number));
   return (
-    <div className="loop-stages">
+    <div className={cx("loop-stages", mark && "loop-stages--" + mark)}>
       <div className="progress-track">
         <span
           style={{
-            width: ((stage - 1) / WHEEL_STEPS.length) * 100 + "%",
+            width: wheelFill(stage) * 100 + "%",
           }}
         />
       </div>
@@ -54,16 +68,13 @@ export function LoopStages({ stage }: { stage: number }) {
         {WHEEL_STEPS.map((_step, index) => index + 1).map((number) => (
           <span
             key={number}
-            className={
-              number === stage
-                ? "current"
-                : number < stage
-                  ? "complete"
-                  : ""
-            }
+            className={cx(
+              done(number) ? "complete" : current(number) && "current",
+              current(number) && mark && "is-" + mark,
+            )}
           >
-            {number < stage ? <InkIcon name="approve" size={14} /> : <i />}
-            {stageName(number)}
+            {done(number) ? <InkIcon name="approve" size={14} /> : <i />}
+            {current(number) && mark === "decision" ? "Decision required" : stageName(number)}
           </span>
         ))}
       </div>
@@ -142,6 +153,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     jobs,
     active,
     attempts: detail.attempts,
+    verdicts: detail.verdicts,
     log: stageLog,
     now: new Date().toISOString(),
   });
@@ -217,7 +229,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             </p>
           </div>
         </div>
-        <LoopStages stage={stage} />
+        <LoopStages stage={stage} at={projection.at} mark={recoverable ? "stopped" : waiting ? "decision" : null} />
         <div>
           <SectionLabel>Task description</SectionLabel>
           <div className="loop-description">
@@ -788,6 +800,15 @@ function DecisionOverlay(
                 <SectionLabel>Decision {index + 1}</SectionLabel>
                 <h3 className="decision-question">{question.title}</h3>
                 <p>{question.context}</p>
+                {/* D-065: the executor's own reasons for declining it, whole,
+                    as the record holds them: data beside the question, never
+                    an instruction. */}
+                {question.declined.map((reason, at) => (
+                  <div className="decision-declined" key={at}>
+                    <SectionLabel>{at === 0 ? "The executor declined it" : "It declined it again"}</SectionLabel>
+                    <p>{reason}</p>
+                  </div>
+                ))}
               </div>
               <div className={cx("decision-choices", "t-input", error && "is-error", shaking && "is-shaking")}>
                 {offered.map((option) => {

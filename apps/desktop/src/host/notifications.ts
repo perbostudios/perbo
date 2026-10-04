@@ -72,6 +72,7 @@ export class Notices {
           ticket,
           objectsDirectory: objectsPath(repo),
           verdictsPath: verdictsPath(repo),
+          attemptsPath: attemptsPath(repo, ticket.ticket_id),
         })?.length ?? 0
       : 0;
     if (on.ceiling && isEarlyStop(reason))

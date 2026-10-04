@@ -138,6 +138,32 @@ describe("the claude-cli transport", () => {
     await expect(model.turn(request)).rejects.toBeInstanceOf(ProviderError);
   });
 
+  it("reads a reported 400 as the request refused, and any other status as unavailable", async () => {
+    const refused = claudeCliModel({
+      submitSchema: { type: "object" },
+      binary: fakeClaude(JSON.stringify({ is_error: true, api_error_status: 400, structured_output: null })),
+    });
+    await expect(refused.turn(request)).rejects.toMatchObject({ kind: "request_refused" });
+    const unavailable = claudeCliModel({
+      submitSchema: { type: "object" },
+      binary: fakeClaude(JSON.stringify({ is_error: true, api_error_status: 529, structured_output: null })),
+    });
+    await expect(unavailable.turn(request)).rejects.toMatchObject({ kind: "provider_unavailable" });
+  });
+
+  it("reads the envelope a failing process printed for the status, not its words", async () => {
+    counter += 1;
+    const path = join(scratch, `refusing-${counter}.sh`);
+    // The words say nothing of a refusal; the envelope's status does.
+    writeFileSync(
+      path,
+      `#!/bin/sh\ncat >/dev/null\necho '{"is_error":true,"api_error_status":400}'\necho 'something went wrong' >&2\nexit 1\n`,
+    );
+    chmodSync(path, 0o755);
+    const model = claudeCliModel({ submitSchema: { type: "object" }, binary: path });
+    await expect(model.turn(request)).rejects.toMatchObject({ kind: "request_refused" });
+  });
+
   it("treats output that is not a result envelope as a provider failure", async () => {
     const model = claudeCliModel({ submitSchema: { type: "object" }, binary: fakeClaude("not json") });
     await expect(model.turn(request)).rejects.toBeInstanceOf(ProviderError);

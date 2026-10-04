@@ -6,7 +6,7 @@
     "config": {
       "permission": {
         "*": "deny",
-        "read": "allow",
+        "read": "ask",
         "bash": "ask",
         "external_directory": "deny"
       },

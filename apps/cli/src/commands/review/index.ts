@@ -42,6 +42,7 @@ import {
 import type { NarratedCommand } from "../../command-line/table.js";
 import { narratedStreams } from "../../streams.js";
 import { UsageError } from "../../usage-error.js";
+import { refusedRequestSentence } from "../../failure.js";
 import { renderReviewMarkdown } from "./internal/markdown.js";
 import { renderArtifact } from "./internal/card.js";
 import type { Streams } from "../../streams.js";
@@ -527,11 +528,14 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
   }
 
   // Only an unfinished review leaves state behind — and not one the provider
-  // could not be reached for: a resume would fail the same way, and what the
-  // person needs is the credential or the binary, named.
+  // could not be reached for, nor one it refused: a resume would fail the same
+  // way. What the person needs is the credential or the binary, named, or to
+  // know that asking again is no use.
   let resumeCommand: string | null = null;
   if (redacted.decision === "error" && redacted.error?.kind === "provider_unavailable") {
     streams.stderr(`error: ${providerUnavailableHint(args.provider)}\n`);
+  } else if (redacted.decision === "error" && redacted.error?.kind === "request_refused") {
+    streams.stderr(`error: ${refusedRequestSentence("the review", redacted.error.message)}\n`);
   } else if (redacted.decision === "error" || redacted.decision === "incomplete") {
     const unresolved = redacted.coverage
       .filter((entry) => entry.status === "cannot_determine")

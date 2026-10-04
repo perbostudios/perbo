@@ -15,7 +15,7 @@ Large work is one ticket. Its plan may group acceptance criteria into nodes, eac
 ## Consequences
 
 - One larger pull request per piece of work.
-- Review partitions by node and runs once overall, and the pinned checks run per node ([D-107](../11-open-decisions.md)).
+- Review partitions by node and runs once overall, and the pinned checks are recorded per node ([D-107](../11-open-decisions.md)).
 - A page per node is generated beside the spec, so that a node reads on its own ([D-103](../11-open-decisions.md)).
 - The executor may parallelise inside one attempt ([ADR-0038](0038-subagents.md)).
 - The drafter's cap on criteria goes.

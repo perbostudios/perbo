@@ -113,8 +113,15 @@ export function anthropicModel(options: AnthropicModelOptions): Model {
       } catch (error) {
         const attempts = Math.max(1, requestsThisTurn);
         if (error instanceof Anthropic.APIError) {
+          // The API's own statement of what went wrong: a 400, or the body's
+          // `invalid_request_error`, is the request refused, which the SDK
+          // does not retry and nothing here retries either.
           const kind =
-            error.status === 408 || error.status === 504 ? "timeout" : "provider_unavailable";
+            error.status === 400 || error.type === "invalid_request_error"
+              ? "request_refused"
+              : error.status === 408 || error.status === 504
+                ? "timeout"
+                : "provider_unavailable";
           throw new ProviderError(
             `${error.name} ${error.status ?? ""}: ${error.message}`.trim(),
             attempts,

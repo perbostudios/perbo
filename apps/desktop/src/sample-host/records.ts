@@ -620,6 +620,9 @@ function reviewFor(key: string): ReviewArtifact {
     review_id: "rev_preview",
     created_at: at,
     target: { base_commit: base, head_commit: "c".repeat(40) },
+    // The contract it judged: the sample's, which is never edited once approved.
+    plan_id: plan.plan_id,
+    plan_version: ticketRow(key).ticket.plan_version,
     decision: "escalate",
     coverage: criteria.map((criterion, index) => ({
       criterion_id: criterion.id,

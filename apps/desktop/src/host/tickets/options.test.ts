@@ -93,6 +93,15 @@ describe("the Architect's answers, as the host asks for them", () => {
     }
   });
 
+  it("runs a command its model provider refused once, and says the CLI's own sentence", async () => {
+    const refused = deps({
+      results: [{ code: 4, stdout: "", stderr: "error: `perbo options` was refused by the model provider: invalid_request_error." }],
+    });
+    await expect(decisionOptions(refused, repo, "PRB-1", [KEY])).rejects.toThrow("was refused by the model provider");
+    expect(refused.runs).toHaveLength(1);
+    expect(refused.pauses).toEqual([]);
+  });
+
   it("redacts an answer and fails one redaction lengthens past its length rather than cutting it (D-133)", async () => {
     vi.stubEnv("PERBO_TEST_TOKEN", "hunter2x");
     try {

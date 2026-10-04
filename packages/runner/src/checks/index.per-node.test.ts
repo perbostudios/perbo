@@ -12,11 +12,14 @@ const scratch = scratchDirectories("perbo-runner-");
  * narrowed to that node's paths as a failed check's re-run is narrowed to the
  * files that own it.
  *
- * The narrow form is `pnpm exec vitest run <files>` in the package that owns
- * them, so the fixture gives each package a `vitest` of its own on
- * `node_modules/.bin` — a real binary that `pnpm exec` really resolves and
- * really answers, printing the markers a test runner prints. What these drive
- * is therefore the spawned command and its output, not a stand-in for either.
+ * The fixture is shaped like this repository: the pinned unit check is a
+ * wrapper (`pnpm run test`) whose root script stands in for the whole suite,
+ * and each package's own `test` script is `vitest run`, so the narrow form is
+ * `pnpm exec vitest run <files>` in the package that owns them. Each package
+ * has a `vitest` of its own on `node_modules/.bin` — a real binary that `pnpm
+ * exec` really resolves and really answers, printing the markers a test runner
+ * prints. What these drive is therefore the spawned command and its output,
+ * not a stand-in for either.
  */
 
 /** The passing and failing forms of the stand-in test runner. */
@@ -63,14 +66,32 @@ interface Fixture {
  * A worktree shaped like this repository: two workspace packages, each with a
  * source file and a test file the change touched.
  */
-function graphedWorktree(verdicts: { queue: "passes" | "fails"; reports: "passes" | "fails" }): Fixture {
+function graphedWorktree(
+  verdicts: { queue: "passes" | "fails"; reports: "passes" | "fails" },
+  whole: "passes" | "fails" = "passes",
+): Fixture {
   const worktree = scratch("perbo-node-checks-");
-  writeFileSync(join(worktree, "package.json"), JSON.stringify({ name: "root", private: true }));
+  writeFileSync(
+    join(worktree, "package.json"),
+    JSON.stringify({
+      name: "root",
+      private: true,
+      scripts: {
+        test:
+          whole === "passes"
+            ? `node -e "process.exit(0)"`
+            : `node -e "console.log('whole-suite-failure-line');process.exit(1)"`,
+      },
+    }),
+  );
   for (const [name, verdict] of Object.entries(verdicts)) {
     const dir = join(worktree, "packages", name);
     mkdirSync(join(dir, "src"), { recursive: true });
     mkdirSync(join(dir, "test"), { recursive: true });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `@fixture/${name}` }));
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ name: `@fixture/${name}`, scripts: { test: "vitest run" } }),
+    );
     writeFileSync(join(dir, "src", `${name}.ts`), `export const ${name} = 1;\n`);
     writeFileSync(join(dir, "test", `${name}.test.ts`), "export {};\n");
     vitestShim(dir, verdict as "passes" | "fails");
@@ -87,8 +108,8 @@ function graphedWorktree(verdicts: { queue: "passes" | "fails"; reports: "passes
   };
 }
 
-/** A whole-change check command that passes and names nothing. */
-const PASSING = ["node", "-e", "process.exit(0)"];
+/** The pinned unit check: a wrapper that runs each package's `test` script. */
+const WHOLE = ["pnpm", "run", "test"];
 
 const pinned = (kind: PinnedCheck["kind"], command: readonly string[]): PinnedCheck[] => [
   {
@@ -120,7 +141,7 @@ describe("a graphed ticket's pinned checks", () => {
     const fixture = graphedWorktree({ queue: "passes", reports: "passes" });
 
     const results = await runPinnedChecks({
-      checks: pinned("unit", PASSING),
+      checks: pinned("unit", WHOLE),
       worktree: fixture.worktree,
       env: process.env,
       secrets: new SecretIndex(),
@@ -157,7 +178,7 @@ describe("a graphed ticket's pinned checks", () => {
     const fixture = graphedWorktree({ queue: "passes", reports: "passes" });
 
     const results = await runPinnedChecks({
-      checks: [...pinned("unit", PASSING), ...pinned("lint", PASSING)],
+      checks: [...pinned("unit", WHOLE), ...pinned("lint", ["node", "-e", "process.exit(0)"])],
       worktree: fixture.worktree,
       env: process.env,
       secrets: new SecretIndex(),
@@ -170,27 +191,31 @@ describe("a graphed ticket's pinned checks", () => {
       changed_files: fixture.changed_files,
     });
 
+    // A check that does not narrow carries the whole-change result for the
+    // node: the whole command is not run again per node.
+    const wholeLint = wholeChange(results).find((result) => result.kind === "lint")!;
     const lint = forNode(results, "node_queue").find((result) => result.kind === "lint")!;
     expect(lint.node?.scope).toBe("task");
     expect(lint.node?.paths).toEqual([]);
     expect(lint.node?.note).toContain("lint");
-    expect(lint.command).toBe(PASSING.join(" "));
+    expect(lint.command).toBe("node -e process.exit(0)");
+    expect({ ...lint, node: undefined }).toEqual({ ...wholeLint, node: undefined });
 
     const sources = forNode(results, "node_sources").find((result) => result.kind === "unit")!;
     expect(sources.node?.scope).toBe("task");
     expect(sources.node?.paths).toEqual([]);
     expect(sources.node?.note).toContain("test file");
-    expect(sources.command).toBe(PASSING.join(" "));
+    expect(sources.command).toBe(WHOLE.join(" "));
 
     // The un-narrowable runs never reached a package's own runner.
     expect(vitestCalls(fixture.packageDir("reports"))).toBe(0);
   }, SPAWN_TEST_TIMEOUT_MS);
 
-  it("keeps running the other nodes when one node's check fails, and leaves the whole-change result alone", async () => {
+  it("keeps a node's failed narrowed run as evidence and never turns the check red where the pinned command passed", async () => {
     const fixture = graphedWorktree({ queue: "passes", reports: "fails" });
 
     const results = await runPinnedChecks({
-      checks: pinned("unit", PASSING),
+      checks: pinned("unit", WHOLE),
       worktree: fixture.worktree,
       env: process.env,
       secrets: new SecretIndex(),
@@ -202,8 +227,14 @@ describe("a graphed ticket's pinned checks", () => {
 
     expect(results).toHaveLength(3);
 
+    // Only the pinned command can fail the check: it passed over the whole
+    // change, so the node's result passed, and its summary says what the
+    // node's own run measured and which command judged.
     const reports = forNode(results, "node_reports")[0]!;
-    expect(reports.status).toBe("failed");
+    expect(reports.status).toBe("passed");
+    expect(reports.summary).toContain("the node's own run failed");
+    expect(reports.summary).toContain("pnpm run test passed over the whole change");
+    expect(reports.command).toBe("pnpm exec vitest run test/reports.test.ts");
     expect(reports.failing_tests?.join("\n")).toContain("packages/reports/test/reports.test.ts");
     // A failed narrowed node run is run once more, the same files in the same
     // package: a node result that did not reproduce is as misleading as a
@@ -230,7 +261,7 @@ describe("a graphed ticket's pinned checks", () => {
     const fixture = graphedWorktree({ queue: "fails", reports: "passes" });
 
     const results = await runPinnedChecks({
-      checks: pinned("unit", PASSING),
+      checks: pinned("unit", WHOLE),
       worktree: fixture.worktree,
       env: process.env,
       secrets: new SecretIndex(),
@@ -240,9 +271,9 @@ describe("a graphed ticket's pinned checks", () => {
     });
 
     const all = forNode(results, "node_all")[0]!;
-    expect(all.status).toBe("failed");
+    expect(all.status).toBe("passed");
     // The record's summary is the failing step's, not the passing step's after it.
-    expect(all.summary).toMatch(/failed/);
+    expect(all.summary).toMatch(/the node's own run failed \(.*failed/);
     expect(all.rerun?.summary).toMatch(/failed/);
     expect(all.node?.paths).toEqual([
       "packages/queue/test/queue.test.ts",
@@ -262,7 +293,7 @@ describe("a graphed ticket's pinned checks", () => {
     writeFileSync(join(fixture.packageDir("reports"), "test", "test_api.py"), "");
 
     const results = await runPinnedChecks({
-      checks: pinned("unit", PASSING),
+      checks: pinned("unit", WHOLE),
       worktree: fixture.worktree,
       env: process.env,
       secrets: new SecretIndex(),
@@ -284,18 +315,50 @@ describe("a graphed ticket's pinned checks", () => {
     ]);
     expect(queue.command).toBe("pnpm exec vitest run test/queue.test.ts __tests__/queue.test.ts");
 
-    // A test for another runner is not handed to vitest: the check runs whole.
+    // A test for another runner is not handed to vitest: the node carries the
+    // whole-change result.
     const py = forNode(results, "node_py")[0]!;
     expect(py.node?.scope).toBe("task");
-    expect(py.node?.note).toContain("the narrow form runs");
-    expect(py.command).toBe(PASSING.join(" "));
+    expect(py.node?.note).toContain("the check's runner collects");
+    expect(py.command).toBe(WHOLE.join(" "));
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  it("carries the pinned command's failure to every node, its lines included, and runs nothing narrowed", async () => {
+    const fixture = graphedWorktree({ queue: "passes", reports: "passes" }, "fails");
+
+    const results = await runPinnedChecks({
+      checks: pinned("unit", WHOLE),
+      worktree: fixture.worktree,
+      env: process.env,
+      secrets: new SecretIndex(),
+      nodes: [node("node_queue", ["packages/queue/**"]), node("node_reports", ["packages/reports/**"])],
+      changed_files: fixture.changed_files,
+    });
+
+    const whole = wholeChange(results)[0]!;
+    expect(whole.status).toBe("failed");
+    expect(whole.command).toBe(WHOLE.join(" "));
+    expect(whole.detail).toContain("whole-suite-failure-line");
+    for (const id of ["node_queue", "node_reports"]) {
+      const carried = forNode(results, id)[0]!;
+      expect(carried.status).toBe("failed");
+      expect(carried.command).toBe(WHOLE.join(" "));
+      expect(carried.summary).toBe(whole.summary);
+      expect(carried.detail).toBe(whole.detail);
+      expect(carried.node?.scope).toBe("task");
+      expect(carried.node?.note).toContain("did not pass over the whole change");
+    }
+    // The packages' passing runners were never asked, so nothing narrowed can
+    // stand beside the pinned command's failure.
+    expect(vitestCalls(fixture.packageDir("queue"))).toBe(0);
+    expect(vitestCalls(fixture.packageDir("reports"))).toBe(0);
   }, SPAWN_TEST_TIMEOUT_MS);
 
   it("records nothing for a node on a flat plan", async () => {
     const fixture = graphedWorktree({ queue: "passes", reports: "passes" });
 
     const results = await runPinnedChecks({
-      checks: pinned("unit", PASSING),
+      checks: pinned("unit", WHOLE),
       worktree: fixture.worktree,
       env: process.env,
       secrets: new SecretIndex(),

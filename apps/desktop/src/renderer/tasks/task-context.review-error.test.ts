@@ -67,6 +67,16 @@ describe("a run that ended on the reviewer's answer", () => {
     expect(ending!.sentence).toBe("The run failed after the loop recorded its attempt.");
     expect(ending!.log).toBe(job.error);
   });
+
+  it("says a request the provider refused was refused and that reviewing again will not help", () => {
+    const ending = runEnding([job], attempt(error("request_refused", "BadRequestError 400: invalid_request_error")));
+    expect(ending!.reasons).toEqual([
+      {
+        text: "The reviewer's model provider refused the request Perbo sent, so the change was not reviewed, and reviewing again will not help.",
+        detail: "BadRequestError 400: invalid_request_error",
+      },
+    ]);
+  });
 });
 
 describe("reviewErrorSentence", () => {
@@ -74,7 +84,7 @@ describe("reviewErrorSentence", () => {
     expect(reviewErrorSentence(error("verdict_rejected", RECORDED), "other")).toBe(REVIEW_UNPARSED);
     expect(reviewErrorSentence(error("malformed_verdict", RECORDED), "other")).toBe(REVIEW_UNPARSED);
     expect(reviewErrorSentence(error("unknown_criterion_id", RECORDED), "other")).toBe(REVIEW_UNPARSED);
-    for (const kind of ["provider_unavailable", "budget_exhausted", "timeout", "internal"] as const)
+    for (const kind of ["provider_unavailable", "request_refused", "budget_exhausted", "timeout", "internal"] as const)
       expect(reviewErrorSentence(error(kind, "x"), "other")).toBe("other");
   });
 });

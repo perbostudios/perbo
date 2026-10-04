@@ -256,7 +256,7 @@ through local `gh`, hands its title and body to a model as delimited `trust="ext
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
 the work has, each with an assertion and a kind, a proposed scope of as many globs as the work
 lands in, a rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v6`). The draft is written beside the ticket as
+(`@perbo/planning`, prompt `draft_v7`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
 created in `plan_review`. The ticket is named per D-127.
 **A draft is never executed; only an approved contract is.** The person's
@@ -739,6 +739,7 @@ learning curve is allowed 1.25×, every confounder, and a verdict of `pass`, `fa
 | `1` | Usage or input error: bad flags, an unreadable contract, a verdict naming a `criterion_id` absent from the plan |
 | `2` | `changes_requested`, `escalate` or `remediable` — the review completed and the gate is closed |
 | `3` | `error` or `incomplete` — the review did not complete |
+| `4` | A command other than `review` whose model provider refused the request Perbo sent; `review` exits `3` with its error's kind `request_refused` |
 
 `2` and `3` are separate because they fail differently. A caller treating every non-zero code as
 blocking is correct; a caller checking only for `2` merges changes whose review never ran.

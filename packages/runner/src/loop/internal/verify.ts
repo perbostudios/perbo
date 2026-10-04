@@ -15,6 +15,7 @@ import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import type { Ledger } from "./ledger.js";
 import type { RoundRecord, RoundState, Step, Stop } from "./state.js";
+import { restoreJudgedCommit } from "./continuation.js";
 
 /**
  * Verifying the closures a remediation round claims (D-061).
@@ -37,8 +38,10 @@ export function verifierModel(config: TicketRunConfig, keys: string[]): Model {
  * SCP-194: a scope round that widened the change set is refused before
  * anything is paid to verify it.
  *
- * Nothing is lost — the change set stays on the branch and the finding stays
- * open — and the stop says which paths arrived and what the contract admits.
+ * Nothing is lost — the refused commit and its diff stay on the record, the
+ * branch goes back to the commit last judged (`restoreJudgedCommit`), and the
+ * finding stays open — and the stop says which paths arrived and what the
+ * contract admits.
  * Null where the round narrowed, or was never a scope round at all.
  */
 export function refuseWidening(facts: {
@@ -268,13 +271,13 @@ export async function verifyRound(args: {
   // consults the pinned checks and the scope computation before asking
   // anything, and with zero findings left it gates on those alone.
   // SCP-194: a scope round that widened is refused before anything is
-  // paid to verify it. Nothing is lost — the change set stays on the
-  // branch and the finding stays open — and the stop says which paths
+  // paid to verify it. Nothing is lost — the refused commit and its diff stay
+  // on the record and the finding stays open — and the stop says which paths
   // arrived and what the contract admits. The refusal is recorded as the
   // round's verification, a scope failure that moves the round to
   // `independent_review` as a closure verification does (D-061), so a person
   // reads what it was judged on. It judged no tree a later round can build
-  // on, so it anchors no continuation.
+  // on, so the branch goes back to the commit last judged.
   const declinedKeys = new Set(args.declines.map((decline) => decline.finding_key));
   const toVerify = args.toClose.filter((finding) => !declinedKeys.has(finding.key));
   const widenedStep = refuseWidening({
@@ -285,6 +288,20 @@ export async function verifyRound(args: {
   });
   if (widenedStep !== null) {
     recordVerification(args, toVerify, widenedVerification(toVerify, widenedStep.end.detail), "refusal");
+    // The refused commit stays on the record; the branch goes back to the
+    // commit last judged, where a person's answers to that judgement act.
+    const back = await restoreJudgedCommit({
+      worktree: state.workspace.path,
+      branch: state.workspace.branch,
+      bundles: args.bundles,
+      ticket_id: args.contract.ticket_id,
+    });
+    if (back !== null) {
+      progress(
+        `the branch is back at ${back}, the commit last judged; the refused round's commit ` +
+          `${sealed.head_commit ?? "(none)"} and its diff stay on the record`,
+      );
+    }
     return widenedStep;
   }
   progress(`verifying closures, round ${state.round}`);
@@ -360,8 +377,9 @@ function widenedVerification(toVerify: readonly Finding[], refusal: string): Clo
  *
  * The verifier's bundle names the commit it judged as `head_commit`, which is
  * what a later run continues from. A refusal judged no tree, so it names the
- * commit it refused as `refused_head_commit` instead and anchors nothing: a
- * re-run of a widened branch reviews it afresh.
+ * commit it refused as `refused_head_commit` instead and anchors nothing: the
+ * runner resets the branch to the commit last judged (`restoreJudgedCommit`),
+ * and a later run continues from there.
  */
 function recordVerification(
   args: Pick<
@@ -397,9 +415,6 @@ function recordVerification(
         .map((row) => row.finding_key)
         .join(","),
       findings_open: verification.open_keys.join(","),
-      // D-065: what the round's executor declined, which no answer of the
-      // person's closes (`loopOnRecord`).
-      findings_declined: args.declines.map((decline) => decline.finding_key).join(","),
     },
     context_manifest: [],
     versions: refused

@@ -49,6 +49,8 @@ The Codex executor runs under a temporary `CODEX_HOME` holding only a link to th
 
 The OpenCode executor runs `opencode acp` under configuration, data, state and cache directories the runner made for the attempt, with the project's configuration off and a configuration of the runner's own: no tool server, plugin, formatter, language server, sharing or update, the brief in the one instruction file OpenCode reads, and permission rules that put every command, every file change and every call outside the worktree to the runner and deny every other tool, `task` and `skill` among them. It is passed no credential but `OPENCODE_API_KEY`, by name; the person's own OpenCode data, where a saved "always allow" rule would decide a call before the runner is asked, is never read ([D-134](11-open-decisions.md)).
 
+The OpenCode reviewer runs the same way in an empty scratch directory, holding no tool it can use: the read and the shell tool its session offers, because OpenCode Zen's free models refuse a session offering neither, are both asked about and every call is refused, never allowed or saved, so nothing runs and no file is read; a read outside the directory is denied outright. The review's turn then carries on with the model told that no tool is available, up to three refused calls in a turn, and the answer is still read only from a message that is one JSON object ([D-134](11-open-decisions.md)).
+
 **Withheld from the worktree.** Every known configuration path (`.claude`, `.mcp.json`, `.cursor`, `.codex`, `.opencode`, `opencode.json`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and others) is moved into `.perbo/quarantine/` before handover and restored afterwards. The journal is written before the first move, and a journal an interrupted attempt left behind is restored at the next start.
 
 **Asserted.** When Claude Code reports what it loaded, any tool server, connected or attempted, or any plugin or memory path inside the worktree ends the attempt `agent_configuration_present`. On OpenCode, a session offering a primary agent beyond OpenCode's own, a command or file change that ran without the runner being asked, and a tool the executor's rules do not give it each end the attempt the same way.
@@ -183,10 +185,10 @@ Nothing is uploaded, and nothing expires on its own.
 |---|---|
 | `.perbo/config.json` | the run configuration: checks, protected paths, the standing prohibited paths, limits, `merge`, the tracker, the spec folder, the ADR folder |
 | `.perbo/tickets/` | admitted tickets and the contracts that bound them |
-| `.perbo/principles.md` | a person's recorded answers to declined findings |
+| `.perbo/principles.md` | the principles a person records for later work ([D-065](11-open-decisions.md)) |
 | `.perbo/state/` | attempt records, locks, the endpoint record and `perbo agent` launch files |
 | `.perbo/bundles/` | run bundles: each model call's context manifest with trust labels, usage, and content-addressed transcripts, diffs and reviews, redacted against the secret index |
-| `.perbo/reviews/`, `verdicts.json`, `baseline.json` | reviews of changes no attempt ran, a person's verdicts on stops, the direct-agent baseline |
+| `.perbo/reviews/`, `verdicts.json`, `baseline.json` | reviews of changes no attempt ran, a person's verdicts on stops and answers to findings routed to them ([D-132](11-open-decisions.md)), the direct-agent baseline |
 | `.perbo/quarantine/` | agent configuration withheld during an attempt |
 | `~/.perbo/worktrees/` | attempt worktrees and their leases |
 | the desktop's data directory | `workspace.json` (mode 0600): settings, registered repositories, redacted job logs and unfinished edits; draft sources |

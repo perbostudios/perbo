@@ -8,7 +8,7 @@ import {
   decidable,
   decisionChoicesFor,
   hasAcceptanceCriteria,
-  leftToPrinciple,
+  declinesOnRecord,
   loopOnRecord,
   NOTHING_TRIED,
   routedToPerson,
@@ -111,6 +111,7 @@ export async function options(
       review_id: review.review_id,
       bundles: report.attempts.flatMap((attempt) => attempt.bundles),
       history: ticket.history,
+      declines: declinesOnRecord(report.attempts.map((attempt) => attempt.record)),
     })?.loop ?? NOTHING_TRIED;
 
   const findings: Finding[] = [...new Set(input.findings)].map((wanted) => {
@@ -119,13 +120,6 @@ export async function options(
       throw new UsageError(
         `${wanted.slice(0, 12)} is not a finding of ${key}'s last review (${review.review_id}); ` +
           "`perbo inspect` lists its findings",
-      );
-    // A finding the executor declined takes no answer here, as the decision
-    // card asks none of it: a principle is its answer (D-065).
-    if (leftToPrinciple(finding, loop))
-      throw new UsageError(
-        `${wanted.slice(0, 12)} (${finding.rule_id}) is a finding the executor declined (D-065), and no ` +
-          "choice closes it: `perbo principle add` carries your answer to the executor",
       );
     if (finding.status !== "open" || !(routedToPerson(finding, loop) || finding.closure === "human"))
       throw new UsageError(
@@ -191,7 +185,11 @@ export async function options(
   const handed: DecisionFinding[] = missing.map((finding) => ({
     rule_id: finding.rule_id,
     statement: finding.statement,
-    reason: finding.blocking_reason,
+    // The executor's own reasons for declining it (D-065) stand beside the
+    // reviewer's, as data inside the finding's delimited block.
+    reason: [finding.blocking_reason, ...(loop.declined.get(finding.key) ?? []).map((why) => `The executor declined it: ${why}`)]
+      .filter((part) => part.trim().length > 0)
+      .join("\n"),
     criterion: criteria.find((criterion) => criterion.id === finding.criterion_id) ?? null,
     file: finding.file,
     line: finding.line,

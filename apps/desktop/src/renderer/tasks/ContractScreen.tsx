@@ -216,6 +216,8 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   // person back here with the confirm offered again. Nothing is confirmed
   // without the reading (D-138).
   const [failedReading, setFailedReading] = useState<string | null>(null);
+  // Whether the failed reading's model provider refused the request, which the pop-up does not offer to try again.
+  const [readingRefused, setReadingRefused] = useState(false);
   // The last change the chat made to a basic ticket's criteria, marked over
   // the words it left; a change made here by hand is the person's own and is
   // marked nowhere (D-128). Diffed once per change.
@@ -343,9 +345,10 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     try {
       const job = await settled(await bridge.request({ kind: "driftCheck", id: session.id, state: now.state }));
       const verdict = job.state === "completed" ? DriftVerdictSchema.safeParse(job.result) : null;
-      if (verdict === null)
+      if (verdict === null) {
+        setReadingRefused(job.refused === true);
         setFailedReading(job.error ?? "The reading did not finish.");
-      else if (!verdict.success)
+      } else if (!verdict.success)
         setFailedReading("The reading came back in a shape this page does not understand.");
       else if (!verdict.data.dismissed && verdict.data.findings.length > 0) setHolding(PROBLEMS_HOLD);
       else start();
@@ -802,7 +805,14 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
       {/* Over the pane rather than inside the page, which scrolls: the pop-up
           stays in the centre wherever the page is scrolled to. */}
       {failedReading !== null && (
-        <ReadingFailedNotice error={failedReading} onAcknowledge={() => setFailedReading(null)} />
+        <ReadingFailedNotice
+          error={failedReading}
+          refused={readingRefused}
+          onAcknowledge={() => {
+            setReadingRefused(false);
+            setFailedReading(null);
+          }}
+        />
       )}
     </>
   );

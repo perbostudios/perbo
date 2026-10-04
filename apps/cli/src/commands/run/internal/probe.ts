@@ -428,6 +428,14 @@ async function probeAnthropic(
   });
 }
 
+/** What the probe asks a structured-output transport to submit: one flag, under the rule every schema Perbo sends keeps. */
+export const PROBE_SUBMIT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: { ok: { type: "boolean" } },
+  required: ["ok"],
+  additionalProperties: false,
+};
+
 /**
  * Ask the configured reviewer, once, whether it will answer this machine.
  *
@@ -442,7 +450,7 @@ export async function probeReviewer(request: ProbeRequest): Promise<ProbeResult>
     (request.provider === "codex-cli" ? "codex" : request.provider === "opencode-cli" ? (env.PERBO_OPENCODE_BINARY ?? "opencode") : "claude");
   try {
     if (request.provider === "codex-cli" || request.provider === "opencode-cli") {
-      const submitSchema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
+      const submitSchema = PROBE_SUBMIT_SCHEMA;
       const model =
         request.provider === "codex-cli"
           ? codexCliModel({ modelId: request.model, binary, timeoutMs, submitSchema })

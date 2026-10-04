@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EXIT_CODES, isRunVerdict } from "@perbo/contracts";
 import { busyMessage, inTheWay, isLive, journal } from "../../shared/jobs.js";
 import { LOG_TAIL_CHARS, logTail, redact, requireSuccess } from "../process.js";
+import { RefusedRequestError } from "../../shared/reading-retry.js";
 import type { Cli } from "../cli.js";
 import type { Changes } from "../changes.js";
 import type { ContractEditing, EditingOwner } from "../../shared/contract-editing.js";
@@ -168,6 +169,7 @@ export class JobRunner {
       .catch((error: unknown) => {
         job.error = redact(error instanceof Error ? error.message : String(error));
         job.state = controller.signal.aborted ? stopped() : "failed";
+        if (job.state === "failed" && error instanceof RefusedRequestError) job.refused = true;
       })
       .finally(async () => {
         job.endedAt = new Date().toISOString();

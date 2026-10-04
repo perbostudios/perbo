@@ -725,11 +725,9 @@ describe("a delivery a person's decisions took (D-132)", () => {
     );
   });
 
-  it("moves provisioning to changes_requested on the row an escalated run writes, and on no other", () => {
+  it("moves provisioning to changes_requested on no run's outcome row", () => {
     const provisioning = ticket({ state: "provisioning" });
-    const moved = transition(provisioning, "changes_requested", gateClosedNote("escalated"));
-    expect(moved.history.at(-1)).toMatchObject({ from: "provisioning", to: "changes_requested" });
-    for (const outcome of ["changes_requested", "remediation_stalled", "remediation_exhausted"]) {
+    for (const outcome of ["escalated", "changes_requested", "remediation_stalled", "remediation_exhausted"]) {
       expect(() => transition(provisioning, "changes_requested", gateClosedNote(outcome)), outcome).toThrow(
         IllegalTransitionError,
       );

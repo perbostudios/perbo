@@ -103,7 +103,7 @@ export function StoppedScreen(context: TaskContext) {
   // ended card reads them, or — a run that closed the gate with nothing left
   // to ask the person — the outcome its row records.
   const ending = runEnding(jobs.filter(isRun), latest);
-  const closedGate = ending === null ? gateClosedReasons(ticket.history, detail.attempts, replannable) : null;
+  const closedGate = ending === null ? gateClosedReasons(ticket.history, detail.attempts) : null;
   const reasons: StopReason[] = ending?.reasons ?? closedGate ?? [
     {
       text: "Perbo holds no record of how this run ended.",
@@ -189,7 +189,7 @@ export function StoppedScreen(context: TaskContext) {
           <InkIcon name="locked" size={32} />
           <h1>The run was stopped</h1>
         </div>
-        <LoopStages stage={projection.stage} />
+        <LoopStages stage={projection.stage} at={projection.at} mark="stopped" />
         <ul className="stopped-reasons" aria-label="Why the run stopped">
           {reasons.map((reason, index) => (
             <li key={index}>

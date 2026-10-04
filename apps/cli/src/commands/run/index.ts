@@ -141,6 +141,8 @@ import {
   renderProviderProbe,
   reviewerDependency,
 } from "./internal/probe.js";
+/** What the doctor's probe sends a structured-output transport, so every schema Perbo sends can be checked. */
+export { PROBE_SUBMIT_SCHEMA } from "./internal/probe.js";
 import { mergedTicketContext } from "./internal/relevel.js";
 import { DEFAULT_CLAUDE_MODEL } from "@perbo/model/defaults";
 import { proposedModel, readClaudeModels } from "./internal/catalog.js";
@@ -903,12 +905,10 @@ const newAttemptNote = (state: string): string => `new attempt after ${state}`;
 
 /**
  * The states a run's result proves. A delivery a person's decisions took
- * without a round proves only that the run provisioned and then went where its
- * outcome goes (D-132): an approval to `pr_open`, on a row that says why in the
- * words the lifecycle's guard reads; one that ends `escalated` over a finding
- * the executor declined (D-065) is walked as every run is, and goes from
- * `provisioning` to `changes_requested` on the row every escalated run writes.
- * Every other run is walked through what its rounds prove.
+ * without a round proves only that the run provisioned and then went where an
+ * approval goes, and its row says why in the words the lifecycle's guard reads
+ * (D-132); every other run is walked
+ * through what its rounds prove.
  */
 export function observedPath(result: TicketRunResult): ReturnType<typeof statesObserved> {
   if (result.outcome === "approved" && result.rounds.length === 0 && result.decided.length > 0) {

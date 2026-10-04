@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spokenLine, tallyLine, type Tally } from "@perbo/contracts/browser";
-import { readStage, runnerProgress, runnerStages, runnerTally, spokenByAttempt, WHEEL_STEPS, wheelStep } from "./runner-progress.js";
+import { furthestAt, overTheTicket, readStage, runnerProgress, runnerStages, runnerTally, spokenByAttempt, WHEEL_STEPS, wheelFill, wheelStep } from "./runner-progress.js";
 
 describe("readStage", () => {
   it("reads each stage the runner announces, and only the number or name the line states", () => {
@@ -101,14 +101,39 @@ describe("runnerStages", () => {
   });
 });
 
+describe("overTheTicket", () => {
+  it("counts a verification announced again within one round once, and the next round's as the next pass", () => {
+    expect(
+      overTheTicket([
+        { kind: "worktree" },
+        { kind: "review", round: 0 },
+        { kind: "remediation", round: 1 },
+        { kind: "verify", round: 1 },
+        // The same round's verification taken again: a transport retry.
+        { kind: "verify", round: 1 },
+        { kind: "remediation", round: 2 },
+        { kind: "verify", round: 2 },
+      ]),
+    ).toEqual([
+      { kind: "worktree" },
+      { kind: "review", round: 0 },
+      { kind: "remediation", round: 1 },
+      { kind: "verify", round: 1 },
+      { kind: "verify", round: 1 },
+      { kind: "remediation", round: 2 },
+      { kind: "verify", round: 2 },
+    ]);
+  });
+});
+
 describe("runnerProgress", () => {
   /**
-   * The wheel's steps follow the order the loop runs: a first review, the
-   * decisions it puts to the person, a refinement round, and a review again,
-   * which returns the wheel to the review and says which pass it is.
+   * The wheel's six stages follow the loop (D-129): the checks are part of the
+   * execution, a run's first review is the review, and each later review and
+   * closure verification is a verification, said with its pass.
    */
-  it("follows the loop's order, returning to the review for a second pass", () => {
-    expect(WHEEL_STEPS).toEqual(["contract", "execution", "checks", "review", "decisions required", "refinement"]);
+  it("reads six stages in the loop's order, the checks within the execution and a later review a verification", () => {
+    expect(WHEEL_STEPS).toEqual(["contract", "execution", "review", "refinement", "verification", "completed"]);
     let log = "  worktree /w on b at c\n  executing\n";
     const seen: [number | undefined, string | undefined][] = [];
     for (const line of [
@@ -117,27 +142,37 @@ describe("runnerProgress", () => {
       "  remediation round 1 of at most 6",
       "  check Tests: pnpm test",
       "  review round 1",
-      "  verifying closures, round 1",
+      "  remediation round 2 of at most 6",
+      "  verifying closures, round 2",
     ]) {
       log += line + "\n";
       const wheel = runnerProgress(log);
       seen.push([wheel?.stage, wheel?.title]);
     }
     expect(seen).toEqual([
-      [3, "Running deterministic checks"],
-      [4, "Independent review"],
-      [6, "Refining the change"],
-      [3, "Running deterministic checks"],
-      [4, "Independent review 2"],
-      [6, "Verifying the refinements"],
+      [2, "Running deterministic checks"],
+      [3, "Independent review"],
+      [4, "Refining the change"],
+      [2, "Running deterministic checks"],
+      [5, "Verification"],
+      [4, "Refining the change, round 2"],
+      [5, "Verification 2"],
     ]);
-    // The pause for a decision is the step after the review.
-    expect(wheelStep("decisions required")).toBe(wheelStep("review") + 1);
+    // The furthest stage the lines reached, which the wheel shows: never back.
+    expect(furthestAt(runnerStages(log.split("  review round 1")[0]!).map(({ stage }) => stage))).toBe(4);
+    expect(furthestAt(runnerStages(log).map(({ stage }) => stage))).toBe(5);
+    expect(furthestAt(runnerStages(log + "  worktree /w on b at c\n  executing\n").map(({ stage }) => stage))).toBe(5);
+    expect(furthestAt([])).toBeNull();
+  });
+
+  it("fills equal slices: the contract none, each stage a fifth more, completed the whole", () => {
+    expect(WHEEL_STEPS.map((_step, at) => wheelFill(at + 1))).toEqual([0, 0.2, 0.4, 0.6, 0.8, 1]);
+    expect(wheelStep("completed")).toBe(6);
   });
 
   it("leaves the wheel where it was for a stage that has no place on it", () => {
     const checked = "  worktree /w on b at c\n  executing\n  check Tests: pnpm test\n";
-    expect(runnerProgress(checked + "  sealing the change set\n")?.stage).toBe(3);
+    expect(runnerProgress(checked + "  sealing the change set\n")?.stage).toBe(2);
     expect(runnerProgress(checked + "  pull request https://x/pull/1\n")?.title).toBe("Running deterministic checks");
   });
 });

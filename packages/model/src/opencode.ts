@@ -25,12 +25,18 @@ import {
   type StructuredTurn,
 } from "./structured.js";
 import { SUBMIT_REVIEW_TOOL, type Model, type ModelRequest, type ModelTurn } from "./turn.js";
-import type { ModelUsage } from "./usage.js";
+import { ZERO_USAGE, type ModelUsage } from "./usage.js";
 
 /**
  * The reviewer on OpenCode, through `opencode acp`
- * (D-134): one session per conversation, holding no
- * tool at all, in a scratch directory of its own.
+ * (D-134): one session per conversation, in an empty scratch directory of its
+ * own, holding no tool it can use. The session offers a read and a shell tool
+ * because OpenCode Zen's free models refuse a session that offers neither, and
+ * every call of either is asked about and refused, so none runs; OpenCode then
+ * ends its turn, and the review's turn carries on in the same session told
+ * that no tool is available ({@link NO_TOOLS}), up to
+ * {@link REVIEWER_REFUSED_TOOL_CALLS} refused calls a turn. A tool OpenCode
+ * reports having run fails the turn.
  *
  * OpenCode's Agent Client Protocol carries no output schema, so nothing
  * constrains the answer to the turn schema as it is decoded. The schema is in
@@ -60,8 +66,43 @@ interface Envelope {
   id?: number | string;
   method?: string;
   result?: unknown;
-  error?: { message?: string };
+  error?: AcpError;
   params?: unknown;
+}
+
+/** A JSON-RPC error as OpenCode's ACP server answers a request with one. */
+interface AcpError {
+  code?: unknown;
+  message?: string;
+  data?: unknown;
+}
+
+/** JSON-RPC's own codes for a request the server would not take as sent: invalid request and invalid params. */
+const RPC_REFUSED = new Set<unknown>([-32600, -32602]);
+
+/**
+ * The `data.errorName` OpenCode's ACP server fails a `session/prompt` with
+ * where the upstream provider refused the turn's request: OpenCode's own
+ * `provider.invalid-request` class, which it gives a body's
+ * `invalid_request_error`, an HTTP 4xx it puts in no other class, and a prompt
+ * past the model's context, and never retries.
+ */
+const PROVIDER_REFUSED = "provider.invalid-request";
+
+/**
+ * Whether OpenCode's error answer says the request itself was refused, read
+ * from its structured fields alone: JSON-RPC's invalid-request or
+ * invalid-params code for Perbo's own ACP request, or the upstream provider's
+ * refusal as OpenCode names it in `data.errorName`. Its words decide nothing.
+ */
+function openCodeRefusedRequest(error: AcpError): boolean {
+  if (RPC_REFUSED.has(error.code)) return true;
+  const data = error.data;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { errorName?: unknown }).errorName === PROVIDER_REFUSED
+  );
 }
 
 interface PromptResult {
@@ -120,8 +161,10 @@ class OpenCodeAcp {
   private message: { id: string | null; text: string } | null = null;
   /** OpenCode's running total for the session, in dollars, as its last usage update said. */
   cost: number | null = null;
-  /** Whether the turn in flight has seen a tool call, which this session holds none of. */
-  toolCalled = false;
+  /** The tool calls the turn in flight asked about, each refused. */
+  refusedCalls = 0;
+  /** The tool calls OpenCode reported having run in the turn in flight, by id; this session never allows one. */
+  private readonly completed = new Set<string>();
 
   constructor(options: OpenCodeCliOptions, system: string, schema: Record<string, unknown>) {
     this.timeoutMs = options.timeoutMs ?? 600_000;
@@ -243,6 +286,11 @@ class OpenCodeAcp {
     return error instanceof Error && this.openCodeRefusals.has(error);
   }
 
+  /** How many tool calls OpenCode reported having run in the turn in flight. */
+  get ran(): number {
+    return this.completed.size;
+  }
+
   /** What the turn in flight has said last. */
   private said(): string | null {
     return this.message?.text ?? null;
@@ -251,7 +299,8 @@ class OpenCodeAcp {
   /** One turn: what the session said last, and how the turn ended. */
   async turn(sessionId: string, prompt: string): Promise<{ message: string | null; result: PromptResult }> {
     this.message = null;
-    this.toolCalled = false;
+    this.refusedCalls = 0;
+    this.completed.clear();
     const result = (await this.request("session/prompt", {
       sessionId,
       prompt: [{ type: "text", text: prompt }],
@@ -299,7 +348,8 @@ class OpenCodeAcp {
     }
     if (message.method !== undefined && message.id !== undefined) {
       // The reviewer holds no tool, and offers OpenCode no file system and no
-      // terminal: a permission is rejected and anything else is refused.
+      // terminal: a permission is rejected, never allowed and never saved, and
+      // anything else is refused.
       this.process.stdin.write(
         `${JSON.stringify(
           message.method === "session/request_permission"
@@ -307,7 +357,7 @@ class OpenCodeAcp {
             : { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `the reviewer offers no ${message.method}` } },
         )}\n`,
       );
-      if (message.method === "session/request_permission") this.toolCalled = true;
+      if (message.method === "session/request_permission") this.refusedCalls += 1;
       return;
     }
     if (message.id !== undefined) {
@@ -319,9 +369,11 @@ class OpenCodeAcp {
         const refusal = new ProviderError(
           `OpenCode request failed: ${message.error.message ?? "unknown"}`,
           1,
-          /usage.?limit|budget|quota|insufficient|credit/i.test(message.error.message ?? "")
-            ? "budget_exhausted"
-            : "provider_unavailable",
+          openCodeRefusedRequest(message.error)
+            ? "request_refused"
+            : /usage.?limit|budget|quota|insufficient|credit/i.test(message.error.message ?? "")
+              ? "budget_exhausted"
+              : "provider_unavailable",
         );
         this.openCodeRefusals.add(refusal);
         pending.reject(refusal);
@@ -340,8 +392,12 @@ class OpenCodeAcp {
     } else if (update["sessionUpdate"] === "usage_update") {
       const cost = update["cost"] as { amount?: unknown; currency?: unknown } | undefined;
       if (typeof cost?.amount === "number" && cost.currency === "USD") this.cost = cost.amount;
-    } else if (update["sessionUpdate"] === "tool_call") {
-      this.toolCalled = true;
+    } else if (update["sessionUpdate"] === "tool_call" || update["sessionUpdate"] === "tool_call_update") {
+      const id = typeof update["toolCallId"] === "string" ? update["toolCallId"] : "";
+      // Every tool this session offers is asked about and refused, so one that
+      // completed ran on a rule Perbo did not write. Only the count is kept: a
+      // call's title is the model's text, and no error repeats it.
+      if (update["status"] === "completed") this.completed.add(id);
     }
   }
 
@@ -353,6 +409,22 @@ class OpenCodeAcp {
     this.pending.clear();
   }
 }
+
+/** What the review's turn is told where it was forced to submit. */
+const FORCE_SUBMIT =
+  "\n\nSubmit now: set next to submit_review and fill review with one coverage entry per criterion. No further reads.";
+
+/** The one sentence the next prompt of a turn is, after OpenCode's model called a tool the reviewer refused. */
+export const NO_TOOLS =
+  "No tool is available to the reviewer: answer from the material you were given, with one JSON object matching the schema.";
+
+/**
+ * How many refused tool calls one review turn carries on past. Each refusal
+ * costs a prompt, and a model told that no tool is available that reaches for
+ * one three times over is not going to answer from the material it was given;
+ * a fourth ends the turn `provider_unavailable`, naming the count.
+ */
+export const REVIEWER_REFUSED_TOOL_CALLS = 3;
 
 export function openCodeCliModel(options: OpenCodeCliOptions): Model {
   const modelId = options.modelId ?? DEFAULT_OPENCODE_MODEL;
@@ -384,15 +456,39 @@ export function openCodeCliModel(options: OpenCodeCliOptions): Model {
         }
         if (sessionId === null)
           throw new ProviderError("OpenCode reviewer has no active session", 1, "provider_unavailable");
-        prompt =
-          lastUserText(request) +
-          (request.forceSubmit
-            ? "\n\nSubmit now: set next to submit_review and fill review with one coverage entry " +
-              "per criterion. No further reads."
-            : "");
-        const { message, result } = await server.turn(sessionId, prompt);
-        if (server.toolCalled)
-          throw new ProviderError("OpenCode offered the isolated reviewer a tool", 1, "provider_unavailable");
+        prompt = lastUserText(request) + (request.forceSubmit ? FORCE_SUBMIT : "");
+        // A model reaching for the read or the shell tool the session has to
+        // offer is refused, and OpenCode then ends its turn; the review's turn
+        // carries on in the same session with the refusal said, up to
+        // REVIEWER_REFUSED_TOOL_CALLS refused calls.
+        const usage: ModelUsage = { ...ZERO_USAGE };
+        let refused = 0;
+        let text = prompt;
+        let message: string | null;
+        let result: PromptResult;
+        for (;;) {
+          ({ message, result } = await server.turn(sessionId, text));
+          const reported = result.usage ?? {};
+          usage.input_tokens += reported.inputTokens ?? 0;
+          usage.output_tokens += reported.outputTokens ?? 0;
+          usage.cache_read_input_tokens += reported.cachedReadTokens ?? 0;
+          usage.cache_creation_input_tokens += reported.cachedWriteTokens ?? 0;
+          if (server.ran > 0)
+            throw new ProviderError(
+              `OpenCode ran ${server.ran} tool call(s) in the isolated reviewer`,
+              1,
+              "provider_unavailable",
+            );
+          if (server.refusedCalls === 0 || result.stopReason !== "cancelled") break;
+          refused += server.refusedCalls;
+          if (refused > REVIEWER_REFUSED_TOOL_CALLS)
+            throw new ProviderError(
+              `OpenCode's model kept calling tools the reviewer does not hold: ${refused} calls refused in one turn`,
+              1,
+              "provider_unavailable",
+            );
+          text = NO_TOOLS + (request.forceSubmit ? FORCE_SUBMIT : "");
+        }
         if (result.stopReason !== "end_turn")
           throw new ProviderError(
             `OpenCode ended the turn: ${result.stopReason ?? "without a reason"}`,
@@ -407,13 +503,6 @@ export function openCodeCliModel(options: OpenCodeCliOptions): Model {
             "provider_unavailable",
           );
         const toolCalls = structured ? structuredTurnToolCalls(structured) : [];
-        const reported = result.usage ?? {};
-        const usage: ModelUsage = {
-          input_tokens: reported.inputTokens ?? 0,
-          output_tokens: reported.outputTokens ?? 0,
-          cache_read_input_tokens: reported.cachedReadTokens ?? 0,
-          cache_creation_input_tokens: reported.cachedWriteTokens ?? 0,
-        };
         const cost = server.cost;
         const turnCost = cost === null ? null : Math.max(0, Math.round((cost - costBefore) * 1_000_000));
         if (cost !== null) costBefore = cost;

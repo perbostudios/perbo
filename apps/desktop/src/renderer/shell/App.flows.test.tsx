@@ -14,7 +14,7 @@ import { useState, type ReactNode } from "react";
 import { App } from "./App.js";
 import type { Route, TaskView } from "./route.js";
 import type { Detail, Snapshot } from "../../shared/protocol.js";
-import { runnerProgress } from "../../shared/runner-progress.js";
+import { runnerProgress, wheelStep } from "../../shared/runner-progress.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { TaskPage } from "../tasks/TaskPage.js";
 import { NOT_LISTED, PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
@@ -1058,10 +1058,10 @@ describe("interactive desktop flows", () => {
   it("reports observed review and refinement instead of an earlier provisioning state", () => {
     const log =
       "  worktree /tmp/example on ayo/task at 123\n  executing\n  check test: pnpm test\n  review round 0\n  read package.json\n";
-    expect(runnerProgress(log)?.stage).toBe(4);
+    expect(runnerProgress(log)?.stage).toBe(wheelStep("review"));
     expect(
       runnerProgress(log + "  remediation round 1 of at most 6\n")?.stage,
-    ).toBe(6);
+    ).toBe(wheelStep("refinement"));
     expect(runnerProgress("  ceilings commands 200\n")).toBeNull();
   });
 

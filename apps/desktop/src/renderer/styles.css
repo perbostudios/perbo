@@ -1872,6 +1872,17 @@ textarea {
 .decision-intro .section-label {
   margin-bottom: 8px;
 }
+/* The executor's reason for declining a finding (D-065): its words, shown whole,
+   set apart from the question as data. */
+.decision-declined {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+.decision-declined p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .decision-question {
   font-size: calc(19px * var(--text-scale));
   font-weight: 600;
@@ -2998,7 +3009,7 @@ textarea {
   height: 10px;
 }
 .loop-stages .progress-track > span {
-  background: var(--amber);
+  background: var(--ink);
 }
 .stage-labels {
   display: flex;
@@ -3013,10 +3024,28 @@ textarea {
   height: 11px;
 }
 .stage-labels .current i {
-  background: var(--amber);
-  border-color: var(--amber);
+  background: var(--ink);
+  border-color: var(--ink);
   width: 8px;
   height: 8px;
+}
+/* The stage that asked a decision waits on the person, in the decision
+   colour; a stopped run's stage, in the stopped colour (D-129). */
+.stage-labels .current.is-decision {
+  color: var(--amber);
+}
+.stage-labels .current.is-decision i,
+.loop-stages--decision .progress-track > span {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.stage-labels .current.is-stopped {
+  color: var(--red);
+}
+.stage-labels .current.is-stopped i,
+.loop-stages--stopped .progress-track > span {
+  background: var(--red);
+  border-color: var(--red);
 }
 .loop-body .section-label {
   margin-bottom: 9px;

@@ -215,8 +215,8 @@ describe("the stopped page", () => {
    */
   function closedGate(
     outcome: string,
-    review: { decision: string } | null,
-    declines: readonly string[] = [],
+    review: { decision: string; findings?: unknown[] } | null,
+    declines: readonly { finding_key: string; reason: string }[] = [],
   ): { workspace: Snapshot; detail: Detail } {
     const run = stopped({ state: "completed", outcome: outcome as Job["outcome"], error: null });
     const template = sample.detail.attempts.findLast((attempt) => attempt.review !== null)?.review;
@@ -225,7 +225,21 @@ describe("the stopped page", () => {
       attempt.declines = [];
     }
     const last = run.detail.attempts.at(-1)!;
-    if (review !== null) last.review = { ...template!, ...review, findings: [] } as AttemptView["review"];
+    if (review !== null) {
+      last.review = { ...template!, ...review, findings: review.findings ?? [] } as AttemptView["review"];
+      // The review's own bundle, recorded before the attempt that followed it started.
+      last.bundles = [
+        ...last.bundles,
+        {
+          ...last.bundles[0]!,
+          bundle_id: "bundle_closedgate0001",
+          kind: "review",
+          subject_id: last.review!.review_id,
+          created_at: "2026-09-08T04:10:30.000Z",
+          inputs: {},
+        },
+      ];
+    }
     last.declines = declines;
     run.detail.ticket = {
       ...run.detail.ticket,
@@ -245,24 +259,35 @@ describe("the stopped page", () => {
       "The refinement stalled: a round closed none of the findings it was given.",
     ]);
     expect(behind()[0]).toMatch(/Nothing on its record is left for you to answer/);
-    expect(wheel()).not.toBe("decisions required");
+    // A stop, not a decision: the stage it stopped at, under its own name, in the stopped colour.
+    expect(wheel()).toBe("review");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+    expect(document.querySelector(".stage-labels .is-decision")).toBeNull();
     expect(carryOn().title).toMatch(/for the reason listed/);
   });
 
-  it("says a run escalated on the executor's declines only where an attempt records them", () => {
-    mount(closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]));
-    expect(reasons()).toEqual(["The executor declined the findings left open, saying no practice determines them."]);
-    expect(behind()[0]).toMatch(/perbo principle add/);
-    expect(behind()[0]).not.toMatch(/Nothing on its record is left for you to answer/);
-    cleanup();
-    // An incomplete review that escalated with every finding the executor's: nothing was declined.
+  it("lands an escalation that asks nothing here, and one the executor declined a finding on never (D-065)", () => {
+    // An incomplete review that escalated with every finding the executor's: nothing is asked.
     mount(closedGate("escalated", { decision: "incomplete" }));
     expect(reasons()).toEqual(["The review escalated the run, and put nothing on its record to you."]);
-    expect(behind()[0]).not.toMatch(/declined/);
+    expect(behind()[0]).not.toMatch(/declined|principle add/);
+    cleanup();
+    // A finding the executor declined is the person's question: a pause, not a stop.
+    const template = sample.detail.attempts.findLast((attempt) => attempt.review !== null)!.review!.findings[0]!;
+    const declined = { ...template, key: "e".repeat(64), routing: "remediable", status: "open", closure: "executor" };
+    mount(
+      closedGate("escalated", { decision: "remediable", findings: [declined] }, [
+        { finding_key: declined.key, reason: "A person must decide whether review runs the suite." },
+      ]),
+    );
+    expect(document.querySelector('section[data-screen="stopped"]')).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Decisions required" }).textContent).toContain(
+      "A person must decide whether review runs the suite.",
+    );
   });
 
   it("reads how the run ended past a later run the loop refused for owed answers, which started nothing", () => {
-    const run = closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]);
+    const run = closedGate("escalated", { decision: "incomplete" });
     run.detail.ticket = {
       ...run.detail.ticket,
       history: [
@@ -273,7 +298,7 @@ describe("the stopped page", () => {
       ],
     };
     mount(run);
-    expect(reasons()).toEqual(["The executor declined the findings left open, saying no practice determines them."]);
+    expect(reasons()).toEqual(["The review escalated the run, and put nothing on its record to you."]);
   });
 
   it("says the review could not be read where no review is on record, rather than that nothing is asked", () => {
@@ -328,7 +353,7 @@ describe("the stopped page", () => {
         ),
     ],
     ["a changes-requested stop with nothing to ask", () => closedGate("remediation_stalled", { decision: "remediable" })],
-    ["an escalation on the executor's declines", () => closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)])],
+    ["an escalation that asks nothing", () => closedGate("escalated", { decision: "incomplete" })],
     ["an unreadable review", () => closedGate("remediation_stalled", null)],
     [
       "a run whose record is gone",
@@ -353,14 +378,9 @@ describe("the stopped page", () => {
     expect(screen.queryByRole("button", { name: "View the paused loop" })).toBeNull();
   });
 
-  it("says a principle added for the executor's declines is read on the run Plan it again starts", () => {
-    mount(closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]));
-    expect(behind()[0]).toMatch(/Plan it again starts that run from the spec\.$/);
-  });
-
   /** An escalated run that published (D-065): its pull request is open on GitHub. */
   const published = () => {
-    const run = closedGate("escalated", { decision: "remediable" }, ["a".repeat(64)]);
+    const run = closedGate("escalated", { decision: "incomplete" });
     run.detail.ticket = {
       ...run.detail.ticket,
       delivery: { ...run.detail.ticket.delivery, state: "open", pull_request_number: 15, pull_request_url: "https://github.com/o/r/pull/15" },
@@ -378,7 +398,7 @@ describe("the stopped page", () => {
           "on GitHub, then Refresh from GitHub; the work can be deleted or planned again after that.",
       ).length,
     ).toBeGreaterThan(0);
-    expect(behind()[0]).toMatch(/reads on the next run\.$/);
+    expect(behind()[0]).not.toMatch(/Plan it again/);
     everyHoverNamesALiveButton();
   });
 
@@ -441,15 +461,34 @@ describe("the stopped page", () => {
     expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
   });
 
-  it("keeps the wheel where a run stopped at review round 2 had taken it, here and on the paused loop", () => {
+  it("keeps the wheel at the verification a run stopped after its second review had reached, in the stopped colour, here and on the paused loop", () => {
     const log =
       "  worktree /tmp/w on ayo/task at 123\n  executing\n  sealing the change set\n  check test: passed\n  review round 0\n" +
       "  remediation round 1 of at most 6\n  sealing the change set\n  check test: passed\n  review round 1\n";
-    mount(stopped({ state: "cancelled", log }));
-    expect(wheel()).toBe("review");
-    expect(document.querySelectorAll(".stage-labels .complete")).toHaveLength(3);
+    // The attempts on record are an earlier run's: this run's log is what says how far it went.
+    mount(stopped({ state: "cancelled", log }, { startedAt: "2026-09-08T04:09:00.000Z" }));
+    expect(wheel()).toBe("verification");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+    expect(document.querySelectorAll(".stage-labels .complete")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: "View the paused loop" }));
-    expect(wheel()).toBe("review");
+    expect(wheel()).toBe("verification");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+  });
+  it("marks the stage the loop was at when it stopped, behind the fill at the furthest stage it reached", () => {
+    const log =
+      "  worktree /tmp/w on ayo/task at 123\n  executing\n  sealing the change set\n  check test: passed\n  review round 0\n" +
+      "  remediation round 1 of at most 6\n  sealing the change set\n  check test: passed\n  review round 1\n" +
+      "  remediation round 2 of at most 6\n";
+    // The attempts on record are an earlier run's: this run's log is what says how far it went.
+    mount(stopped({ state: "cancelled", log }, { startedAt: "2026-09-08T04:09:00.000Z" }));
+    expect(wheel()).toBe("refinement");
+    expect(document.querySelector(".stage-labels .current")!.classList.contains("is-stopped")).toBe(true);
+    expect([...document.querySelectorAll(".stage-labels .complete")].map((step) => step.textContent)).toEqual([
+      "contract",
+      "execution",
+      "review",
+    ]);
+    expect((document.querySelector(".progress-track > span") as HTMLElement).style.width).toBe("80%");
   });
 });
 

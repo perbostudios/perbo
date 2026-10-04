@@ -155,6 +155,66 @@ describe("the review page's criterion cards", () => {
 });
 
 /**
+ * A ticket that went through a refinement round: its latest attempt is the
+ * round, judged by a closure verification and carrying no review of its own,
+ * so each criterion reads as the review before it left it.
+ */
+describe("the review page after a refinement round", () => {
+  const rows: Row[] = [
+    { status: "met", strength: "directly_verified", assertion: "one" },
+    { status: "not_met", strength: "proxy", assertion: "two" },
+    null,
+  ];
+  /** The review `rows` describes, with one finding open, and then a round whose verification closed it. */
+  function refined(): TaskContext {
+    const task = context(rows);
+    const reviewed = task.detail.attempts.at(-1)!;
+    const template = sample.detail.attempts.findLast((attempt) => attempt.review)!.review!;
+    reviewed.review = { ...reviewed.review!, findings: [{ ...template.findings[0]!, status: "open" }] };
+    const key = template.findings[0]!.key;
+    task.detail.attempts.push({
+      ...reviewed,
+      id: "refinement-round-1",
+      round: 1,
+      review: null,
+      reviewDecision: null,
+      verification: {
+        all_closed: true,
+        deterministic_failure: null,
+        open_keys: [],
+        per_finding: [{ finding_key: key, status: "closed", pointer: "src/mailer.ts:12" }],
+      },
+    });
+    return task;
+  }
+
+  it("shows each criterion's status from the review before the round, and the finding it closed as closed", () => {
+    view(refined());
+    expect(cards().map((card) => card.querySelector(".review-outcome")!.getAttribute("aria-label"))).toEqual([
+      "met",
+      "not met",
+      "not reviewed",
+    ]);
+    expect(cards().map((card) => badge(card).textContent)).toEqual(["directly verified", "inferred", "not reviewed"]);
+    const notes = [...document.querySelectorAll(".refinement-note strong")].map((note) => note.textContent);
+    expect(notes).toEqual(["Refinement caught this"]);
+    expect(screen.getByText(/Remediation closures verified/)).toBeTruthy();
+  });
+
+  it("shows every criterion not reviewed where no review is on record", () => {
+    const task = refined();
+    for (const attempt of task.detail.attempts) attempt.review = null;
+    view(task);
+    expect(cards().map((card) => card.querySelector(".review-outcome")!.getAttribute("aria-label"))).toEqual([
+      "not reviewed",
+      "not reviewed",
+      "not reviewed",
+    ]);
+    expect(document.querySelectorAll(".refinement-note")).toHaveLength(0);
+  });
+});
+
+/**
  * The founder's rule for a bar of actions: the highlighted one sits at the
  * bottom right.
  */
