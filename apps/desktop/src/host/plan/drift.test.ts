@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { REREAD_COULD_NOT_START } from "../../shared/contract-editing.js";
+import { RefusedRequestError } from "../../shared/reading-retry.js";
 import { DriftReadings, type DriftDeps } from "./drift.js";
 import type { JobOperation } from "../jobs/runner.js";
 import type { DriftFinding } from "@perbo/planning";
@@ -250,6 +251,17 @@ describe("a reading that does not run (D-138)", () => {
     expect(invoked()).toBe(2);
     expect(paused).toEqual([2_000]);
     expect(landed).toHaveLength(1);
+  });
+
+  it("is not run again where the model provider refused the request", async () => {
+    const { drift, answer, ran, paused, invoked } = readings({
+      runs: [new RefusedRequestError("error: `perbo drift` was refused by the model provider")],
+    });
+    answer([]);
+    await drift.check("s-1", null);
+    await expect(ran()).rejects.toBeInstanceOf(RefusedRequestError);
+    expect(invoked()).toBe(1);
+    expect(paused).toEqual([]);
   });
 
   it("is not run again once its job is cancelled", async () => {

@@ -50,6 +50,8 @@ export const JobSchema = z.object({
     .optional(),
   publish: z.boolean().optional(),
   outcome: z.enum(RUN_VERDICTS).optional(),
+  /** Set on a failed job whose model provider refused the request Perbo sent: running it again is no use. */
+  refused: z.literal(true).optional(),
 });
 
 /** Everything this host keeps between launches, in one file. */

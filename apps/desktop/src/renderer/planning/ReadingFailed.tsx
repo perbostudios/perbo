@@ -6,6 +6,9 @@ import { firstSentence } from "./InterviewDock.js";
 export const READING_FAILED = "The plan could not be checked against the spec";
 /** What it says after why: nothing moved on, and the way to check again. */
 export const CONFIRM_TO_CHECK = "Nothing was confirmed. Confirm again to check once more.";
+/** What it says after why instead, where the model provider refused the request: no way to check again is offered. */
+export const REFUSED_NOT_AGAIN =
+  "Nothing was confirmed. The model provider refused the request Perbo sent, so checking again will not help.";
 
 /**
  * The pop-up over a confirm whose reading of the plan against its spec did
@@ -15,9 +18,19 @@ export const CONFIRM_TO_CHECK = "Nothing was confirmed. Confirm again to check o
  * with the whole error behind the `i` (D-133), and has
  * one button, which puts it away and leaves the person on the screen they
  * confirmed from, where confirming again reads the plan again. There is no
- * way on without the reading.
+ * way on without the reading. Where the reading's model provider refused the
+ * request (`refused`, from the job the host ran), it does not offer to check
+ * again, because the same request is refused the same way.
  */
-export function ReadingFailedNotice({ error, onAcknowledge }: { error: string; onAcknowledge: () => void }) {
+export function ReadingFailedNotice({
+  error,
+  refused = false,
+  onAcknowledge,
+}: {
+  error: string;
+  refused?: boolean;
+  onAcknowledge: () => void;
+}) {
   const card = useRef<HTMLDivElement>(null);
   useEffect(() => {
     card.current?.focus();
@@ -40,7 +53,7 @@ export function ReadingFailedNotice({ error, onAcknowledge }: { error: string; o
           <p className="ended-sentence">
             {`${READING_FAILED}: ${firstSentence(error)}`} <InfoHint text={error} label="The whole error" />
           </p>
-          <p>{CONFIRM_TO_CHECK}</p>
+          <p>{refused ? REFUSED_NOT_AGAIN : CONFIRM_TO_CHECK}</p>
           <div className="decision-actions">
             <span className="spacer" />
             <Button variant="primary" onClick={onAcknowledge}>

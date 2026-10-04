@@ -141,6 +141,8 @@ import {
   renderProviderProbe,
   reviewerDependency,
 } from "./internal/probe.js";
+/** What the doctor's probe sends a structured-output transport, so every schema Perbo sends can be checked. */
+export { PROBE_SUBMIT_SCHEMA } from "./internal/probe.js";
 import { mergedTicketContext } from "./internal/relevel.js";
 import { DEFAULT_CLAUDE_MODEL } from "@perbo/model/defaults";
 import { proposedModel, readClaudeModels } from "./internal/catalog.js";

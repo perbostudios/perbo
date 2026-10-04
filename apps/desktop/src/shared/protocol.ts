@@ -1516,6 +1516,8 @@ export interface Job {
   publish?: boolean | undefined;
   /** A run that completed on a verdict for the person: the outcome its CLI reported. */
   outcome?: RunVerdict | undefined;
+  /** A failed job whose model provider refused the request Perbo sent: running it again is no use. */
+  refused?: true | undefined;
 }
 export interface TaskRow {
   repoId: string;
@@ -1594,6 +1596,7 @@ const JobUpdateSchema = z.object({
   editing: z.object({ sessionId: identifier, operationId: identifier }).optional(),
   publish: z.boolean().optional(),
   outcome: z.enum(RUN_VERDICTS).optional(),
+  refused: z.literal(true).optional(),
 });
 export const PowerStateSchema = z.strictObject({
   holding: z.boolean(),

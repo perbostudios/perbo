@@ -30,7 +30,7 @@ describe("draftContract", () => {
     const result = await draftContract(input(model));
     expect(result.draft).toEqual(validDraft);
     expect(result.model.prompt_version).toBe(DRAFT_PROMPT_VERSION);
-    expect(DRAFT_PROMPT_VERSION).toBe("draft_v6");
+    expect(DRAFT_PROMPT_VERSION).toBe("draft_v7");
     expect(result.model.provider).toBe("double");
     expect(result.model.model_id).toBe("scripted");
     expect(result.model.turns).toBe(1);

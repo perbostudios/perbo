@@ -27,7 +27,7 @@ export {
   draftSystemPrompt,
   namesBlock,
 } from "./draft/index.js";
-export type { BoardEntry, DraftResult } from "./draft/index.js";
+export type { BoardEntry, DraftCriterion, DraftResult } from "./draft/index.js";
 export { readDrift } from "./drift.js";
 export { driftHash, driftRecordPath, readDriftRecord, writeDriftRecord } from "./drift-record.js";
 export {

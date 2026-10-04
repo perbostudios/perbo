@@ -51,12 +51,41 @@ interface TokenUsageBreakdown {
   outputTokens?: number;
 }
 
+/** The app-server's `TurnError`: its words, and its structured `codexErrorInfo`. */
+interface TurnError {
+  message?: string;
+  codexErrorInfo?: unknown;
+}
+
 interface TurnState {
   message: string | null;
   usage: TokenUsageBreakdown | null;
-  completed: { status?: string; error?: { message?: string } } | null;
+  completed: { status?: string; error?: TurnError } | null;
   reroutedTo: string | null;
 }
+
+/**
+ * Whether the app-server's `codexErrorInfo` says the provider refused the
+ * request: `badRequest`, or a variant carrying the upstream `httpStatusCode`
+ * 400 (`{ responseStreamConnectionFailed: { httpStatusCode: 400 } }`). A schema
+ * the Responses API will not take (`invalid_json_schema`) is one of these.
+ */
+export function codexRefusedRequest(info: unknown): boolean {
+  if (info === "badRequest") return true;
+  if (typeof info !== "object" || info === null) return false;
+  return Object.values(info).some(
+    (variant) =>
+      typeof variant === "object" &&
+      variant !== null &&
+      (variant as { httpStatusCode?: unknown }).httpStatusCode === 400,
+  );
+}
+
+/**
+ * JSON-RPC's own codes for a request the server would not take as sent:
+ * invalid request and invalid params.
+ */
+const RPC_REFUSED = new Set([-32600, -32602]);
 
 export interface CodexCliOptions {
   submitSchema: Record<string, unknown>;
@@ -272,9 +301,11 @@ class CodexAppServer {
 
     if (state.completed?.status !== "completed") {
       const message = state.completed?.error?.message ?? "Codex turn did not complete";
-      const kind = /usage.?limit|budget|quota/i.test(message)
-        ? "budget_exhausted"
-        : "provider_unavailable";
+      const kind = codexRefusedRequest(state.completed?.error?.codexErrorInfo)
+        ? "request_refused"
+        : /usage.?limit|budget|quota/i.test(message)
+          ? "budget_exhausted"
+          : "provider_unavailable";
       throw new ProviderError(message, 1, kind);
     }
 
@@ -405,7 +436,9 @@ class CodexAppServer {
           new ProviderError(
             `Codex app-server request failed: ${message.error.message ?? message.error.code ?? "unknown"}`,
             1,
-            "provider_unavailable",
+            message.error.code !== undefined && RPC_REFUSED.has(message.error.code)
+              ? "request_refused"
+              : "provider_unavailable",
           ),
         );
       } else {
@@ -419,7 +452,7 @@ class CodexAppServer {
           turnId?: string;
           item?: { type?: string; text?: string };
           tokenUsage?: { last?: TokenUsageBreakdown };
-          turn?: { id?: string; status?: string; error?: { message?: string } };
+          turn?: { id?: string; status?: string; error?: TurnError };
           toModel?: string;
         }
       | undefined;

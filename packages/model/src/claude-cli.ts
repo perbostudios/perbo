@@ -30,8 +30,9 @@ function runCli(
   return new Promise((resolve, reject) => {
     const child = execFile(binary, [...args], options, (error, stdout, stderr) => {
       // The CLI's own voice, kept beside the error: Node's message for a
-      // non-zero exit opens with the whole argv, which says nothing.
-      if (error) reject(Object.assign(error, { stderr }));
+      // non-zero exit opens with the whole argv, which says nothing. Its
+      // result envelope too, which carries the API's status on a failed turn.
+      if (error) reject(Object.assign(error, { stderr, stdout }));
       else resolve(stdout);
     });
     // A process that exits before draining the prompt — the timeout fired, the
@@ -120,6 +121,25 @@ export const CLAUDE_CLI_ENV_ALLOW_LIST = [
  * because an argument is not a place to find out.
  */
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The kind a turn the CLI reported failing takes, from the API status its
+ * result envelope carries: a 400 is the request refused, and anything else is
+ * a provider that could not serve it.
+ */
+function failedTurnKind(status: number | null | undefined): "request_refused" | "provider_unavailable" {
+  return status === 400 ? "request_refused" : "provider_unavailable";
+}
+
+/** The result envelope a failed process still printed, or null where it printed none. */
+function envelopeOf(stdout: string | undefined): CliResult | null {
+  try {
+    const parsed = JSON.parse(stdout ?? "") as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as CliResult) : null;
+  } catch {
+    return null;
+  }
+}
 
 interface CliResult {
   is_error?: boolean;
@@ -315,7 +335,7 @@ export function claudeCliModel(options: ClaudeCliOptions): ClaudeCliModel {
           prompt,
         );
       } catch (error) {
-        const failure = error as { message?: string; stderr?: string; killed?: boolean };
+        const failure = error as { message?: string; stderr?: string; stdout?: string; killed?: boolean };
         if (failure.killed) {
           throw new ProviderError("the claude CLI timed out", 1, "timeout");
         }
@@ -323,7 +343,7 @@ export function claudeCliModel(options: ClaudeCliOptions): ClaudeCliModel {
         throw new ProviderError(
           `the claude CLI failed: ${providerFailureText(said, [prompt, request.system])}`,
           1,
-          "provider_unavailable",
+          failedTurnKind(envelopeOf(failure.stdout)?.api_error_status),
         );
       }
 
@@ -341,7 +361,7 @@ export function claudeCliModel(options: ClaudeCliOptions): ClaudeCliModel {
         throw new ProviderError(
           `the claude CLI reported an error (api status ${parsed.api_error_status ?? "none"})`,
           1,
-          "provider_unavailable",
+          failedTurnKind(parsed.api_error_status),
         );
       }
       // Advanced only for a turn the process actually received, so a failure
