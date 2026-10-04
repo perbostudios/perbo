@@ -3663,19 +3663,22 @@ describe("a graphed ticket's round", () => {
     });
   };
 
-  /** An executor that writes one source file and one test file. */
+  /** An executor that writes one source file and one passing `node:test` file. */
   const writesBoth = () =>
     agentDouble((worktree) => {
       mkdirSync(join(worktree, "src"), { recursive: true });
       mkdirSync(join(worktree, "test"), { recursive: true });
       writeFileSync(join(worktree, "src", "feature.ts"), "export const total = (n) => n.length;\n");
-      writeFileSync(join(worktree, "test", "feature.test.ts"), "// exercises total()\n");
+      writeFileSync(
+        join(worktree, "test", "feature.test.js"),
+        'require("node:test")("exercises total()", () => {});\n',
+      );
     });
 
   it("records the pinned check once per node beside the whole-change result", async () => {
     const repo = runnerRepository(scratch);
     const contract = graphed(repo.head);
-    const config = makeConfig(repo.dir);
+    const config = makeConfig(repo.dir, undefined, ["node", "--test"]);
     const agent = writesBoth();
     const reviewInputs: Array<Record<string, unknown>> = [];
 
@@ -3698,12 +3701,13 @@ describe("a graphed ticket's round", () => {
     expect(module.node?.scope).toBe("task");
     expect(module.node?.note).toContain("test file");
 
-    // The node whose paths hold the change's test file was narrowed to it.
-    // The fixture worktree has no test runner to resolve, so this asserts what
-    // the run was aimed at and not what it concluded.
+    // The node whose paths hold the change's test file was narrowed to it,
+    // with the pinned check's own runner.
     const tests = checks.find((check) => check.node?.node_id === "node_tests")!;
     expect(tests.node?.scope).toBe("files");
-    expect(tests.node?.paths).toEqual(["test/feature.test.ts"]);
+    expect(tests.node?.paths).toEqual(["test/feature.test.js"]);
+    expect(tests.command).toBe("node --test test/feature.test.js");
+    expect(tests.status).toBe("passed");
 
     // D-107: reviewed once per node, in plan order, then once overall — three
     // calls. A node's own call is handed only that node's own check result; the

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { CHECK_DETAIL_MAX_CHARS, runPinnedChecks } from "../index.js";
-import { parseTestOutput, planRerun, resolveFailures } from "./rerun.js";
+import { parseTestOutput, planNodeRun, planRerun, resolveFailures } from "./rerun.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
@@ -165,6 +165,140 @@ describe("planning the re-run", () => {
         argv: ["pnpm", "exec", "vitest", "run", "test/x.test.ts", "test/y.test.ts"],
         cwd: join(worktree, "apps", "cli"),
       },
+    ]);
+  });
+});
+
+/** A worktree with one package, `app`, whose manifest declares `scripts`. */
+function onePackage(scripts: Record<string, string> | null): { worktree: string; app: string } {
+  const worktree = scratch("perbo-runner-row-");
+  const app = join(worktree, "app");
+  mkdirSync(join(app, "test", "helpers"), { recursive: true });
+  writeFileSync(
+    join(app, "package.json"),
+    JSON.stringify(scripts === null ? { name: "app" } : { name: "app", scripts }),
+  );
+  writeFileSync(join(app, "test", "app.test.js"), "// a test\n");
+  writeFileSync(join(app, "test", "helpers", "browser.js"), "// under test/\n");
+  writeFileSync(join(app, "server.js"), "// source\n");
+  return { worktree, app };
+}
+
+/** One failure in `app/test/app.test.js`, as turbo's `app:test:` prefix attributes it. */
+const failureIn = (worktree: string, app: string) => {
+  const resolved = resolveFailures([{ package_name: "app", file: "test/app.test.js", name: null }], worktree);
+  expect(resolved[0]!.package_dir).toBe(app);
+  return resolved;
+};
+
+const CHANGED = ["app/server.js", "app/test/app.test.js", "app/test/helpers/browser.js"];
+
+describe("the narrow form is the pinned check's own runner", () => {
+  it("narrows a command that names vitest with vitest, to the files vitest collects", () => {
+    const { worktree, app } = onePackage(null);
+    const command = ["pnpm", "exec", "vitest", "run"];
+    expect(planRerun({ command, worktree, resolved: failureIn(worktree, app) }).steps).toEqual([
+      { argv: ["pnpm", "exec", "vitest", "run", "test/app.test.js"], cwd: app },
+    ]);
+    const node = planNodeRun({ command, worktree, paths: ["app/**"], changed_files: CHANGED });
+    expect(node.scope).toBe("files");
+    // A file under test/ without the suffix is not one vitest collects.
+    expect(node.files).toEqual(["app/test/app.test.js"]);
+    expect(node.steps).toEqual([{ argv: ["pnpm", "exec", "vitest", "run", "test/app.test.js"], cwd: app }]);
+  });
+
+  it("narrows `node --test` with node --test, to the files node --test collects", () => {
+    const { worktree, app } = onePackage(null);
+    const command = ["node", "--test"];
+    expect(planRerun({ command, worktree, resolved: failureIn(worktree, app) }).steps).toEqual([
+      { argv: ["node", "--test", "test/app.test.js"], cwd: app },
+    ]);
+    const node = planNodeRun({ command, worktree, paths: ["app/**"], changed_files: CHANGED });
+    expect(node.scope).toBe("files");
+    // node --test runs every file under a test directory; a source file is not one.
+    expect(node.files).toEqual(["app/test/app.test.js", "app/test/helpers/browser.js"]);
+    expect(node.steps).toEqual([
+      { argv: ["node", "--test", "test/app.test.js", "test/helpers/browser.js"], cwd: app },
+    ]);
+  });
+
+  it("does not narrow a command whose runner it cannot name, and says the runner has no narrow form", () => {
+    const { worktree, app } = onePackage(null);
+    for (const command of [["pytest", "-q"], ["node", "scripts/test.js", "--test"]]) {
+      const rerun = planRerun({ command, worktree, resolved: failureIn(worktree, app) });
+      expect(rerun.scope).toBe("task");
+      expect(rerun.steps).toEqual([{ argv: command, cwd: worktree }]);
+      expect(rerun.note).toContain("the check's runner has no narrow form");
+      const node = planNodeRun({ command, worktree, paths: ["app/**"], changed_files: CHANGED });
+      expect(node.scope).toBe("task");
+      expect(node.steps).toEqual([{ argv: command, cwd: worktree }]);
+      expect(node.note).toContain("the check's runner has no narrow form");
+    }
+  });
+
+  it("reads a wrapper's runner from the owning package's script: vitest", () => {
+    const { worktree, app } = onePackage({ test: "vitest run" });
+    for (const command of [["pnpm", "test"], ["npm", "test"], ["pnpm", "run", "test"]]) {
+      expect(planRerun({ command, worktree, resolved: failureIn(worktree, app) }).steps).toEqual([
+        { argv: ["pnpm", "exec", "vitest", "run", "test/app.test.js"], cwd: app },
+      ]);
+    }
+  });
+
+  it("reads a wrapper's runner from the owning package's script: node --test", () => {
+    const { worktree, app } = onePackage({ test: "NODE_ENV=test node --test" });
+    const command = ["npm", "test"];
+    expect(planRerun({ command, worktree, resolved: failureIn(worktree, app) }).steps).toEqual([
+      { argv: ["node", "--test", "test/app.test.js"], cwd: app },
+    ]);
+    expect(planNodeRun({ command, worktree, paths: ["app/**"], changed_files: CHANGED }).steps).toEqual([
+      { argv: ["node", "--test", "test/app.test.js", "test/helpers/browser.js"], cwd: app },
+    ]);
+  });
+
+  it("runs a wrapper whole, and says why, where the owning package's script runs anything else", () => {
+    for (const scripts of [{ test: "jest" }, { test: "tsc -b && vitest run" }, { test: "vitest run && node report.js" }, { lint: "eslint ." }]) {
+      const { worktree, app } = onePackage(scripts);
+      const command = ["pnpm", "test"];
+      const rerun = planRerun({ command, worktree, resolved: failureIn(worktree, app) });
+      expect(rerun.scope).toBe("task");
+      expect(rerun.steps).toEqual([{ argv: command, cwd: worktree }]);
+      expect(rerun.note).toContain("the check's runner has no narrow form");
+      expect(rerun.note).toContain("app");
+      const node = planNodeRun({ command, worktree, paths: ["app/**"], changed_files: CHANGED });
+      expect(node.scope).toBe("task");
+      expect(node.note).toContain("the check's runner has no narrow form");
+    }
+  });
+
+  it("narrows this repository's turbo check per package, each with its own package's runner", () => {
+    const worktree = workspaceFixture();
+    const tooling = join(worktree, "tooling", "package");
+    mkdirSync(tooling, { recursive: true });
+    writeFileSync(
+      join(tooling, "package.json"),
+      JSON.stringify({ name: "@perbo/package", scripts: { test: "node --test stage.test.mjs" } }),
+    );
+    writeFileSync(join(tooling, "stage.test.mjs"), "// a node test\n");
+    const command = [...TURBO_TEST, "--force"];
+    const node = planNodeRun({
+      command,
+      worktree,
+      paths: ["**"],
+      changed_files: ["apps/cli/test/x.test.ts", "tooling/package/stage.test.mjs"],
+    });
+    expect(node.scope).toBe("files");
+    expect(node.steps).toEqual([
+      { argv: ["pnpm", "exec", "vitest", "run", "test/x.test.ts"], cwd: join(worktree, "apps", "cli") },
+      { argv: ["node", "--test", "stage.test.mjs"], cwd: tooling },
+    ]);
+    const rerun = planRerun({
+      command,
+      worktree,
+      resolved: resolveFailures([{ package_name: "@perbo/cli", file: "test/x.test.ts", name: null }], worktree),
+    });
+    expect(rerun.steps).toEqual([
+      { argv: ["pnpm", "exec", "vitest", "run", "test/x.test.ts"], cwd: join(worktree, "apps", "cli") },
     ]);
   });
 });
