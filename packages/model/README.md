@@ -62,9 +62,12 @@ two clauses; it runs in tests, never at send time — over this package's own sc
 A provider refusing the request Perbo built fails the turn `request_refused`, never
 `provider_unavailable`, read from the provider's structured error and never its prose: the API's
 HTTP 400 or `invalid_request_error`, Claude Code's result envelope carrying `api_error_status` 400,
-and Codex's failed turn whose `codexErrorInfo` is `badRequest` or carries `httpStatusCode` 400, or a
-JSON-RPC invalid-request or invalid-params answer from its app-server. The same request is refused
-the same way, so nothing retries it and nothing tells a person to try again.
+Codex's failed turn whose `codexErrorInfo` is `badRequest` or carries `httpStatusCode` 400, or a
+JSON-RPC invalid-request or invalid-params answer from its app-server, and OpenCode's ACP server
+failing a request with `data.errorName` `provider.invalid-request` — OpenCode's own class for an
+upstream `invalid_request_error`, an HTTP 4xx it puts in no other class, and a prompt past the
+model's context — or with JSON-RPC's invalid-request or invalid-params code. The same request is
+refused the same way, so nothing retries it and nothing tells a person to try again.
 
 ## How hard a model thinks
 

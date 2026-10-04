@@ -13,7 +13,9 @@ import { join } from "node:path";
  * the turn ends `cancelled`, as OpenCode ends one a client refused a call in.
  * A reply with `ran` reports that many tool calls completed that nothing was
  * asked about, each announced under `title` (`read` where none is given), and
- * the last one's completion reported twice.
+ * the last one's completion reported twice. A reply with `error` answers the
+ * `session/prompt` with that JSON-RPC error and no turn, as OpenCode answers
+ * one whose turn failed.
  * After every prompt the fake logs what the session's directory holds. Every
  * line it receives, and the argv, environment and instructions it was started
  * with, go to `log`. With `exit`, the process ends with code 3 and a line on
@@ -29,6 +31,7 @@ export interface FakeOpenCodeReply {
   ran?: number;
   title?: string;
   usage?: Record<string, number>;
+  error?: { code: number; message: string; data?: unknown };
 }
 
 export function fakeOpenCodeReviewer(
@@ -113,6 +116,7 @@ export function fakeOpenCodeReviewer(
       "  if (m.method === 'session/prompt') {",
       "    const reply = replies[turn++] ?? {};",
       "    const sessionId = m.params.sessionId;",
+      "    if (reply.error) { send({ id: m.id, error: reply.error }); return; }",
       "    const ran = reply.ran ?? 0;",
       "    if (reply.permission || ran > 0) {",
       "      update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: 'r' + turn, content: { type: 'text', text: 'I will read src/a.ts first.' } });",

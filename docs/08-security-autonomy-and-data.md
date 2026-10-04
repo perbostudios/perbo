@@ -185,10 +185,10 @@ Nothing is uploaded, and nothing expires on its own.
 |---|---|
 | `.perbo/config.json` | the run configuration: checks, protected paths, the standing prohibited paths, limits, `merge`, the tracker, the spec folder, the ADR folder |
 | `.perbo/tickets/` | admitted tickets and the contracts that bound them |
-| `.perbo/principles.md` | a person's recorded answers to declined findings |
+| `.perbo/principles.md` | the principles a person records for later work ([D-065](11-open-decisions.md)) |
 | `.perbo/state/` | attempt records, locks, the endpoint record and `perbo agent` launch files |
 | `.perbo/bundles/` | run bundles: each model call's context manifest with trust labels, usage, and content-addressed transcripts, diffs and reviews, redacted against the secret index |
-| `.perbo/reviews/`, `verdicts.json`, `baseline.json` | reviews of changes no attempt ran, a person's verdicts on stops, the direct-agent baseline |
+| `.perbo/reviews/`, `verdicts.json`, `baseline.json` | reviews of changes no attempt ran, a person's verdicts on stops and answers to findings routed to them ([D-132](11-open-decisions.md)), the direct-agent baseline |
 | `.perbo/quarantine/` | agent configuration withheld during an attempt |
 | `~/.perbo/worktrees/` | attempt worktrees and their leases |
 | the desktop's data directory | `workspace.json` (mode 0600): settings, registered repositories, redacted job logs and unfinished edits; draft sources |

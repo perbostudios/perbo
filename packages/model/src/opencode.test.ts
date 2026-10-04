@@ -200,6 +200,52 @@ describe("the opencode-cli reviewer transport", () => {
   );
 });
 
+describe("a request OpenCode refuses", () => {
+  /** How OpenCode 2.0.14's ACP server answers a `session/prompt` whose turn failed, in OpenCode's class `errorName`. */
+  const failedTurn = (errorName: string) => ({
+    code: -32603,
+    // Words that would read as a usage limit: the structured field decides.
+    message: "Internal error: insufficient quota of something: tools.0.input_schema: invalid",
+    data: { service: "session", errorName },
+  });
+
+  it(
+    "reads the upstream provider's refusal from OpenCode's errorName, whatever the words say, and sends the prompt once",
+    async () => {
+      for (const [errorName, kind] of [
+        ["provider.invalid-request", "request_refused"],
+        ["provider.internal", "budget_exhausted"],
+      ] as const) {
+        const fake = fakeOpenCodeReviewer([{ error: failedTurn(errorName) }, { text: verdict }]);
+        const failure = await openCodeCliModel({ submitSchema, binary: fake.binary })
+          .turn(request())
+          .catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(ProviderError);
+        expect((failure as ProviderError).kind).toBe(kind);
+        expect(logOf(fake.log).lines.filter((line) => line["method"] === "session/prompt")).toHaveLength(1);
+      }
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reads JSON-RPC's invalid-request and invalid-params codes as the request refused, and an internal error as not",
+    async () => {
+      for (const [code, kind] of [
+        [-32600, "request_refused"],
+        [-32602, "request_refused"],
+        [-32603, "provider_unavailable"],
+      ] as const) {
+        const fake = fakeOpenCodeReviewer([{ error: { code, message: "Invalid params" } }]);
+        await expect(openCodeCliModel({ submitSchema, binary: fake.binary }).turn(request())).rejects.toMatchObject({
+          kind,
+        });
+      }
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+});
+
 describe("the review's session and OpenCode's catalogue", () => {
   it(
     "opens the review's session only once a scratch session's catalogue offers the model, so a stale first snapshot cannot refuse it",

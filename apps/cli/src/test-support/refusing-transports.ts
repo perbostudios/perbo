@@ -1,23 +1,22 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { anthropicModel, claudeCliModel, codexCliModel, type Model } from "@perbo/model";
+import { anthropicModel, claudeCliModel, codexCliModel, openCodeCliModel, type Model } from "@perbo/model";
 
 /**
- * Each transport that carries a schema, built for real over a provider that
- * refuses the request it is sent, each in its own structured way: the API's
- * HTTP 400 `invalid_request_error`, Claude Code's result envelope with
- * `api_error_status` 400, and Codex's failed turn with `codexErrorInfo`
- * `badRequest` and the Responses API's `invalid_json_schema` in its words.
- * Nothing reaches a provider: the API's `fetch` is a double, and the two
- * binaries are scripts in a directory of this test's own.
- *
- * OpenCode is not here: its ACP carries no schema, and its transport's
- * classification is its own module's to test.
+ * Each transport, built for real over a provider that refuses the request it
+ * is sent, each in its own structured way: the API's HTTP 400
+ * `invalid_request_error`, Claude Code's result envelope with
+ * `api_error_status` 400, Codex's failed turn with `codexErrorInfo`
+ * `badRequest` and the Responses API's `invalid_json_schema` in its words, and
+ * OpenCode's ACP server failing the `session/prompt` with `data.errorName`
+ * `provider.invalid-request`, as OpenCode 2.0.14 answers a turn its upstream
+ * provider refused. Nothing reaches a provider: the API's `fetch` is a double,
+ * and the three binaries are scripts in a directory of this test's own.
  */
-export type RefusingTransport = "anthropic" | "claude-cli" | "codex-cli";
+export type RefusingTransport = "anthropic" | "claude-cli" | "codex-cli" | "opencode-cli";
 
-export const REFUSING_TRANSPORTS: readonly RefusingTransport[] = ["anthropic", "claude-cli", "codex-cli"];
+export const REFUSING_TRANSPORTS: readonly RefusingTransport[] = ["anthropic", "claude-cli", "codex-cli", "opencode-cli"];
 
 const dir = mkdtempSync(join(tmpdir(), "perbo-refusing-"));
 
@@ -58,6 +57,37 @@ writeFileSync(
 );
 chmodSync(CODEX, 0o755);
 
+const OPENCODE_MODEL = "opencode/refusing";
+
+const OPENCODE = join(dir, "opencode.mjs");
+writeFileSync(
+  OPENCODE,
+  [
+    "#!/usr/bin/env node",
+    "import readline from 'node:readline';",
+    "const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\\n');",
+    `const model = ${JSON.stringify(OPENCODE_MODEL)};`,
+    "let sessions = 0;",
+    "readline.createInterface({ input: process.stdin }).on('line', (line) => {",
+    "  const message = JSON.parse(line);",
+    "  if (message.method === 'initialize') send({ id: message.id, result: { protocolVersion: 1 } });",
+    "  if (message.method === 'session/new')",
+    "    send({ id: message.id, result: { sessionId: 'ses_' + ++sessions, configOptions: [",
+    "      { id: 'model', currentValue: model, options: [{ value: model }] },",
+    "      { id: 'mode', options: [{ value: 'build' }, { value: 'plan' }] } ] } });",
+    "  if (message.method === 'session/delete') send({ id: message.id, result: {} });",
+    "  if (message.method === 'session/set_config_option')",
+    "    send({ id: message.id, result: { configOptions: [{ id: 'model', currentValue: message.params.value }] } });",
+    "  if (message.method === 'session/prompt')",
+    "    send({ id: message.id, error: { code: -32603,",
+    "      message: 'Internal error: tools.0.input_schema: invalid',",
+    "      data: { service: 'session', errorName: 'provider.invalid-request' } } });",
+    "});",
+    "",
+  ].join("\n"),
+);
+chmodSync(OPENCODE, 0o755);
+
 const CODEX_HOME = join(dir, "codex-home");
 mkdirSync(CODEX_HOME, { recursive: true });
 writeFileSync(join(CODEX_HOME, "auth.json"), "{}");
@@ -90,5 +120,7 @@ export function refusingModel(transport: RefusingTransport, submitSchema: Record
       return claudeCliModel({ submitSchema, binary: CLAUDE, env: { PATH: process.env.PATH ?? "", HOME } });
     case "codex-cli":
       return codexCliModel({ submitSchema, binary: CODEX, codexHome: CODEX_HOME, modelId: "gpt-test" });
+    case "opencode-cli":
+      return openCodeCliModel({ submitSchema, binary: OPENCODE, modelId: OPENCODE_MODEL, env: { PATH: process.env.PATH ?? "", HOME } });
   }
 }

@@ -104,9 +104,10 @@ Every stopping finding on a routable row goes to the executor first: it closes t
 established practice, or declares that no determinable practice exists. `security.*` and
 `context.*` findings always stop for a person regardless — closing one means deciding product
 behaviour, or handing attacker-authored text to an agent. A deterministic finding always stops.
-The last remediation round always stops, so nothing is routed with nowhere left to go. A person's
-answer to a decline is recorded with `perbo principle add` and read on later reviews
-([D-065](11-open-decisions.md)).
+The last remediation round always stops, so nothing is routed with nowhere left to go. A person
+answers a decline on the decision screen or with `perbo verdict --decide`
+([D-132](11-open-decisions.md)); a principle for later work is recorded with `perbo principle add`
+and read by every later executor brief ([D-065](11-open-decisions.md)).
 
 Perbo is judged by real use: stops, escapes and the unattended-merge share are read live from
 people's work, and the regression suite checks that a change to the reviewer did not make it

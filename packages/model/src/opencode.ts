@@ -66,8 +66,43 @@ interface Envelope {
   id?: number | string;
   method?: string;
   result?: unknown;
-  error?: { message?: string };
+  error?: AcpError;
   params?: unknown;
+}
+
+/** A JSON-RPC error as OpenCode's ACP server answers a request with one. */
+interface AcpError {
+  code?: unknown;
+  message?: string;
+  data?: unknown;
+}
+
+/** JSON-RPC's own codes for a request the server would not take as sent: invalid request and invalid params. */
+const RPC_REFUSED = new Set<unknown>([-32600, -32602]);
+
+/**
+ * The `data.errorName` OpenCode's ACP server fails a `session/prompt` with
+ * where the upstream provider refused the turn's request: OpenCode's own
+ * `provider.invalid-request` class, which it gives a body's
+ * `invalid_request_error`, an HTTP 4xx it puts in no other class, and a prompt
+ * past the model's context, and never retries.
+ */
+const PROVIDER_REFUSED = "provider.invalid-request";
+
+/**
+ * Whether OpenCode's error answer says the request itself was refused, read
+ * from its structured fields alone: JSON-RPC's invalid-request or
+ * invalid-params code for Perbo's own ACP request, or the upstream provider's
+ * refusal as OpenCode names it in `data.errorName`. Its words decide nothing.
+ */
+function openCodeRefusedRequest(error: AcpError): boolean {
+  if (RPC_REFUSED.has(error.code)) return true;
+  const data = error.data;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { errorName?: unknown }).errorName === PROVIDER_REFUSED
+  );
 }
 
 interface PromptResult {
@@ -334,9 +369,11 @@ class OpenCodeAcp {
         const refusal = new ProviderError(
           `OpenCode request failed: ${message.error.message ?? "unknown"}`,
           1,
-          /usage.?limit|budget|quota|insufficient|credit/i.test(message.error.message ?? "")
-            ? "budget_exhausted"
-            : "provider_unavailable",
+          openCodeRefusedRequest(message.error)
+            ? "request_refused"
+            : /usage.?limit|budget|quota|insufficient|credit/i.test(message.error.message ?? "")
+              ? "budget_exhausted"
+              : "provider_unavailable",
         );
         this.openCodeRefusals.add(refusal);
         pending.reject(refusal);

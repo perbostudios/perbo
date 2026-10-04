@@ -84,7 +84,7 @@ A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/dec
 
 ## Principles
 
-`.perbo/principles.md` accumulates a person's answer whenever an executor's brief declares `NO_PRACTICE` for a finding it could not close. `perbo principle add` is the only writer; the agent's write guard refuses every other path under `.perbo/**`; every later brief reads the file as data that resolves unspecified behaviour and never widens scope, weakens security or excuses a failing check.
+`.perbo/principles.md` accumulates the principles a person records for later work: product answers no established practice settles. A finding the executor declines with `NO_PRACTICE` is answered on the decision screen or with `perbo verdict --decide`, into `verdicts.json` ([D-132](11-open-decisions.md)); a principle is for the work after it. `perbo principle add` is the only writer of the principles file; the agent's write guard refuses every other path under `.perbo/**`; every later brief reads the file as data that resolves unspecified behaviour and never widens scope, weakens security or excuses a failing check.
 
 ## Store layout
 
