@@ -86,9 +86,15 @@ The half of execution that is not the agent.
 - `checks/` — the pinned set, run in the worktree after the seal: uncached, one at a time, with
   a failed unit check re-run on its own failing files. A ticket whose plan carries an execution
   graph runs the set again once per node afterwards, narrowed to the change's test files inside
-  that node's paths ([D-107](../../docs/11-open-decisions.md)); a node's result is evidence for
-  that node's review and never the gate, which stays the whole-change result. `index.ts` runs the
-  set; `internal/rerun.ts` reads a failed run's output and plans what is run again.
+  that node's paths ([D-107](../../docs/11-open-decisions.md)). A narrowed run uses the check's
+  own runner — `pnpm exec vitest run <files>` for Vitest, `node --test <files>` for `node
+  --test`, read from the pinned argv or, for a wrapper such as `pnpm test` or `turbo run test`,
+  from the owning package's script — and a command whose runner is neither is not narrowed: the
+  pinned command runs whole, and the note says its runner has no narrow form. Only the pinned
+  command can fail a check: a node's result carries the whole-change status, and its narrowed run,
+  made only where that passed, is evidence for the node's review. `index.ts` runs the set;
+  `internal/rerun.ts` reads a failed run's output and plans what is run again; `internal/runner.ts`
+  reads which runner a pinned command runs and composes the narrow form.
 - `loop/` — the run. `index.ts` is the entry and the sequencer: contract → worktree → spec commit →
   agent → seal → checks → review → route → pull request. It holds the run's public types,
   `runTicket`, `publishRetained`, the run's limits and the order the phases run in; `internal/`

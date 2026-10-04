@@ -60,11 +60,14 @@ export type CheckRerun = z.infer<typeof CheckRerunSchema>;
 /**
  * The node of an execution graph a result belongs to (D-107).
  *
- * A graphed ticket runs each pinned check once over the whole change and once
- * per node. `scope` says which run this was: `files` narrowed it to `paths` —
- * the changed test files inside the node's paths — and `task` ran the check's
- * whole command over the change for that node because it could not be
- * narrowed, with `note` saying why.
+ * A graphed ticket runs each pinned check once over the whole change and
+ * records it once per node. Only the pinned command judges a check, so a
+ * node's result carries the whole-change status. `scope` says what else the
+ * node's result holds: `files` — the check's runner, run again on `paths`, the
+ * changed test files inside the node's paths, whose command, output and
+ * failing tests are the node's evidence — and `task` — the whole-change result
+ * itself, because the check could not be narrowed or the pinned command did
+ * not pass, with `note` saying which.
  */
 export const CheckNodeSchema = z.discriminatedUnion("scope", [
   z.strictObject({
@@ -155,8 +158,8 @@ export const CheckResultsFileSchema = z.union([
  * Everything that decides an outcome over the whole change — the overall
  * review, the closure verification, the re-level and the desktop — reads
  * this rather than the list; a node's own review reads `checksForNode`
- * instead, and gates nothing on its own until that review does (D-107). A
- * flat plan's list passes through unchanged, since nothing in it is tagged.
+ * instead, whose statuses are these results' own (D-107). A flat plan's list
+ * passes through unchanged, since nothing in it is tagged.
  */
 export function wholeChangeChecks(checks: readonly CheckResult[]): CheckResult[] {
   return checks.filter((check) => check.node === undefined);
