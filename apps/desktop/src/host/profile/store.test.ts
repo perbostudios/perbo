@@ -165,6 +165,21 @@ describe("opening the profile", () => {
     });
   });
 
+  it("reads a profile without the Graph pane's node runs switch as off, and writes nothing to say so", () => {
+    const settings: Record<string, unknown> = { ...SettingsSchema.parse({}) };
+    delete settings["graphNodeRuns"];
+    const root = directory({ ...stored, settings });
+    const path = join(root, "workspace.json");
+    const before = readFileSync(path, "utf8");
+    const profile = Profile.open(root);
+    expect(profile.state.settings.graphNodeRuns).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    // Turned on and saved, it reads back on.
+    profile.state.settings = { ...profile.state.settings, graphNodeRuns: true };
+    profile.save();
+    expect(Profile.open(root).state.settings.graphNodeRuns).toBe(true);
+  });
+
   it("leaves the four moments alone where the profile already carries them", () => {
     const notifyOn = { decision: true, review: false, ceiling: true, stage: false };
     const root = directory({

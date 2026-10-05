@@ -1,6 +1,6 @@
 import { closureVerifySchema, type ClosureVerification } from "@perbo/review";
 import { ZERO_USAGE, createModel, type Model } from "@perbo/model";
-import { formatUsd } from "@perbo/contracts";
+import { formatUsd, loopOnRecord } from "@perbo/contracts";
 import type {
   CheckResult,
   Finding,
@@ -9,7 +9,7 @@ import type {
 } from "@perbo/contracts";
 import type { BundleStore } from "../../bundle.js";
 import type { Decline } from "../../declines.js";
-import type { SealResult } from "../../seal.js";
+import { changedPathsBetween, type SealResult } from "../../seal.js";
 import { allowedPathsSentence } from "../../shell/index.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
@@ -66,6 +66,59 @@ export function refuseWidening(facts: {
         `the change set it was asked to narrow. ${allowedPathsSentence(facts.pathsAllowed)}`,
     },
   };
+}
+
+/**
+ * The paths a remediation round itself changed: its sealed commit against the
+ * commit last judged — the review's, or the last closure verification's after
+ * it, a refused round passed over, as `judgedCommit` reads the same bundles —
+ * as git lists them. Both commits come from the record and git, never from the
+ * executor's account, and git runs by argv (ADR-0023).
+ *
+ * Where the base moved under the round, a path only the base brought differs
+ * between the two commits as well, so the list keeps only the paths the round's
+ * change set holds or the judged one held. Null where the record names no
+ * judged commit, the round sealed none, or git cannot read the range: the
+ * paths only inform the sentence a failed check's verification says, and a
+ * round is never judged on them.
+ */
+export async function roundChangedPaths(args: {
+  bundles: BundleStore;
+  ticket_id: string;
+  worktree: string;
+  /** The base the round's change set was sealed against. */
+  base_commit: string;
+  sealed: Pick<SealResult, "head_commit" | "changed_paths">;
+}): Promise<string[] | null> {
+  const forTicket = args.bundles.forTicket(args.ticket_id);
+  const review = forTicket.findLast(
+    (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
+  );
+  if (review === undefined || args.sealed.head_commit === null) return null;
+  const onRecord = loopOnRecord({ review_id: review.subject_id, bundles: forTicket, history: [], declines: [] });
+  if (onRecord === null) return null;
+  const judgedBy =
+    onRecord.verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined) ?? review;
+  const judged = judgedBy.inputs["head_commit"];
+  const judgedBase = judgedBy.inputs["base_commit"];
+  if (typeof judged !== "string" || judged.length === 0) return null;
+  try {
+    const between = await changedPathsBetween({
+      worktree: args.worktree,
+      base_commit: judged,
+      head_commit: args.sealed.head_commit,
+    });
+    if (typeof judgedBase !== "string" || judgedBase === args.base_commit) return between;
+    const held = new Set([
+      ...args.sealed.changed_paths,
+      ...(await changedPathsBetween({ worktree: args.worktree, base_commit: judgedBase, head_commit: judged })),
+    ]);
+    return between.filter((path) => held.has(path));
+  } catch {
+    // A range git cannot read leaves the sentence without the round's paths;
+    // the verification itself is gated on the checks and the scope alone.
+    return null;
+  }
 }
 
 /** What a round's closure verification is routed against. */
@@ -311,6 +364,13 @@ export async function verifyRound(args: {
     checks: args.gating,
     scope: args.contract.scope,
     changeset: sealed.changeset!,
+    roundChangedPaths: await roundChangedPaths({
+      bundles: args.bundles,
+      ticket_id: args.contract.ticket_id,
+      worktree: state.workspace.path,
+      base_commit: state.baseCommit,
+      sealed,
+    }),
     model: verifierModel(
       config,
       toVerify.map((finding) => finding.key),

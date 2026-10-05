@@ -94,7 +94,12 @@ The half of execution that is not the agent.
   failed check's re-run runs the pinned command whole, a node carries the whole-change result, and
   the note says its runner has no narrow form. Only the pinned
   command can fail a check: a node's result carries the whole-change status, and its narrowed run,
-  made only where that passed, is evidence for the node's review. `index.ts` runs the set;
+  made only where that passed, is evidence for the node's review, its outcome recorded as the
+  node's `run_status`, which nothing here decides on. A result's command line, and its re-run's,
+  is recorded with credential-shaped values and materialized secrets redacted, so the finding that
+  names the pinned command and the executor's brief never carry a literal token from the
+  declared argv ([D-063](../../docs/11-open-decisions.md)); what runs is always the declared argv.
+  `index.ts` runs the set;
   `internal/rerun.ts` reads a failed run's output and plans what is run again; `internal/runner.ts`
   reads which runner a pinned command runs and composes the narrow form.
 - `loop/` — the run. `index.ts` is the entry and the sequencer: contract → worktree → spec commit →

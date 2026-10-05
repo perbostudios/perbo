@@ -554,13 +554,18 @@ const sampleChanges: Detail["attempts"][number]["changes"] = [
   { path: "packages/auth/signup.ts", change_kind: "modified", additions: 18, deletions: 4 },
   { path: "docs/activation-email.md", change_kind: "added", additions: 31, deletions: 0 },
 ];
-/** The pinned checks, once over the whole change and once per node (D-107). */
-const sampleChecks: { name: string; status: string; node: string | null }[] = [
+/**
+ * The pinned checks, once over the whole change and once per node (D-107).
+ * A node's status is the pinned command's, and `run` is what the node's own
+ * narrowed run came to: node_2's failed where the pinned command passed, which
+ * is what `graphNodeRuns` marks on the Graph pane.
+ */
+const sampleChecks: { name: string; status: string; node: string | null; run?: string }[] = [
   { name: "Typecheck", status: "passed", node: null },
   { name: "Lint", status: "passed", node: null },
   { name: "Tests", status: "passed", node: null },
-  { name: "Tests", status: "passed", node: "node_1" },
-  { name: "Tests", status: "failed", node: "node_2" },
+  { name: "Tests", status: "passed", node: "node_1", run: "passed" },
+  { name: "Tests", status: "passed", node: "node_2", run: "failed" },
 ];
 /**
  * The execution bundle the stopped attempt sealed (ADR-0013, ADR-0026).
@@ -1583,7 +1588,7 @@ function liveFor(key: string, nodes: readonly { id: string; paths: readonly stri
           checks: sampleChecks.map((check) => ({
             name: check.name,
             status: check.status,
-            node: check.node ? { id: check.node, scope: "files" } : null,
+            node: check.node ? { id: check.node, scope: "files", run: check.run } : null,
           })),
           review: {
             planVersion: ticket.plan_version,
@@ -1602,6 +1607,7 @@ function liveFor(key: string, nodes: readonly { id: string; paths: readonly stri
           ],
         },
     ticket.plan_version,
+    { nodeRuns: snapshot.settings.graphNodeRuns },
   );
 }
 

@@ -229,9 +229,9 @@ function checkFindings(checks: CheckResult[], baseVerified: boolean | undefined)
       symbol: check.name,
       statement:
         check.status === "skipped"
-          ? `The ${check.name} check did not run (${check.summary}). A skipped check is not a ` +
+          ? `The ${checkNamed(check)} did not run (${check.summary}). A skipped check is not a ` +
             "passing one and establishes nothing."
-          : `The ${check.name} check ${check.status} (${check.summary}).${checkTail(check)}`,
+          : `The ${checkNamed(check)} ${check.status} (${check.summary}).${checkTail(check)}`,
       status: "open" as const,
       outcome: "unknown" as const,
       row: null,
@@ -242,6 +242,14 @@ function checkFindings(checks: CheckResult[], baseVerified: boolean | undefined)
       routing: "blocks" as const,
       waiver: null,
     }));
+}
+
+/**
+ * A check as a finding names it: by name, and by the pinned command that
+ * judged it (D-107), so the person and the executor read what to run.
+ */
+export function checkNamed(check: Pick<CheckResult, "name" | "command">): string {
+  return check.command ? `${check.name} check (\`${check.command}\`)` : `${check.name} check`;
 }
 
 /** How many characters of a failed check's output the finding carries: enough for the failing test's name and assertion, not the whole run. */

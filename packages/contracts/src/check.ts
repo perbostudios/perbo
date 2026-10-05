@@ -64,8 +64,8 @@ export type CheckRerun = z.infer<typeof CheckRerunSchema>;
  * records it once per node. Only the pinned command judges a check, so a
  * node's result carries the whole-change status. `scope` says what else the
  * node's result holds: `files` — the check's runner, run again on `paths`, the
- * changed test files inside the node's paths, whose command, output and
- * failing tests are the node's evidence — and `task` — the whole-change result
+ * changed test files inside the node's paths, whose command, output, failing
+ * tests and `run_status` are the node's evidence — and `task` — the whole-change result
  * itself, because the check could not be narrowed or the pinned command did
  * not pass, with `note` saying which.
  */
@@ -76,6 +76,13 @@ export const CheckNodeSchema = z.discriminatedUnion("scope", [
     /** Worktree-relative: the changed test files the run was narrowed to. */
     paths: z.array(z.string().min(1)).min(1),
     note: z.null().default(null),
+    /**
+     * What the node's own narrowed run came to, after its re-run, beside the
+     * result's `status`, which is the pinned command's. Evidence only: nothing
+     * decides on it. Absent where no outcome of the node's own run is on the
+     * record.
+     */
+    run_status: CheckStatusSchema.optional(),
   }),
   z.strictObject({
     node_id: NodeIdSchema,

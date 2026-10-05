@@ -1,5 +1,6 @@
 import type { ChangeSet, CheckResult, Finding, Scope } from "@perbo/contracts";
 import { assessLegibility } from "./legibility.js";
+import { checkNamed } from "./review.js";
 import { assessScope } from "./scope.js";
 import {
   ZERO_USAGE,
@@ -147,12 +148,48 @@ function isRoutedCheckFinding(finding: Finding): boolean {
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n…(clipped)` : text);
 
+/** How many of the round's paths the sentence names whole before it counts the rest (D-133). */
+const NAMED_ROUND_PATHS = 5;
+
+/**
+ * What a failed pinned check's verification says: the check, by name and by
+ * the pinned command that judged it (D-107), its status, and what the round
+ * itself changed, so the person and a later run read what the round did and
+ * what still fails. A long list names its first paths whole and counts the
+ * rest (D-133); a round that changed nothing says so, and where the runner
+ * could not read the round's paths the sentence ends at the check.
+ */
+export function checkFailureSentence(
+  check: Pick<CheckResult, "name" | "command" | "status">,
+  roundChangedPaths: readonly string[] | null,
+): string {
+  const outcome = check.status === "skipped" ? "did not run" : check.status;
+  const failed = `the ${checkNamed(check)} ${outcome} on the round's tree`;
+  if (roundChangedPaths === null) return `${failed}.`;
+  if (roundChangedPaths.length === 0) return `${failed}, and the round itself changed nothing.`;
+  const named = roundChangedPaths.slice(0, NAMED_ROUND_PATHS);
+  const rest = roundChangedPaths.length - named.length;
+  const list =
+    rest > 0
+      ? `${roundChangedPaths.length} paths: ${named.join(", ")} and ${rest} more`
+      : named.length === 1
+        ? named[0]!
+        : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]!}`;
+  return `${failed}; the round changed ${list}.`;
+}
+
 export async function verifyClosures(args: {
   findings: Finding[];
   diff: string;
   checks: CheckResult[];
   scope: Scope;
   changeset: ChangeSet;
+  /**
+   * The paths the round itself changed: its sealed tree against the commit
+   * last judged, as the runner read them from git — not the whole change set,
+   * which `changeset` is. Null where the runner could not read them.
+   */
+  roundChangedPaths: readonly string[] | null;
   model: Model;
   onProgress?: (message: string) => void;
 }): Promise<ClosureVerification> {
@@ -174,7 +211,7 @@ export async function verifyClosures(args: {
     return {
       prompt_version: CLOSURE_VERIFY_PROMPT_VERSION,
       per_finding: allCannotTell(),
-      deterministic_failure: `${failedCheck.check_id} is ${failedCheck.status}: the fixed tree does not pass the pinned checks`,
+      deterministic_failure: checkFailureSentence(failedCheck, args.roundChangedPaths),
       deterministic_failure_kind: "check",
       all_closed: false,
       open_keys: keys,

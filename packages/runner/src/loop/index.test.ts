@@ -398,7 +398,7 @@ describe("the loop closes", () => {
           return {
             prompt_version: "closure_verify_v1",
             per_finding: keys.map((finding_key) => ({ finding_key, status: "cannot_tell", pointer: "" })),
-            deterministic_failure: "check_ut is failed: the fixed tree does not pass the pinned checks",
+            deterministic_failure: "the unit check (`node -e process.exit(0)`) failed on the round's tree; the round changed src/round-1.ts.",
             all_closed: false,
             open_keys: keys,
             usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
@@ -410,8 +410,11 @@ describe("the loop closes", () => {
     });
 
     expect(result.outcome).toBe("changes_requested");
-    expect(result.detail).toContain("pinned checks");
+    expect(result.detail).toMatch(/^the fix regressed: the unit check \(`node -e process\.exit\(0\)`\) failed/);
   }, 60_000);
+
+  /** What the verifier says of a round that left the pinned check failing. */
+  const STILL_FAILING = "the unit check (`node -e process.exit(0)`) failed on the round's tree; the round changed src/round-1.ts.";
 
   /**
    * d069 (SCP-276): a round given the failing pinned check that leaves it
@@ -481,12 +484,9 @@ describe("the loop closes", () => {
   };
 
   it("a routed check still failing after its round stops as the checks failing, not as a regression", async () => {
-    const result = await stopAfterRoutedCheck(
-      "check",
-      "check_ut is failed: the fixed tree does not pass the pinned checks",
-    );
+    const result = await stopAfterRoutedCheck("check", STILL_FAILING);
     expect(result.outcome).toBe("changes_requested");
-    expect(result.detail).toMatch(/^the pinned checks still fail after remediation round 1: check_ut is failed/);
+    expect(result.detail).toBe(`the pinned checks still fail after remediation round 1: ${STILL_FAILING}`);
   }, 60_000);
 
   it("a scope escape after a routed check's round is a regression and says so", async () => {

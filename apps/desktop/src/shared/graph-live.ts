@@ -17,7 +17,12 @@ export interface LiveNodeInput {
 export interface LiveCheck {
   name: string;
   status: string;
-  node: { id: string; scope: string | undefined } | null;
+  /**
+   * The node it was narrowed to, and, where the record has it, what the
+   * node's own narrowed run came to beside `status`, which is the pinned
+   * command's.
+   */
+  node: { id: string; scope: string | undefined; run?: string | undefined } | null;
 }
 /** The review artifact on record, as this derivation reads one. */
 export interface LiveReview {
@@ -101,6 +106,12 @@ export function assembleLiveGraph(
   nodes: readonly LiveNodeInput[],
   records: LiveRecords,
   planVersion: number | undefined,
+  /**
+   * The person's `graphNodeRuns`: whether each node also says which of its
+   * checks its own narrowed run did not pass where the pinned command did.
+   * Off, the view is exactly what it is without the records of those runs.
+   */
+  display: { nodeRuns: boolean },
 ): GraphLiveView {
   const changed = records.changed ?? [];
   // A change set was sealed and its bytes are not here to read: withheld above
@@ -155,10 +166,21 @@ export function assembleLiveGraph(
       // did, so counting it would read the node by the whole change rather
       // than by anything of its own. A narrowed result carries the pinned
       // command's status too, the node's own run being evidence in its
-      // summary (D-107).
-      const ran = records.checks
-        .filter((check) => check.node?.id === node.id && check.node.scope === "files")
-        .map((check) => ({ name: check.name, status: check.status }));
+      // summary and its `run_status` (D-107).
+      const narrowed = records.checks.filter(
+        (check) => check.node?.id === node.id && check.node.scope === "files",
+      );
+      const ran = narrowed.map((check) => ({ name: check.name, status: check.status }));
+      // The node's own run, where the pinned command passed and it did not:
+      // evidence beside the state, which it never moves. A record with no
+      // outcome of its own run says nothing here.
+      const ownRuns = display.nodeRuns
+        ? narrowed.flatMap((check) =>
+            check.status === "passed" && check.node?.run !== undefined && check.node.run !== "passed"
+              ? [{ name: check.name, run: check.node.run }]
+              : [],
+          )
+        : null;
       const criteria = node.criteria.map((id): GraphCriterionState => {
         const binding = bound.get(id);
         const location = binding?.evidence?.location ?? null;
@@ -174,7 +196,14 @@ export function assembleLiveGraph(
           finding: open.get(id) ?? null,
         };
       });
-      return { id: node.id, state: nodeState({ touched, ran, criteria }), changed: touched, criteria, checks: ran };
+      return {
+        id: node.id,
+        state: nodeState({ touched, ran, criteria }),
+        changed: touched,
+        criteria,
+        checks: ran,
+        ...(ownRuns === null ? {} : { ownRuns }),
+      };
     }),
     // A flat plan has no node for a path to be outside of, so nothing is: its
     // whole change set is the change, and the task screen is where it is read.

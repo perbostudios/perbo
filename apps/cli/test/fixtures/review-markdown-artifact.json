@@ -169,7 +169,7 @@
       "file": null,
       "line": null,
       "symbol": "lint",
-      "statement": "The lint check failed (1 error). Its last lines:\npackages/search/src/query.ts: prefer const",
+      "statement": "The lint check (`eslint .`) failed (1 error). Its last lines:\npackages/search/src/query.ts: prefer const",
       "status": "open",
       "outcome": "unknown",
       "waiver": null

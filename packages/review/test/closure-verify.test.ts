@@ -87,6 +87,7 @@ const run = (args: {
   findings: Finding[];
   checks: CheckResult[];
   model: unknown;
+  roundChangedPaths?: string[] | null;
 }): Promise<ClosureVerification> =>
   verifyClosures({
     findings: args.findings,
@@ -94,6 +95,7 @@ const run = (args: {
     checks: args.checks,
     scope,
     changeset: changeSetFromDiff({ diff: DIFF, base_commit: "a1b2c3d" }),
+    roundChangedPaths: args.roundChangedPaths === undefined ? ["src/a.ts"] : args.roundChangedPaths,
     model: args.model as never,
   });
 
@@ -160,7 +162,9 @@ describe("a routed check finding is closed by the checks, not the diff (d069)", 
   it("stops on the checks when the round left them failing, and says which gate", async () => {
     const f = routedCheck();
     const result = await run({ findings: [f], checks: [check("failed")], model: modelNeverAsked() });
-    expect(result.deterministic_failure).toContain("does not pass the pinned checks");
+    expect(result.deterministic_failure).toBe(
+      "the unit check (`pnpm test`) failed on the round's tree; the round changed src/a.ts.",
+    );
     expect(result.deterministic_failure_kind).toBe("check");
     expect(result.open_keys).toEqual([f.key]);
   });
@@ -185,7 +189,7 @@ describe("closure verification is not a second opinion (D-061, SCP-101)", () => 
     const model = { provider: "t", model_id: "t", turn: async () => ((asked = true), { toolCalls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, stop_reason: null }) };
     const result = await run({ findings: [finding()], checks: [check("failed")], model });
     expect(result.all_closed).toBe(false);
-    expect(result.deterministic_failure).toContain("check_ut");
+    expect(result.deterministic_failure).toContain("the unit check (`pnpm test`) failed");
     expect(asked).toBe(false);
   });
 
@@ -204,6 +208,7 @@ index 1111111..2222222 100644
       checks: [check("passed")],
       scope,
       changeset: changeSetFromDiff({ diff: hostileDiff, base_commit: "a1b2c3d" }),
+      roundChangedPaths: [".github/workflows/ci.yml"],
       model: modelSaying([]) as never,
     });
     expect(result.all_closed).toBe(false);
@@ -220,6 +225,7 @@ index 1111111..2222222 100644
       checks: [check("passed")],
       scope,
       changeset: changeSetFromDiff({ diff: DIFF, base_commit: "a1b2c3d" }),
+      roundChangedPaths: ["src/a.ts"],
       model: { turn: () => { throw new Error("the model must not be asked"); } } as never,
     });
     expect(result.deterministic_failure).toContain("legibility");
@@ -362,7 +368,7 @@ describe("an all-declined round still meets the deterministic gate (D-065 review
   it("fails on a failed pinned check with no findings to verify", async () => {
     const result = await run({ findings: [], checks: [check("failed")], model: { turn: async () => { throw new Error("must not be called"); } } });
     expect(result.all_closed).toBe(false);
-    expect(result.deterministic_failure).toContain("check_ut");
+    expect(result.deterministic_failure).toContain("the unit check (`pnpm test`) failed");
   });
 
   it("passes without a model call when the gates pass and nothing needs verifying", async () => {
@@ -375,5 +381,41 @@ describe("an all-declined round still meets the deterministic gate (D-065 review
     expect(asked).toBe(false);
     expect(result.all_closed).toBe(true);
     expect(result.open_keys).toEqual([]);
+  });
+});
+
+describe("a failed check's verification says the command and what the round changed", () => {
+  const failing = async (roundChangedPaths: string[] | null, status: CheckResult["status"] = "failed") =>
+    (await run({ findings: [finding()], checks: [check(status)], model: modelNeverAsked(), roundChangedPaths }))
+      .deterministic_failure;
+
+  it("names the check, its pinned command, its status and the one path the round changed", async () => {
+    expect(await failing(["src/b.ts"])).toBe(
+      "the unit check (`pnpm test`) failed on the round's tree; the round changed src/b.ts.",
+    );
+  });
+
+  it("says so where the round itself changed nothing", async () => {
+    expect(await failing([])).toBe(
+      "the unit check (`pnpm test`) failed on the round's tree, and the round itself changed nothing.",
+    );
+  });
+
+  it("lists a few paths whole, and a long list as its count, five whole paths and how many more", async () => {
+    expect(await failing(["a.ts", "b.ts", "c.ts"])).toBe(
+      "the unit check (`pnpm test`) failed on the round's tree; the round changed a.ts, b.ts and c.ts.",
+    );
+    const many = Array.from({ length: 12 }, (_, index) => `src/f${index}.ts`);
+    expect(await failing(many)).toBe(
+      "the unit check (`pnpm test`) failed on the round's tree; the round changed 12 paths: " +
+        "src/f0.ts, src/f1.ts, src/f2.ts, src/f3.ts, src/f4.ts and 7 more.",
+    );
+  });
+
+  it("ends at the check where the round's paths could not be read, and says a skipped check did not run", async () => {
+    expect(await failing(null)).toBe("the unit check (`pnpm test`) failed on the round's tree.");
+    expect(await failing(["src/b.ts"], "skipped")).toBe(
+      "the unit check (`pnpm test`) did not run on the round's tree; the round changed src/b.ts.",
+    );
   });
 });

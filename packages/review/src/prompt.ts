@@ -27,17 +27,17 @@ import {
  */
 
 /**
- * The version every artifact stamps. It covers everything the reviewer is
- * shown — the system prompt, the tool schema, and the delimited blocks
- * `buildContext` and `renderReadFileResult` produce — not only the prose
- * below: a changed byte anywhere in that surface is a new version and a
- * fresh corpus score.
+ * The version every artifact stamps. It covers what this package shows the
+ * reviewer — the system prompt, the tool schema, and the delimited blocks
+ * `buildContext` and `renderReadFileResult` produce: a changed byte there is
+ * a new version and a fresh corpus score. A transport's own re-prompt, such
+ * as OpenCode's `NO_TOOLS`, is `@perbo/model`'s and is held by its tests.
  */
 export const PROMPT_VERSION = "reviewer_v11";
 
 /**
  * The delimiter namespace is `perbo:`. The version covers
- * everything the reviewer is shown, not only the system prompt, so a byte
+ * the delimited blocks, not only the system prompt, so a byte
  * changed here is a new PROMPT_VERSION and a fresh corpus score.
  */
 const OPEN = (kind: string, trust: TrustTier, attrs: Record<string, string> = {}) => {

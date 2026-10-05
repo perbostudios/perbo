@@ -3,6 +3,9 @@ import { assembleLiveGraph } from "./graph-live.js";
 import type { LiveNodeInput, LiveRecords, LiveReview } from "./graph-live.js";
 
 const FINDING = "d".repeat(64);
+/** The person's `graphNodeRuns`, off — what a profile without it reads as. */
+const OFF = { nodeRuns: false };
+const ON = { nodeRuns: true };
 const REVIEWED_AT = "2026-01-02T00:00:00.000Z";
 
 const nodes: LiveNodeInput[] = [
@@ -44,7 +47,7 @@ function records(over: Partial<LiveRecords> = {}): LiveRecords {
 
 describe("what a run's records say about a plan's graph", () => {
   it("leaves a finding open while nothing has closed it", () => {
-    const view = assembleLiveGraph(nodes, records(), 2);
+    const view = assembleLiveGraph(nodes, records(), 2, OFF);
     expect(view.attempt).toBe("attempt_1");
     expect(view.nodes[0]!.state).toBe("finding_open");
     expect(view.nodes[0]!.criteria[0]!.finding).toBe("Where should a permanently failed email go?");
@@ -59,6 +62,7 @@ describe("what a run's records say about a plan's graph", () => {
       nodes,
       records({ closures: [{ createdAt: "2026-01-03T00:00:00.000Z", closed: [FINDING] }] }),
       2,
+      OFF,
     );
     expect(view.nodes[0]!.state).not.toBe("finding_open");
     expect(view.nodes[0]!.criteria[0]!.finding).toBeNull();
@@ -69,13 +73,14 @@ describe("what a run's records say about a plan's graph", () => {
       nodes,
       records({ closures: [{ createdAt: "2026-01-01T00:00:00.000Z", closed: [FINDING] }] }),
       2,
+      OFF,
     );
     expect(view.nodes[0]!.state).toBe("finding_open");
     expect(view.nodes[0]!.criteria[0]!.finding).toBe("Where should a permanently failed email go?");
   });
 
   it("reads no criterion from a review of a plan that has been re-drafted since", () => {
-    const view = assembleLiveGraph(nodes, records({ review: review({ planVersion: 1 }) }), 2);
+    const view = assembleLiveGraph(nodes, records({ review: review({ planVersion: 1 }) }), 2, OFF);
     expect(view.note).toMatch(/re-drafted since it was reviewed/);
     for (const node of view.nodes) {
       expect(node.state).not.toBe("finding_open");
@@ -89,23 +94,23 @@ describe("what a run's records say about a plan's graph", () => {
   it("counts a check narrowed to a node's own files and not one that could not be narrowed", () => {
     const scoped = (scope: string): LiveRecords =>
       records({ checks: [{ name: "Tests", status: "failed", node: { id: "node_2", scope } }] });
-    expect(assembleLiveGraph(nodes, scoped("files"), 2).nodes[1]!.checks).toEqual([
+    expect(assembleLiveGraph(nodes, scoped("files"), 2, OFF).nodes[1]!.checks).toEqual([
       { name: "Tests", status: "failed" },
     ]);
-    expect(assembleLiveGraph(nodes, scoped("files"), 2).nodes[1]!.state).toBe("checks_failed");
-    expect(assembleLiveGraph(nodes, scoped("task"), 2).nodes[1]!.checks).toEqual([]);
-    expect(assembleLiveGraph(nodes, scoped("task"), 2).nodes[1]!.state).not.toBe("checks_failed");
+    expect(assembleLiveGraph(nodes, scoped("files"), 2, OFF).nodes[1]!.state).toBe("checks_failed");
+    expect(assembleLiveGraph(nodes, scoped("task"), 2, OFF).nodes[1]!.checks).toEqual([]);
+    expect(assembleLiveGraph(nodes, scoped("task"), 2, OFF).nodes[1]!.state).not.toBe("checks_failed");
   });
 
   it("says so when a sealed change set could not be read", () => {
-    const view = assembleLiveGraph(nodes, records({ changed: null, sealed: true }), 2);
+    const view = assembleLiveGraph(nodes, records({ changed: null, sealed: true }), 2, OFF);
     expect(view.note).toMatch(/sealed change set is not in the bundle store/);
     expect(view.nodes.every((node) => node.changed.length === 0)).toBe(true);
   });
 
   it("carries the paths no node names as outside, and nothing for a flat plan", () => {
-    expect(assembleLiveGraph(nodes, records(), 2).outside).toEqual(["docs/activation-email.md"]);
-    expect(assembleLiveGraph([], records(), 2).outside).toEqual([]);
+    expect(assembleLiveGraph(nodes, records(), 2, OFF).outside).toEqual(["docs/activation-email.md"]);
+    expect(assembleLiveGraph([], records(), 2, OFF).outside).toEqual([]);
   });
 
   it("reads every node as untouched before a run", () => {
@@ -113,6 +118,7 @@ describe("what a run's records say about a plan's graph", () => {
       nodes,
       { attempt: null, changed: [], sealed: false, checks: [], review: null, closures: [] },
       2,
+      OFF,
     );
     expect(view.attempt).toBeNull();
     expect(view.note).toBeNull();
@@ -123,9 +129,54 @@ describe("what a run's records say about a plan's graph", () => {
   });
 
   it("reads a review with no plan version of its own as an account of the plan it is beside", () => {
-    const view = assembleLiveGraph(nodes, records({ review: review({ planVersion: undefined }) }), 2);
+    const view = assembleLiveGraph(nodes, records({ review: review({ planVersion: undefined }) }), 2, OFF);
     expect(view.note).toBeNull();
     expect(view.nodes[0]!.criteria[0]!.state).toBe("met");
     expect(view.nodes[0]!.criteria[0]!.evidence).toBe("packages/queue/retry.test.ts:142");
+  });
+});
+
+/**
+ * A node's own narrowed run, recorded beside the pinned command's status
+ * (D-107), and shown only while the person's `graphNodeRuns` is on.
+ */
+describe("a node's own narrowed run on the graph", () => {
+  const ownRun = (run: string | undefined, status = "passed"): LiveRecords =>
+    records({
+      checks: [
+        { name: "Tests", status, node: null },
+        { name: "Tests", status, node: { id: "node_2", scope: "files", run } },
+        { name: "Lint", status, node: { id: "node_2", scope: "task" } },
+      ],
+    });
+
+  it("leaves the view exactly as it is without those records while the switch is off", () => {
+    const view = assembleLiveGraph(nodes, ownRun("failed"), 2, OFF);
+    expect(JSON.stringify(view)).toBe(JSON.stringify(assembleLiveGraph(nodes, ownRun(undefined), 2, OFF)));
+    for (const node of view.nodes) expect(node).not.toHaveProperty("ownRuns");
+    expect(Object.keys(view.nodes[1]!)).toEqual(["id", "state", "changed", "criteria", "checks"]);
+    expect(view.nodes[1]!.checks).toEqual([{ name: "Tests", status: "passed" }]);
+    expect(view.nodes[1]!.state).toBe("covered");
+  });
+
+  it("names a check whose own run failed under a passing pinned command, and moves no state", () => {
+    const view = assembleLiveGraph(nodes, ownRun("failed"), 2, ON);
+    expect(view.nodes[1]!.ownRuns).toEqual([{ name: "Tests", run: "failed" }]);
+    // The state is what it is with the switch off: the pinned command passed.
+    expect(view.nodes[1]!.state).toBe(assembleLiveGraph(nodes, ownRun("failed"), 2, OFF).nodes[1]!.state);
+    expect(view.nodes[1]!.checks).toEqual([{ name: "Tests", status: "passed" }]);
+    // A node with no narrowed result has nothing to name.
+    expect(view.nodes[0]!.ownRuns).toEqual([]);
+  });
+
+  it("names nothing where the own run passed, or the pinned command did not", () => {
+    expect(assembleLiveGraph(nodes, ownRun("passed"), 2, ON).nodes[1]!.ownRuns).toEqual([]);
+    expect(assembleLiveGraph(nodes, ownRun("failed", "failed"), 2, ON).nodes[1]!.ownRuns).toEqual([]);
+  });
+
+  it("names nothing for a record written without the node's own run", () => {
+    const view = assembleLiveGraph(nodes, ownRun(undefined), 2, ON);
+    expect(view.nodes[1]!.ownRuns).toEqual([]);
+    expect(view.nodes[1]!.state).toBe("covered");
   });
 });

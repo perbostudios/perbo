@@ -4594,6 +4594,23 @@ kbd {
   color: var(--red);
   border-color: var(--red-line);
 }
+/* D-107: a node's own narrowed run that did not pass where the pinned command
+   did. Amber, as a caution beside the state rather than a state: red is what
+   fails a check, and this does not. */
+.state--own_run {
+  color: var(--amber-text);
+  border-color: rgba(var(--amber-rgb), 0.6);
+  margin-left: 0;
+}
+.node-own-run {
+  margin-top: 5px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: calc(11px * var(--text-scale));
+  line-height: 1.4;
+  color: var(--amber-text);
+}
 .node-changed {
   margin-top: 5px;
   display: flex;

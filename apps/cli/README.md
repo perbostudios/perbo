@@ -605,7 +605,9 @@ iterations, commands, wall clock, tokens and cost **against their ceilings** (`i
 ceiling hit`, using the ceiling in force when it was hit rather than the one in the file today, and
 `no ceiling` where nothing bounds one), the
 checks — the whole-change results, then each node's under its node id with the paths its run was
-narrowed to, or the reason it was not ([D-107](../../docs/11-open-decisions.md)) — the review
+narrowed to and, where the record has it, what that run came to (`own run failed`, `errored` or `skipped`), beside the mark,
+which is the pinned command's, or the reason it was not narrowed
+([D-107](../../docs/11-open-decisions.md)) — the review
 decision and every finding with its rule, routing, location and statement as persisted,
 closure verification per round, the executor's declines, and the pull request — marked
 `(handed off — a person opened it, not the loop)` when the last row that walked the ticket to

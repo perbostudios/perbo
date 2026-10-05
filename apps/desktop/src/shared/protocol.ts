@@ -147,6 +147,12 @@ export const SettingsSchema = z.strictObject({
   theme: z.enum(["light", "dark", "system"]).default("system"),
   textSize: z.enum(["small", "default", "large"]).default("default"),
   reduceMotion: z.boolean().default(false),
+  /**
+   * The Graph pane marks a node whose own narrowed run did not pass where the
+   * pinned command passed (D-107). Off unless the person turns it on, and a
+   * profile without it reads as off.
+   */
+  graphNodeRuns: z.boolean().default(false),
   afk: AfkSchema.default({ holdSleep: false, displaySleep: true, releaseOnBattery: true }),
   shortcuts: z.partialRecord(ShortcutActionSchema, BindingSchema).default({}),
 });
@@ -1038,6 +1044,12 @@ export interface GraphNodeLive {
   changed: string[];
   /** The pinned checks narrowed to this node's own changed files (D-107). */
   checks: { name: string; status: string }[];
+  /**
+   * The checks the pinned command passed and this node's own narrowed run did
+   * not, with what that run came to (D-107). Evidence, and no part of the
+   * node's state. Present only while `graphNodeRuns` is on.
+   */
+  ownRuns?: { name: string; run: string }[];
   criteria: GraphCriterionState[];
 }
 /**

@@ -257,6 +257,39 @@ describe("a graphed ticket's pinned checks", () => {
     expect(whole.node).toBeUndefined();
   }, SPAWN_TEST_TIMEOUT_MS);
 
+  it("records what each node's own narrowed run came to beside the pinned command's status", async () => {
+    const fixture = graphedWorktree({ queue: "passes", reports: "fails" });
+
+    const results = await runPinnedChecks({
+      checks: [...pinned("unit", WHOLE), ...pinned("lint", ["node", "-e", "process.exit(0)"])],
+      worktree: fixture.worktree,
+      env: process.env,
+      secrets: new SecretIndex(),
+      nodes: [node("node_reports", ["packages/reports/**"]), node("node_queue", ["packages/queue/**"])],
+      changed_files: fixture.changed_files,
+    });
+
+    // The node's own run failed, twice, and the pinned command passed: the
+    // status is the pinned command's and the run's own outcome is beside it.
+    const reports = forNode(results, "node_reports").find((result) => result.kind === "unit")!;
+    expect(reports.status).toBe("passed");
+    expect(reports.node).toMatchObject({ scope: "files", run_status: "failed" });
+
+    const queue = forNode(results, "node_queue").find((result) => result.kind === "unit")!;
+    expect(queue.status).toBe("passed");
+    expect(queue.node).toMatchObject({ scope: "files", run_status: "passed" });
+
+    // A check carried over the whole change for the node ran nothing of its
+    // own, so it records no outcome of one.
+    for (const id of ["node_reports", "node_queue"]) {
+      const lint = forNode(results, id).find((result) => result.kind === "lint")!;
+      expect(lint.node?.scope).toBe("task");
+      expect(lint.node).not.toHaveProperty("run_status");
+    }
+    // The whole-change results carry no node at all.
+    for (const whole of wholeChange(results)) expect(whole.node).toBeUndefined();
+  }, SPAWN_TEST_TIMEOUT_MS);
+
   it("runs every package step of a node's narrowed run, and records a failure across them", async () => {
     const fixture = graphedWorktree({ queue: "fails", reports: "passes" });
 
@@ -347,6 +380,7 @@ describe("a graphed ticket's pinned checks", () => {
       expect(carried.detail).toBe(whole.detail);
       expect(carried.node?.scope).toBe("task");
       expect(carried.node?.note).toContain("did not pass over the whole change");
+      expect(carried.node).not.toHaveProperty("run_status");
     }
     // The packages' passing runners were never asked, so nothing narrowed can
     // stand beside the pinned command's failure.

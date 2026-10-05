@@ -81,6 +81,7 @@ function deps(over: Partial<GraphDeps> = {}): GraphDeps {
         stderr: "",
         cancelled: false,
       })) as Execute,
+    nodeRuns: false,
     ...over,
   };
 }

@@ -400,7 +400,11 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       return null;
     }),
     graphRead: scoped<"graphRead">((repo, request) =>
-      graphView({ tickets: m.tickets, execute: m.execute }, repo, request.key),
+      graphView(
+        { tickets: m.tickets, execute: m.execute, nodeRuns: settings().graphNodeRuns },
+        repo,
+        request.key,
+      ),
     ),
     // Every edit the Graph pane makes is this command (D-100): applied to a
     // copy, validated whole and recorded with its author by the CLI, which is

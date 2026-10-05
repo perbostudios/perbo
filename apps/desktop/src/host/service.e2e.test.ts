@@ -1784,6 +1784,51 @@ describe("the graph while the work runs", () => {
     expect(live.outside).toEqual([]);
   });
 
+  it("names a node's own failed run beside the pinned command's pass only while graphNodeRuns is on", async () => {
+    const { service, repo, repoId, ticketId } = await graphed();
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000004",
+      artifacts: [
+        {
+          name: "checks.json",
+          body: JSON.stringify([
+            {
+              check_id: "check_unit",
+              name: "Tests",
+              kind: "unit",
+              status: "passed",
+              summary: "the node's own run failed (1 failed); pnpm test passed over the whole change",
+              node: {
+                node_id: "node_1",
+                scope: "files",
+                paths: ["packages/auth/signup.test.ts"],
+                note: null,
+                run_status: "failed",
+              },
+            },
+          ]),
+        },
+      ],
+    });
+    const read = async () =>
+      (await service.request({ kind: "graphRead", repoId, key: "PRB-1" })).live.nodes.find(
+        (node) => node.id === "node_1",
+      )!;
+    const off = await read();
+    expect((await service.snapshot()).settings.graphNodeRuns).toBe(false);
+    expect(off).not.toHaveProperty("ownRuns");
+    expect(off.state).toBe("checks_passed");
+    await service.request({
+      kind: "saveSettings",
+      settings: { ...(await service.snapshot()).settings, graphNodeRuns: true },
+    });
+    const on = await read();
+    expect(on.ownRuns).toEqual([{ name: "Tests", run: "failed" }]);
+    // Evidence beside the state, which is the pinned command's either way.
+    expect(on.state).toBe("checks_passed");
+    expect(on.checks).toEqual([{ name: "Tests", status: "passed" }]);
+  });
+
   it("says a check that failed where the review left no finding, and a withheld diff", async () => {
     const { service, repo, repoId, ticketId } = await graphed();
     record(repo, ticketId, {

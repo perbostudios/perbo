@@ -8,6 +8,7 @@ import {
   type CheckStatus,
   type PlanNode,
   type SecretIndex,
+  redactCredentials,
 } from "@perbo/contracts";
 import { run } from "@perbo/workspace";
 import {
@@ -207,8 +208,11 @@ interface Observation {
   duration_ms: number;
   parse: TestOutput;
   resolved: ResolvedFailure[];
-  /** The node the run was for, or `null` for the run over the whole change. */
-  node: CheckNode | null;
+  /**
+   * The node the run was narrowed to, or `null` for the run over the whole
+   * change. The record adds the run's own outcome to it.
+   */
+  node: Omit<Extract<CheckNode, { scope: "files" }>, "run_status"> | null;
 }
 
 /** What running a plan's steps in order measured. */
@@ -498,8 +502,8 @@ const joinSteps = (steps: readonly RerunStep[]): string =>
  * `judge` is the whole-change result of the same check, for a node's narrowed
  * run: the record keeps the node's own command, output and failing tests as
  * that node's evidence, and takes its status from the judge, so a narrowed run
- * that failed where the pinned command passed says so in its summary and
- * closes nothing.
+ * that failed where the pinned command passed says so in its summary and in
+ * its node's `run_status`, and closes nothing.
  */
 function toResult(args: {
   observed: Observation;
@@ -524,6 +528,11 @@ function toResult(args: {
       : null;
   const quarantined = quarantineEntries !== null;
   const redact = (text: string) => args.secrets.redact(text).text;
+  // A command line is the check's declared argv, which can carry a literal
+  // credential: the record keeps it redacted by shape as well as by the
+  // materialized secrets, so the finding that names the command, the
+  // reviewer's context and the executor's brief never carry the value (D-063).
+  const redactCommand = (command: string) => redactCredentials(redact(command)).text;
   const status = flaky || quarantined ? "passed" : observed.status;
   const summary = flaky
     ? flakySummary(failing.length)
@@ -547,7 +556,7 @@ function toResult(args: {
         ? summary
         : nodeRunSummary(status, summary, args.judge),
     ),
-    command: observed.command,
+    command: redactCommand(observed.command),
     // The command's own output, and nothing the runner adds to it: the tail
     // is what a failed check's finding quotes, and the re-run has a record of
     // its own below. Capped last, from the end: the parsed failure lines are
@@ -565,7 +574,7 @@ function toResult(args: {
       rerun === null
         ? null
         : {
-            command: rerun.command,
+            command: redactCommand(rerun.command),
             scope: rerun.scope,
             note: rerun.note,
             status: rerun.status,
@@ -573,8 +582,10 @@ function toResult(args: {
             failing_tests: rerun.failing_tests.map(redact),
             duration_ms: rerun.duration_ms,
           },
-    // Absent on a whole-change result, which is what judges the change.
-    ...(observed.node === null ? {} : { node: observed.node }),
+    // Absent on a whole-change result, which is what judges the change. A
+    // node's carries what its own run came to, the status above being the
+    // pinned command's.
+    ...(observed.node === null ? {} : { node: { ...observed.node, run_status: status } }),
   });
 }
 

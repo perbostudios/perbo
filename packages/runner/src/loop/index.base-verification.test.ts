@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -85,12 +85,15 @@ const agentDouble = (
   }>,
 ) => {
   let round = 0;
+  const prompts: string[] = [];
   const run = async (request: {
     worktree: string;
+    prompt: string;
     profile: { network_allow_list: readonly string[] };
   }): Promise<AgentResult> => {
     const step = rounds[Math.min(round, rounds.length - 1)]!;
     round += 1;
+    prompts.push(request.prompt);
     step.write?.(request.worktree);
     return {
       invocation: {
@@ -126,7 +129,7 @@ const agentDouble = (
       transcript: ['{"type":"result","subtype":"success"}'],
     };
   };
-  return { run };
+  return { run, prompts };
 };
 
 /** The one criterion `makeContract` carries, answered by the pinned check. */
@@ -407,5 +410,75 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
     expect(finding?.caused_by_change).toBeNull();
     expect(result.rounds[0]?.attempt.base_verification).toBeNull();
     expect(result.rounds[0]?.attempt.provisioning_verify).toBeNull();
+  }, 120_000);
+});
+
+/**
+ * A check whose declared argv carries a literal credential (D-063). The
+ * command line the record keeps is redacted, so the finding that names it, the
+ * reviewer's context and the executor's brief carry the vendor prefix and a
+ * marker, and never the value.
+ */
+describe("a credential in a pinned check's argv", () => {
+  it("reaches neither the record, the finding, the reviewer nor the remediation brief", async () => {
+    const TOKEN = "sk_live_51QeXampleNotReal";
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const manifest = manifestVerifying(repo.dir, failsWhile(BREAKS));
+    const config = makeConfig(repo.dir, manifest, [...failsWhile(BREAKS), TOKEN]);
+
+    const model = cleanModel();
+    const reviewed: Array<Parameters<typeof runReview>[0]> = [];
+    const agent = agentDouble([
+      {
+        write: (worktree) => {
+          writeFileSync(join(worktree, "src/feature.ts"), "export const total = 3;\n");
+          writeFileSync(join(worktree, BREAKS), "export const broken = true;\n");
+        },
+      },
+      { write: (worktree) => rmSync(join(worktree, BREAKS), { force: true }) },
+    ]);
+    const result = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: agent.run as never,
+        review: ((input: Parameters<typeof runReview>[0]) => {
+          reviewed.push(input);
+          return runReview({ ...input, model });
+        }) as never,
+        verify: closesEverything as never,
+      },
+    });
+
+    const unit = result.rounds[0]!.checks[0]!;
+    expect(unit.status).toBe("failed");
+    expect(unit.command).toContain("sk_live_[redacted:");
+    expect(unit.command).not.toContain(TOKEN);
+    expect(unit.rerun?.command).toContain("sk_live_[redacted:");
+    expect(unit.rerun?.command).not.toContain(TOKEN);
+
+    expect(JSON.stringify(reviewed[0]!.checks)).not.toContain(TOKEN);
+
+    const finding = checkFinding(result.rounds[0]?.review);
+    expect(finding?.routing).toBe("remediable");
+    expect(finding?.statement).toContain("sk_live_[redacted:");
+    expect(finding?.statement).not.toContain(TOKEN);
+
+    expect(agent.prompts).toHaveLength(2);
+    expect(agent.prompts[1]).toContain("remediation round 1");
+    expect(agent.prompts[1]).toContain(finding!.statement);
+    expect(agent.prompts[1]).not.toContain(TOKEN);
+
+    // The bundles keep each round's checks.json: the redacted line is there
+    // and the value is nowhere in the store or the attempts record.
+    const stored = [config.bundle_root, config.state_root].flatMap((root) =>
+      readdirSync(root, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8")),
+    );
+    expect(stored.some((text) => text.includes("sk_live_[redacted:"))).toBe(true);
+    expect(stored.filter((text) => text.includes(TOKEN))).toEqual([]);
   }, 120_000);
 });

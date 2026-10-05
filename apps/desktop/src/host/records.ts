@@ -524,7 +524,14 @@ const StoredCheckSchema = z.looseObject({
    * own changed test files, `task` the whole command where it could not be
    * narrowed (D-107). Only the first is evidence about the node.
    */
-  node: z.looseObject({ node_id: z.string().min(1), scope: z.string().optional() }).optional(),
+  node: z
+    .looseObject({
+      node_id: z.string().min(1),
+      scope: z.string().optional(),
+      /** What the node's own narrowed run came to, beside `status`, which is the pinned command's. */
+      run_status: z.string().optional(),
+    })
+    .optional(),
 });
 const StoredChecksSchema = z.union([
   z.array(StoredCheckSchema),
@@ -796,6 +803,8 @@ export function liveGraph(input: {
   /** The plan the ticket carries now, which a review has to have judged. */
   planVersion?: number;
   objectsDirectory: string;
+  /** The person's `graphNodeRuns`, which {@link assembleLiveGraph} reads. */
+  display: { nodeRuns: boolean };
 }): GraphLiveView {
   const latest = input.attempts.at(-1);
   const mine = input.bundles.filter((bundle) => bundle.ticket_id === input.ticketId);
@@ -826,7 +835,9 @@ export function liveGraph(input: {
     (check) => ({
       name: check.name ?? check.check_id ?? "Check",
       status: check.status,
-      node: check.node ? { id: check.node.node_id, scope: check.node.scope } : null,
+      node: check.node
+        ? { id: check.node.node_id, scope: check.node.scope, run: check.node.run_status }
+        : null,
     }),
   );
   const newest = <T extends BundleManifest>(bundles: T[]): T | undefined =>
@@ -869,5 +880,6 @@ export function liveGraph(input: {
       closures,
     },
     input.planVersion,
+    input.display,
   );
 }
