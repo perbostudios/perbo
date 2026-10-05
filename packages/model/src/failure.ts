@@ -1,4 +1,14 @@
-export type ProviderErrorKind = "provider_unavailable" | "budget_exhausted" | "timeout";
+/**
+ * Why a turn failed at the transport.
+ *
+ * `request_refused` is the provider refusing the request Perbo built — an
+ * HTTP 400 `invalid_request_error`, a schema the provider will not take — read
+ * from the provider's own structured error, never from its prose. The same
+ * request is refused the same way every time, so it is never retried and a
+ * person is never told to try again; `provider_unavailable` is a provider that
+ * could not serve a request it would have taken.
+ */
+export type ProviderErrorKind = "provider_unavailable" | "request_refused" | "budget_exhausted" | "timeout";
 
 /** How much of a transport's own error text a review record may carry. */
 const MAX_FAILURE_TEXT = 300;

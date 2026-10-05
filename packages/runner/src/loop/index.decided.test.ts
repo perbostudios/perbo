@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DECISION_WORDS, LimitsTableSchema, gateClosedNote, type Finding, type PlanContract } from "@perbo/contracts";
@@ -9,6 +9,9 @@ import { EgressLog } from "../egress.js";
 import { AnswersOwedError, TicketRunConfigSchema, runTicket, type DecidedFinding } from "./index.js";
 import { finding, makeContract, makeReview, withoutInstall } from "../test-support/records.js";
 import { git, runnerRepository } from "../test-support/repository.js";
+import { readAttemptsRecord } from "../attempts.js";
+import { BundleStore } from "../bundle.js";
+import { declinesOfRecord, judgedOnRecord } from "./internal/continuation.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
@@ -379,20 +382,43 @@ describe("a person's answers to the findings routed to them", () => {
     expect(second.decided).toEqual([]);
   }, 90_000);
 
-  it("reviews a branch that has moved since the review, answers or not", async () => {
+  it("reviews a branch that has moved since the review, and carries the person's answers into its brief as data", async () => {
     const { repo, contract, config, reviews } = await stoppedForPerson();
+    // A commit made outside the run: the branch is past the commit that review judged.
     sealOnBranch(repo, contract, { "src/by-hand.ts": "export const byHand = true;\n" });
+    const agent = agentDouble(writeFeature);
     const second = await runTicket({
       config,
       contract,
-      decided: forPerson.map((entry) => decision(entry.key, "decided")),
+      decided: [
+        decision(forPerson[0]!.key, "package-lock.json is authoritative; leave pnpm-lock alone.", new Date(), "approach"),
+        decision(forPerson[1]!.key, DECISION_WORDS.ship_as_is),
+      ],
       hooks: {
-        agent: agentDouble(writeFeature).run as never,
+        agent: agent.run as never,
         review: reviewer(reviews, "changes_requested", forPerson),
       },
     });
     expect(reviews).toHaveLength(2);
     expect(second.rounds[0]!.kind).toBe("execute");
+    const brief = agent.calls[0]!;
+    expect(brief).toContain('<perbo:earlier-decisions trust="user">');
+    expect(brief).toContain(`finding_key: ${forPerson[0]!.key}`);
+    expect(brief).toContain("package-lock.json is authoritative; leave pnpm-lock alone.");
+    expect(brief).toContain(DECISION_WORDS.ship_as_is);
+    expect(brief).toContain(forPerson[0]!.statement);
+  }, 90_000);
+
+  it("carries nothing into a fresh brief where no answer stands", async () => {
+    const { repo, contract, config, reviews } = await stoppedForPerson();
+    sealOnBranch(repo, contract, { "src/by-hand.ts": "export const byHand = true;\n" });
+    const agent = agentDouble(writeFeature);
+    await runTicket({
+      config,
+      contract,
+      hooks: { agent: agent.run as never, review: reviewer(reviews, "changes_requested", forPerson) },
+    });
+    expect(agent.calls[0]).not.toContain("perbo:earlier-decisions");
   }, 90_000);
 });
 
@@ -604,6 +630,282 @@ describe("a decided finding beside one the executor can close", () => {
  * does: shipped as it is closes it, an approach runs one round scoped to it
  * with the person's words.
  */
+/**
+ * D-065 meets D-132: PRB-20's shape. The review routes two findings to the
+ * executor; its round closes one and declines the other with a reason. The run
+ * ends `escalated`, and the declined finding is the person's, answered as any
+ * finding the loop finished trying: an approach runs one round scoped to it,
+ * shipping it as it is delivers with no model call, and a second decline ends
+ * the run for the person again with both reasons on the record.
+ */
+describe("a finding the executor declined", () => {
+  const [closing, declined] = (
+    [
+      ["a", "check.suite_not_run", "The committed TAP record is not a run of the suite."],
+      ["b", "verification.execution_missing", "No execution result establishes the flappy test."],
+    ] as const
+  ).map(([digit, rule_id, statement]) => finding({ key: digit.repeat(64), rule_id, statement }));
+  const REASON =
+    "A person must decide whether review should run `node --test tests/flappy.test.mjs` itself, which needs a CI job.";
+  const AGAIN = "Still needs a CI job outside the allowed files.";
+
+  /** An executor that writes a change and, handed `declined`, declines it with `reason`. */
+  const declining = (reason: string | null) => {
+    const base = fixing();
+    const calls: string[] = [];
+    const run = async (request: Parameters<typeof base.run>[0]) => {
+      calls.push(request.prompt);
+      const result = await base.run(request);
+      if (reason === null || !request.prompt.includes(declined!.key)) return result;
+      return {
+        ...result,
+        transcript: [
+          JSON.stringify({
+            type: "assistant",
+            message: { content: [{ type: "text", text: `Fixing what I can.\nNO_PRACTICE ${declined!.key}: ${reason}` }] },
+          }),
+          ...result.transcript,
+        ],
+      };
+    };
+    return { run, calls };
+  };
+  const closes = (seen: string[][]) =>
+    (async (input: { findings: Array<{ key: string }> }) => {
+      const keys = input.findings.map((entry) => entry.key);
+      seen.push(keys);
+      return {
+        prompt_version: "closure_verify_v1",
+        per_finding: keys.map((finding_key) => ({ finding_key, status: "closed", pointer: "src/fix.ts" })),
+        deterministic_failure: null,
+        all_closed: true,
+        open_keys: [],
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        cost_micros: 30,
+        cost_basis: "provider_list_estimate",
+      };
+    }) as never;
+
+  /** Run 1: round 1 closes one finding and declines the other, and the run ends escalated. */
+  async function escalatedOnDecline() {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    const verifications: string[][] = [];
+    const first = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: declining(REASON).run as never,
+        review: reviewer([], "remediable", [closing!, declined!]),
+        verify: closes(verifications),
+      },
+    });
+    expect(first.outcome).toBe("escalated");
+    expect(verifications).toEqual([[closing!.key]]);
+    const history = [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }];
+    return { contract, config, history };
+  }
+
+  it("runs one round scoped to it with the person's words, and delivers once it is closed", async () => {
+    const { contract, config, history } = await escalatedOnDecline();
+    const agent = declining(null);
+    const verifications: string[][] = [];
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [decision(declined!.key, "Add a test script that runs the suite; it is in scope.", new Date(), "approach")],
+      hooks: { agent: agent.run as never, review: noModel.review, verify: closes(verifications) },
+    });
+    expect(second.rounds.map((round) => round.kind)).toEqual(["remediate"]);
+    expect(agent.calls).toHaveLength(1);
+    expect(agent.calls[0]).toContain("Add a test script that runs the suite; it is in scope.");
+    expect(agent.calls[0]).not.toContain(closing!.key);
+    expect(verifications).toEqual([[declined!.key]]);
+    expect(second.outcome).toBe("approved");
+    expect(second.decided.map((row) => [row.finding_key, row.choice])).toEqual([[declined!.key, "approach"]]);
+  }, 120_000);
+
+  it("delivers with no model call where the person ships it as it is", async () => {
+    const { contract, config, history } = await escalatedOnDecline();
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [decision(declined!.key, DECISION_WORDS.ship_as_is)],
+      hooks: noModel,
+    });
+    expect(second.outcome).toBe("approved");
+    expect(second.rounds).toEqual([]);
+    expect(second.final_review!.findings.find((row) => row.key === declined!.key)!.status).toBe("waived");
+  }, 120_000);
+
+  it("ends for the person again, with both reasons on the record, where the executor declines it a second time", async () => {
+    const { contract, config, history } = await escalatedOnDecline();
+    const verifications: string[][] = [];
+    const second = await runTicket({
+      config,
+      contract,
+      history,
+      decided: [decision(declined!.key, DECISION_WORDS.let_it_decide, new Date(), "let_it_decide")],
+      hooks: { agent: declining(AGAIN).run as never, review: noModel.review, verify: closes(verifications) },
+    });
+    expect(second.outcome).toBe("escalated");
+    expect(second.rounds).toHaveLength(1);
+    expect(second.final_review!.findings.find((row) => row.key === declined!.key)!.status).toBe("open");
+    const judged = judgedOnRecord({
+      bundles: new BundleStore({ root: config.bundle_root, retainContext: true }),
+      ticket_id: contract.ticket_id,
+      history,
+      declines: declinesOfRecord(readAttemptsRecord(join(config.state_root, `${contract.ticket_id}.attempts.json`))),
+    });
+    expect(judged!.loop.declined.get(declined!.key)).toEqual([REASON, AGAIN]);
+  }, 120_000);
+});
+
+/**
+ * SCP-194 meets D-132: PRB-20's first run. The review routes a scope finding to
+ * the executor; its round widens the change set instead of narrowing it and is
+ * refused. The branch goes back to the commit the review judged, the refused
+ * commit stays on the record, and the finding is the person's: their answer
+ * runs one round on that commit with their words, verified, and delivers with
+ * no second review.
+ */
+describe("a round the runner refused", () => {
+  const scope = finding({
+    key: "c".repeat(64),
+    rule_id: "scope.path_outside_allowed",
+    file: "src/wide.ts",
+    statement: "The change set touches a path the contract does not admit.",
+  });
+
+  /** Run 1: the review routes the scope finding to the executor, and its round widens and is refused. */
+  async function refusedRun() {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    const first = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: agentDouble((worktree) => {
+          mkdirSync(join(worktree, "src"), { recursive: true });
+          if (!existsSync(join(worktree, "src", "feature.ts"))) {
+            writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 1;\n");
+            return;
+          }
+          // Asked to narrow the change set, the round adds a file instead.
+          mkdirSync(join(worktree, "test"), { recursive: true });
+          writeFileSync(join(worktree, "test", "extra.test.ts"), "// a file nobody asked for\n");
+        }).run as never,
+        review: reviewer([], "remediable", [scope]),
+        verify: (async () => {
+          throw new Error("the widened round is refused before anything verifies it");
+        }) as never,
+      },
+    });
+    const judged = first.final_review!.target.head_commit;
+    const branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome });
+    const history = [{ at: new Date().toISOString(), note: gateClosedNote(first.outcome) }];
+    return { repo, contract, config, first, judged, branch, history };
+  }
+
+  /** Run 2: the person's answer runs one round on the judged commit, which stays inside the change set. */
+  async function answeredRun(run: Awaited<ReturnType<typeof refusedRun>>) {
+    const agent = agentDouble((worktree) => writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 2;\n"));
+    const verifications: string[][] = [];
+    const reviews: unknown[] = [];
+    const second = await runTicket({
+      config: run.config,
+      contract: run.contract,
+      history: run.history,
+      decided: [decision(scope.key, "Keep every change under src/ and drop the extra test file.", new Date(), "approach")],
+      hooks: {
+        agent: agent.run as never,
+        review: (async (input: unknown) => {
+          reviews.push(input);
+          throw new Error("the answer acts on the judged commit, never a fresh review");
+        }) as never,
+        verify: (async (input: { findings: Array<{ key: string }> }) => {
+          const keys = input.findings.map((entry) => entry.key);
+          verifications.push(keys);
+          return {
+            prompt_version: "closure_verify_v1",
+            per_finding: keys.map((finding_key) => ({ finding_key, status: "closed", pointer: "src/fix.ts" })),
+            deterministic_failure: null,
+            all_closed: true,
+            open_keys: [],
+            usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+            cost_micros: 30,
+            cost_basis: "provider_list_estimate",
+          };
+        }) as never,
+      },
+    });
+    return { second, agent, verifications, reviews };
+  }
+
+  it("leaves the branch at the judged commit, and the person's answer acts on it", async () => {
+    const run = await refusedRun();
+    const { repo, config, contract, first, judged, branch } = run;
+    expect(first.outcome).toBe("changes_requested");
+    expect(first.detail).toContain("widened the change set");
+    const refused = first.rounds.at(-1)!.attempt.head_commit!;
+    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged);
+    expect(refused).not.toBe(judged);
+    const store = new BundleStore({ root: config.bundle_root, retainContext: true });
+    const refusal = store.forTicket(contract.ticket_id).find((bundle) => bundle.subject_id.startsWith("cv_"))!;
+    expect(refusal.inputs["refused_head_commit"]).toBe(refused);
+
+    const { second, agent, verifications, reviews } = await answeredRun(run);
+    expect(reviews).toEqual([]);
+    expect(second.rounds.map((round) => round.kind)).toEqual(["remediate"]);
+    expect(agent.calls[0]).toContain("Keep every change under src/ and drop the extra test file.");
+    expect(verifications).toEqual([[scope.key]]);
+    expect(second.outcome).toBe("approved");
+  }, 120_000);
+
+  it("refuses the next run while the finding is unanswered, and continues at the judged commit once it is answered", async () => {
+    const run = await refusedRun();
+    const { repo, config, contract, judged, branch, history } = run;
+    const owed = runTicket({ config, contract, history, decided: [], hooks: noModel });
+    await expect(owed).rejects.toBeInstanceOf(AnswersOwedError);
+    await expect(owed).rejects.toThrow(`left 1 finding(s) for you to answer (${scope.key.slice(0, 12)})`);
+    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged);
+
+    const { second, reviews } = await answeredRun(run);
+    expect(reviews).toEqual([]);
+    expect(second.outcome).toBe("approved");
+    // The answered round's commit sits on the judged one, not on the refused one.
+    const made = second.rounds[0]!.attempt.head_commit!;
+    expect(repo.git("rev-parse", `${made}^`).trim()).toBe(judged);
+  }, 120_000);
+
+  it("puts the finding to the person on the refused round alone: no run finished trying and nothing was declined", async () => {
+    const { config, contract, first, history } = await refusedRun();
+    // The run ended `changes_requested`, which is not one of FINISHED_TRYING,
+    // and the round declined nothing: the refusal is the only route left.
+    expect(first.outcome).toBe("changes_requested");
+    const judged = judgedOnRecord({
+      bundles: new BundleStore({ root: config.bundle_root, retainContext: true }),
+      ticket_id: contract.ticket_id,
+      history,
+      declines: declinesOfRecord(readAttemptsRecord(join(config.state_root, `${contract.ticket_id}.attempts.json`))),
+    });
+    expect(judged!.loop.finished).toBe(false);
+    expect(judged!.loop.declined.size).toBe(0);
+    expect(judged!.loop.closed.has(scope.key)).toBe(false);
+    expect([...judged!.loop.refused]).toEqual([scope.key]);
+
+    const owed = runTicket({ config, contract, history, decided: [], hooks: noModel });
+    await expect(owed).rejects.toBeInstanceOf(AnswersOwedError);
+    await expect(owed).rejects.toThrow(`left 1 finding(s) for you to answer (${scope.key.slice(0, 12)})`);
+  }, 120_000);
+});
+
 describe("the findings a stalled refinement left open", () => {
   const [stuck, alsoStuck, closedEarly] = (
     [
@@ -766,10 +1068,10 @@ describe("the findings a stalled refinement left open", () => {
 
 /**
  * D-065 beside D-132: a finding the executor declined in a round that then
- * stalled is not the person's to answer by a choice, since a principle is its
- * answer; the other finding it left open is. Answering that one delivers, or
- * runs the round it hands on, and the run ends `escalated` with the declined
- * finding left for the person.
+ * stalled is the person's, as the other finding the round left open is. A run
+ * is refused until they are answered; shipping both delivers with no model
+ * call, and handing one on runs the round on it, the run ending `escalated`
+ * with the declined one still the person's.
  */
 describe("a finding the executor declined in a refinement that stalled", () => {
   const [declined, open] = (
@@ -845,30 +1147,32 @@ describe("a finding the executor declined in a refinement that stalled", () => {
     return { contract, config, history };
   }
 
-  it("puts only the other finding to the person, and refuses a run until it is answered", async () => {
+  it("puts both findings to the person, and refuses a run until they are answered", async () => {
     const { contract, config, history } = await stalledWithDecline();
     await expect(runTicket({ config, contract, history, decided: [], hooks: noModel })).rejects.toThrow(
-      `left 1 finding(s) for you to answer (${open!.key.slice(0, 12)})`,
+      `left 2 finding(s) for you to answer (${declined!.key.slice(0, 12)}, ${open!.key.slice(0, 12)})`,
     );
+    await expect(
+      runTicket({ config, contract, history, decided: [decision(open!.key, DECISION_WORDS.ship_as_is)], hooks: noModel }),
+    ).rejects.toThrow(`left 1 finding(s) for you to answer (${declined!.key.slice(0, 12)})`);
   }, 120_000);
 
-  it("delivers on the other shipped as it is, executing nothing, and leaves the declined one to the person", async () => {
+  it("delivers on both shipped as they are, executing nothing", async () => {
     const { contract, config, history } = await stalledWithDecline();
     const second = await runTicket({
       config,
       contract,
       history,
-      decided: [decision(open!.key, DECISION_WORDS.ship_as_is)],
+      decided: [decision(declined!.key, DECISION_WORDS.ship_as_is), decision(open!.key, DECISION_WORDS.ship_as_is)],
       hooks: noModel,
     });
     expect(second.rounds).toEqual([]);
-    expect(second.outcome).toBe("escalated");
+    expect(second.outcome).toBe("approved");
     expect(second.detail).toContain("nothing was executed or reviewed again");
-    expect(second.detail).toContain(`the executor declined are yours to decide, and \`perbo principle add\` is the answer: ${declined!.key}`);
-    expect(second.final_review!.findings.find((row) => row.key === declined!.key)!.status).toBe("open");
+    expect(second.final_review!.findings.find((row) => row.key === declined!.key)!.status).toBe("waived");
   }, 120_000);
 
-  it("runs one round on the other handed on, never the declined one, and ends escalated once it is closed", async () => {
+  it("runs one round on the other handed on, never the declined one, and ends escalated with the declined one still the person's", async () => {
     const { contract, config, history } = await stalledWithDecline();
     const agent = declining();
     const verifications: string[][] = [];

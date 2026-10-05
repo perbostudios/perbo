@@ -135,8 +135,12 @@ export function routeReview(facts: ReviewFacts): Step {
     // a NUL byte, could not say which, and a re-run over the same sealed
     // commit would have died the same way (SCP-188). A verdict the plan
     // could not accept implicates no file and names none.
+    //
+    // A request the provider refused stopped at the transport too, and is
+    // never taken again: the same request is refused the same way.
     const atTheTransport =
       review.error?.kind === "provider_unavailable" ||
+      review.error?.kind === "request_refused" ||
       review.error?.kind === "timeout" ||
       review.error?.kind === "budget_exhausted";
     const reading = review.error?.reading ?? [];
@@ -152,7 +156,10 @@ export function routeReview(facts: ReviewFacts): Step {
             : reading.length > 0
               ? ` (reading ${reading.join(", ")})`
               : " (no file named: the review had read nothing when the transport failed)") +
-          // The reset a refused review was not taken again before, said with
+          (review.error?.kind === "request_refused"
+            ? ". The provider refuses the request Perbo sends as it is built, so reviewing again will not help"
+            : "") +
+          // The reset a rate-limited review was not taken again before, said with
           // the instant and the key, so raising the bound is a decision a
           // person makes with the number in front of them.
           (unwaited === null
@@ -671,14 +678,16 @@ export async function reviewRound(args: {
     { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
   );
   let graphOutcome = await reviewOnce();
-  // A review its provider refused has judged nothing, and runs of different
-  // tickets side by side (D-049) make a rate limit likely. So the review waits
+  // A review its provider could not serve has judged nothing, and runs of
+  // different tickets side by side (D-049) make a rate limit likely. So the review waits
   // and is taken once more over the same sealed commit before its verdict is
   // routed (`reviewRetry`). A park is on the record before the sleep, as an
   // attempt's is: the attempt the review judged carries the wait and is
   // flushed to the ticket's record, so a run restarted mid-wait honours what
-  // is left of it. The refused review's usage is the provider's to report, so
-  // it is added to the retried review's bundle rather than dropped.
+  // is left of it. The unserved review's usage is the provider's to report, so
+  // it is added to the retried review's bundle rather than dropped. A request
+  // the provider refused (`request_refused`) is not taken again: it would be
+  // refused the same way.
   let attempt = args.attempt;
   let refused: ReviewArtifact | null = null;
   let unwaited: UnwaitedReset | null = null;

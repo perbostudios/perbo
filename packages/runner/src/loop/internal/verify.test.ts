@@ -2,14 +2,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import type { ClosureRow, ClosureVerification } from "@perbo/review";
 import { SecretIndex } from "@perbo/contracts";
 import { BundleStore } from "../../bundle.js";
 import type { SealResult } from "../../seal.js";
 import { TicketRunConfigSchema } from "./config.js";
 import { Ledger } from "./ledger.js";
-import { refuseWidening, routeVerification, verifyRound } from "./verify.js";
+import { refuseWidening, roundChangedPaths, routeVerification, verifyRound } from "./verify.js";
 import { finding, makeReview } from "../../test-support/records.js";
+import { runnerRepository } from "../../test-support/repository.js";
 import { attempt, contract, roundState } from "./test-support/fakes.js";
 
 const verification = (overrides: Partial<ClosureVerification> = {}): ClosureVerification => ({
@@ -98,14 +100,14 @@ describe("where a round's closure verification sends the run", () => {
     const step = route({
       toVerify: [finding({ source: "deterministic", rule_id: "check.unit" })],
       verification: verification({
-        deterministic_failure: "check_ut is failed",
+        deterministic_failure: "the unit check (`pnpm test`) failed on the round's tree; the round changed src/a.ts.",
         deterministic_failure_kind: "check",
       }),
     });
 
     expect(step).toMatchObject({ next: "stop", end: { outcome: "changes_requested" } });
     expect(step.next === "stop" && step.end.detail).toBe(
-      "the pinned checks still fail after remediation round 1: check_ut is failed",
+      "the pinned checks still fail after remediation round 1: the unit check (`pnpm test`) failed on the round's tree; the round changed src/a.ts.",
     );
   });
 
@@ -120,14 +122,14 @@ describe("where a round's closure verification sends the run", () => {
     const checkNobodyRouted = route({
       toVerify: [finding({ source: "semantic", rule_id: "test.missing_for_criterion" })],
       verification: verification({
-        deterministic_failure: "check_ut is failed",
+        deterministic_failure: "the unit check (`pnpm test`) failed on the round's tree; the round changed src/a.ts.",
         deterministic_failure_kind: "check",
       }),
     });
 
     expect(scope.next === "stop" && scope.end.detail).toBe("the fix regressed: scope: src/other.ts");
     expect(checkNobodyRouted.next === "stop" && checkNobodyRouted.end.detail).toBe(
-      "the fix regressed: check_ut is failed",
+      "the fix regressed: the unit check (`pnpm test`) failed on the round's tree; the round changed src/a.ts.",
     );
   });
 
@@ -377,5 +379,111 @@ describe("the bundle a closure verification leaves", () => {
     expect(written[0]!.inputs["findings_closed"]).toBe(closedOne.key);
     expect(written[0]!.inputs["head_commit"]).toBe("ab12cd3");
     expect(step.next).toBe("advance");
+  });
+});
+
+describe("the paths a round itself changed", () => {
+  const scratchRepo = scratchDirectories("perbo-round-paths-");
+
+  /** The ticket's bundles as `roundChangedPaths` reads them: the review's, then each verification's. */
+  const bundlesOf = (...bundles: Array<{ subject_id: string; at: string; inputs: Record<string, string> }>) =>
+    ({
+      forTicket: () =>
+        bundles.map((bundle) => ({
+          kind: "review",
+          subject_id: bundle.subject_id,
+          created_at: bundle.at,
+          inputs: { findings_given: "", findings_open: "", ...bundle.inputs },
+        })),
+    }) as never;
+
+  /** A branch off main: the judged commit adds two files, and the round changes one of them. */
+  const branch = () => {
+    const repo = runnerRepository(scratchRepo);
+    const base = repo.head;
+    repo.git("checkout", "-q", "-b", "ticket");
+    const judged = repo.commit({ "src/a.ts": "a\n", "src/b.ts": "b\n" }, "judged");
+    return { repo, base, judged };
+  };
+
+  it("reads the round's sealed commit against the last commit a verification judged, passing over a refusal", async () => {
+    const { repo, base, judged } = branch();
+    const verified = repo.commit({ "src/a.ts": "a2\n" }, "round 1");
+    const refused = repo.commit({ "src/other.ts": "x\n" }, "refused round");
+    repo.git("reset", "-q", "--hard", verified);
+    const head = repo.commit({ "src/b.ts": "b2\n" }, "round 3");
+    const bundles = bundlesOf(
+      { subject_id: "rev_0000000000000001", at: "2026-10-05T00:00:00.000Z", inputs: { base_commit: base, head_commit: judged } },
+      { subject_id: "cv_att_1", at: "2026-10-05T00:01:00.000Z", inputs: { base_commit: base, head_commit: verified } },
+      { subject_id: "cv_att_2", at: "2026-10-05T00:02:00.000Z", inputs: { base_commit: base, refused_head_commit: refused } },
+    );
+
+    const paths = await roundChangedPaths({
+      bundles,
+      ticket_id: "tkt_1",
+      worktree: repo.dir,
+      base_commit: base,
+      sealed: { head_commit: head, changed_paths: ["src/a.ts", "src/b.ts"] },
+    });
+
+    expect(paths).toEqual(["src/b.ts"]);
+  });
+
+  it("is empty where the round sealed the commit last judged, and null where the record names none", async () => {
+    const { repo, base, judged } = branch();
+    const review = { subject_id: "rev_0000000000000001", at: "2026-10-05T00:00:00.000Z", inputs: { base_commit: base, head_commit: judged } };
+    const read = (bundles: never) =>
+      roundChangedPaths({
+        bundles,
+        ticket_id: "tkt_1",
+        worktree: repo.dir,
+        base_commit: base,
+        sealed: { head_commit: judged, changed_paths: ["src/a.ts", "src/b.ts"] },
+      });
+
+    expect(await read(bundlesOf(review))).toEqual([]);
+    expect(await read(bundlesOf())).toBeNull();
+  });
+
+  it("leaves out a path only the base brought, where the round merged the base up", async () => {
+    const { repo, base, judged } = branch();
+    repo.git("checkout", "-q", "main");
+    const movedBase = repo.commit({ "lib/base-only.ts": "base\n" }, "base moves");
+    repo.git("checkout", "-q", "ticket");
+    repo.git("merge", "-q", "--no-edit", "main");
+    const head = repo.commit({ "src/b.ts": "b2\n" }, "round 1");
+    const bundles = bundlesOf({
+      subject_id: "rev_0000000000000001",
+      at: "2026-10-05T00:00:00.000Z",
+      inputs: { base_commit: base, head_commit: judged },
+    });
+    const read = (base_commit: string) =>
+      roundChangedPaths({
+        bundles,
+        ticket_id: "tkt_1",
+        worktree: repo.dir,
+        base_commit,
+        sealed: { head_commit: head, changed_paths: ["src/a.ts", "src/b.ts"] },
+      });
+
+    expect(await read(movedBase)).toEqual(["src/b.ts"]);
+    // Against the base the review judged on, nothing moved, and git's own list stands.
+    expect(await read(base)).toEqual(["lib/base-only.ts", "src/b.ts"]);
+
+    // A round that puts one of the judged change's files back as the base has
+    // it leaves that file out of its own change set, and the round still
+    // changed it: the judged change held it.
+    repo.git("rm", "-q", "src/a.ts");
+    repo.git("commit", "-q", "-m", "round 2");
+    const restored = repo.git("rev-parse", "HEAD").trim();
+    expect(
+      await roundChangedPaths({
+        bundles,
+        ticket_id: "tkt_1",
+        worktree: repo.dir,
+        base_commit: movedBase,
+        sealed: { head_commit: restored, changed_paths: ["src/b.ts"] },
+      }),
+    ).toEqual(["src/a.ts", "src/b.ts"]);
   });
 });

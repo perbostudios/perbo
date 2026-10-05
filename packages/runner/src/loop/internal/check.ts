@@ -37,9 +37,9 @@ export interface Checked {
  * round and reach that node's own review (`reviewGraph`), never `gating`,
  * which is what the overall review, the closure verification and the
  * reviewer's own check schema are given — exactly the list a flat plan
- * produces, since a flat plan tags none. A node's own check result gates
- * nothing on its own; the review it feeds can, once the gate reads the
- * combination.
+ * produces, since a flat plan tags none. A node's check result carries the
+ * whole-change status of its check, so the review it feeds can close the gate
+ * on a check only where the pinned command itself did not pass.
  *
  * SCP-263: the attempt is over, so nothing may still be running from its
  * worktree. The executor and every check run in process groups the runner

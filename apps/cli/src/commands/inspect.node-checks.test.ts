@@ -84,6 +84,19 @@ function storeWithNodeChecks(): { repo: string; store: string } {
         note: "no changed file inside the node's paths is a test file",
       },
     }),
+    // The pinned command passed and the node's own narrowed run did not:
+    // the mark is the pinned command's, the run's outcome is beside it.
+    result({
+      summary: "the node's own run failed (Tests  1 failed (3)); pnpm exec turbo run test passed",
+      command: "pnpm exec vitest run test/api.test.ts",
+      node: {
+        node_id: "node_api",
+        paths: ["packages/api/test/api.test.ts"],
+        scope: "files",
+        note: null,
+        run_status: "failed",
+      },
+    }),
   ];
 
   const bundles = new BundleStore({ root: join(store, "bundles"), retainContext: true });
@@ -454,6 +467,44 @@ describe("a graphed attempt's checks section", () => {
     const failed = checks.find((check) => check.status === "failed")!;
     expect(failed.node?.node_id).toBe("node_queue");
     expect(failed.node?.paths).toEqual(["packages/queue/test/send.test.ts"]);
+  });
+
+  it("prints a node's own run beside the pinned command's mark where the record has it", () => {
+    const { store } = storeWithNodeChecks();
+    const report = buildInspectReport({ storeDirectory: store, key: "AYO-1", attempt: null });
+    const rendered = renderInspect(report, { color: false, detail: false, version: "test" });
+    const lines = rendered.split("\n");
+
+    const api = lines.findIndex((line) => line.trim() === "node_api");
+    expect(api).toBeGreaterThan(-1);
+    const underApi = lines.slice(api);
+    // The mark is the pinned command's pass; the narrowed line says what the
+    // node's own run came to.
+    expect(underApi.find((line) => line.includes("test/api.test.ts") && line.includes("pnpm exec"))).toMatch(/^\s+✓/);
+    expect(underApi.join("\n")).toContain("narrowed to packages/api/test/api.test.ts · own run failed");
+    // A narrowed result whose record has no outcome of its own run says none.
+    const queue = lines.findIndex((line) => line.trim() === "node_queue");
+    const reports = lines.findIndex((line) => line.trim() === "node_reports");
+    expect(lines.slice(queue, reports).join("\n")).not.toContain("own run");
+    expect(lines.slice(reports, api).join("\n")).not.toContain("own run");
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(80);
+  });
+
+  it("carries a node's own run outcome in the JSON report", async () => {
+    const { repo, store } = storeWithNodeChecks();
+    const streams = recordStreams();
+    expect(
+      await runCommandLine(inspectCommandLine, {
+        argv: ["AYO-1", "--repo", repo, "--store", store, "--json"],
+        streams,
+        cwd: repo,
+      }),
+    ).toBe(0);
+    const checks = streams.json<{ attempts: Array<{ checks: CheckResult[] | null }> }>().attempts[0]!.checks!;
+    const api = checks.find((check) => check.node?.node_id === "node_api")!;
+    expect(api.status).toBe("passed");
+    expect(api.node).toMatchObject({ scope: "files", run_status: "failed" });
+    expect(checks.find((check) => check.node?.node_id === "node_queue")!.node).not.toHaveProperty("run_status");
   });
 });
 

@@ -25,6 +25,8 @@ import type {
 export interface GraphDeps {
   tickets: Pick<TicketReads, "ticket" | "contract" | "bundles">;
   execute: Execute;
+  /** The person's `graphNodeRuns`, read as the graph is. */
+  nodeRuns: boolean;
 }
 
 /**
@@ -190,5 +192,6 @@ async function liveView(
     decisions: readDecisions(verdictsPath(repo), ticket.ticket_id),
     planVersion: ticket.plan_version,
     objectsDirectory: objectsPath(repo),
+    display: { nodeRuns: deps.nodeRuns },
   });
 }

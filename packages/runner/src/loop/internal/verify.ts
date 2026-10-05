@@ -1,6 +1,6 @@
 import { closureVerifySchema, type ClosureVerification } from "@perbo/review";
 import { ZERO_USAGE, createModel, type Model } from "@perbo/model";
-import { formatUsd } from "@perbo/contracts";
+import { formatUsd, loopOnRecord } from "@perbo/contracts";
 import type {
   CheckResult,
   Finding,
@@ -9,12 +9,13 @@ import type {
 } from "@perbo/contracts";
 import type { BundleStore } from "../../bundle.js";
 import type { Decline } from "../../declines.js";
-import type { SealResult } from "../../seal.js";
+import { changedPathsBetween, type SealResult } from "../../seal.js";
 import { allowedPathsSentence } from "../../shell/index.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import type { Ledger } from "./ledger.js";
 import type { RoundRecord, RoundState, Step, Stop } from "./state.js";
+import { restoreJudgedCommit } from "./continuation.js";
 
 /**
  * Verifying the closures a remediation round claims (D-061).
@@ -37,8 +38,10 @@ export function verifierModel(config: TicketRunConfig, keys: string[]): Model {
  * SCP-194: a scope round that widened the change set is refused before
  * anything is paid to verify it.
  *
- * Nothing is lost — the change set stays on the branch and the finding stays
- * open — and the stop says which paths arrived and what the contract admits.
+ * Nothing is lost — the refused commit and its diff stay on the record, the
+ * branch goes back to the commit last judged (`restoreJudgedCommit`), and the
+ * finding stays open — and the stop says which paths arrived and what the
+ * contract admits.
  * Null where the round narrowed, or was never a scope round at all.
  */
 export function refuseWidening(facts: {
@@ -63,6 +66,59 @@ export function refuseWidening(facts: {
         `the change set it was asked to narrow. ${allowedPathsSentence(facts.pathsAllowed)}`,
     },
   };
+}
+
+/**
+ * The paths a remediation round itself changed: its sealed commit against the
+ * commit last judged — the review's, or the last closure verification's after
+ * it, a refused round passed over, as `judgedCommit` reads the same bundles —
+ * as git lists them. Both commits come from the record and git, never from the
+ * executor's account, and git runs by argv (ADR-0023).
+ *
+ * Where the base moved under the round, a path only the base brought differs
+ * between the two commits as well, so the list keeps only the paths the round's
+ * change set holds or the judged one held. Null where the record names no
+ * judged commit, the round sealed none, or git cannot read the range: the
+ * paths only inform the sentence a failed check's verification says, and a
+ * round is never judged on them.
+ */
+export async function roundChangedPaths(args: {
+  bundles: BundleStore;
+  ticket_id: string;
+  worktree: string;
+  /** The base the round's change set was sealed against. */
+  base_commit: string;
+  sealed: Pick<SealResult, "head_commit" | "changed_paths">;
+}): Promise<string[] | null> {
+  const forTicket = args.bundles.forTicket(args.ticket_id);
+  const review = forTicket.findLast(
+    (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
+  );
+  if (review === undefined || args.sealed.head_commit === null) return null;
+  const onRecord = loopOnRecord({ review_id: review.subject_id, bundles: forTicket, history: [], declines: [] });
+  if (onRecord === null) return null;
+  const judgedBy =
+    onRecord.verifications.findLast((bundle) => bundle.inputs["refused_head_commit"] === undefined) ?? review;
+  const judged = judgedBy.inputs["head_commit"];
+  const judgedBase = judgedBy.inputs["base_commit"];
+  if (typeof judged !== "string" || judged.length === 0) return null;
+  try {
+    const between = await changedPathsBetween({
+      worktree: args.worktree,
+      base_commit: judged,
+      head_commit: args.sealed.head_commit,
+    });
+    if (typeof judgedBase !== "string" || judgedBase === args.base_commit) return between;
+    const held = new Set([
+      ...args.sealed.changed_paths,
+      ...(await changedPathsBetween({ worktree: args.worktree, base_commit: judgedBase, head_commit: judged })),
+    ]);
+    return between.filter((path) => held.has(path));
+  } catch {
+    // A range git cannot read leaves the sentence without the round's paths;
+    // the verification itself is gated on the checks and the scope alone.
+    return null;
+  }
 }
 
 /** What a round's closure verification is routed against. */
@@ -268,13 +324,13 @@ export async function verifyRound(args: {
   // consults the pinned checks and the scope computation before asking
   // anything, and with zero findings left it gates on those alone.
   // SCP-194: a scope round that widened is refused before anything is
-  // paid to verify it. Nothing is lost — the change set stays on the
-  // branch and the finding stays open — and the stop says which paths
+  // paid to verify it. Nothing is lost — the refused commit and its diff stay
+  // on the record and the finding stays open — and the stop says which paths
   // arrived and what the contract admits. The refusal is recorded as the
   // round's verification, a scope failure that moves the round to
   // `independent_review` as a closure verification does (D-061), so a person
   // reads what it was judged on. It judged no tree a later round can build
-  // on, so it anchors no continuation.
+  // on, so the branch goes back to the commit last judged.
   const declinedKeys = new Set(args.declines.map((decline) => decline.finding_key));
   const toVerify = args.toClose.filter((finding) => !declinedKeys.has(finding.key));
   const widenedStep = refuseWidening({
@@ -285,6 +341,20 @@ export async function verifyRound(args: {
   });
   if (widenedStep !== null) {
     recordVerification(args, toVerify, widenedVerification(toVerify, widenedStep.end.detail), "refusal");
+    // The refused commit stays on the record; the branch goes back to the
+    // commit last judged, where a person's answers to that judgement act.
+    const back = await restoreJudgedCommit({
+      worktree: state.workspace.path,
+      branch: state.workspace.branch,
+      bundles: args.bundles,
+      ticket_id: args.contract.ticket_id,
+    });
+    if (back !== null) {
+      progress(
+        `the branch is back at ${back}, the commit last judged; the refused round's commit ` +
+          `${sealed.head_commit ?? "(none)"} and its diff stay on the record`,
+      );
+    }
     return widenedStep;
   }
   progress(`verifying closures, round ${state.round}`);
@@ -294,6 +364,13 @@ export async function verifyRound(args: {
     checks: args.gating,
     scope: args.contract.scope,
     changeset: sealed.changeset!,
+    roundChangedPaths: await roundChangedPaths({
+      bundles: args.bundles,
+      ticket_id: args.contract.ticket_id,
+      worktree: state.workspace.path,
+      base_commit: state.baseCommit,
+      sealed,
+    }),
     model: verifierModel(
       config,
       toVerify.map((finding) => finding.key),
@@ -360,8 +437,9 @@ function widenedVerification(toVerify: readonly Finding[], refusal: string): Clo
  *
  * The verifier's bundle names the commit it judged as `head_commit`, which is
  * what a later run continues from. A refusal judged no tree, so it names the
- * commit it refused as `refused_head_commit` instead and anchors nothing: a
- * re-run of a widened branch reviews it afresh.
+ * commit it refused as `refused_head_commit` instead and anchors nothing: the
+ * runner resets the branch to the commit last judged (`restoreJudgedCommit`),
+ * and a later run continues from there.
  */
 function recordVerification(
   args: Pick<
@@ -397,9 +475,6 @@ function recordVerification(
         .map((row) => row.finding_key)
         .join(","),
       findings_open: verification.open_keys.join(","),
-      // D-065: what the round's executor declined, which no answer of the
-      // person's closes (`loopOnRecord`).
-      findings_declined: args.declines.map((decline) => decline.finding_key).join(","),
     },
     context_manifest: [],
     versions: refused

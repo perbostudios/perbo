@@ -16,16 +16,16 @@ export {
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
+  declinesOnRecord,
   FINISHED_TRYING,
   judgedCommit,
-  leftToPrinciple,
   loopOnRecord,
   loopOnReview,
   NOTHING_TRIED,
   owedAnswers,
   routedToPerson,
 } from "./decision.js";
-export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle } from "./decision.js";
+export type { DecisionChoice, HistoryRow, LoopOnReview, RecordedBundle, RecordedDecline } from "./decision.js";
 export { EgressQuestionKeySchema, egressSettledLine, readEgressQuestion, readEgressSettled } from "./egress.js";
 export type { EgressQuestion, EgressSettlement } from "./egress.js";
 export { EFFORT_LABELS, EFFORT_LEVELS, EffortLevelSchema } from "./effort.js";

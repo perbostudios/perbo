@@ -761,3 +761,34 @@ it("plans a stopped ticket again while another ticket's run is under way, as the
   expect(listed.lastPane).toBe("contract");
   expect(listed.confirmed).toBe(contractStateOf(listed, row.ticket.updated_at));
 });
+
+/**
+ * The sample's node_2 records a narrowed run that failed where the pinned
+ * command passed (D-107). Its graph names that run only while the person's
+ * `graphNodeRuns` is on, as the host's does, and its state is the same either
+ * way.
+ */
+it("names a node's own failed run on the graph only while the switch is on", async () => {
+  const before = snapshot.settings;
+  try {
+    const read = async () => {
+      for (const row of snapshot.tasks) {
+        const graph = await sampleBridge.request({ kind: "graphRead", repoId: row.repoId, key: row.ticket.key }).catch(() => null);
+        const node = graph?.live.attempt ? graph.live.nodes.find((each) => each.id === "node_2") : undefined;
+        if (node) return { key: row.ticket.key, node };
+      }
+      throw new Error("No sample graph has run node_2.");
+    };
+    expect(before.graphNodeRuns).toBe(false);
+    const off = await read();
+    expect(off.node).not.toHaveProperty("ownRuns");
+    await sampleBridge.request({ kind: "saveSettings", settings: { ...before, graphNodeRuns: true } });
+    const on = await read();
+    expect(on.key).toBe(off.key);
+    expect(on.node.ownRuns).toEqual([{ name: "Tests", run: "failed" }]);
+    expect(on.node.state).toBe(off.node.state);
+    expect(on.node.checks).toEqual(off.node.checks);
+  } finally {
+    await sampleBridge.request({ kind: "saveSettings", settings: before });
+  }
+});

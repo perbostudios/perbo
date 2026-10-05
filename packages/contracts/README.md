@@ -54,8 +54,9 @@ measurement, not an edit.
 ([D-132](../../docs/11-open-decisions.md)): the three
 choices and the words each carries where the person typed none, `loopOnRecord`, which reads what the
 loop has done on a review — whether a run since it ended stalled or exhausted, what each
-finding's last closure verification left open, and what the executor declined — `routedToPerson`, which says which findings take
-one, `leftToPrinciple`, which says which a principle answers, `decidable`, which says only a review that judged the whole change and stopped for a person, or
+finding's last closure verification left open, which rounds the runner refused, and what the executor
+declined since (`declinesOnRecord` reads those off the attempts' records) — `routedToPerson`, which says which findings take
+one, a declined one included, `decidable`, which says only a review that judged the whole change and stopped for a person, or
 one the loop has finished trying, takes any, `answersReview`, which says which review an answer
 answers, `owedAnswers`, which says which a run would start without,
 `judgedCommit`, which says which commit the branch has to be at for a run to act on that record, and `decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
@@ -99,8 +100,8 @@ screen says it; it imports only the ticket's types, so the renderer takes it fro
 `ticket-transitions.ts` is the single home for the ticket lifecycle's rows, `TICKET_TRANSITIONS`:
 `transition` in `ticket.ts` refuses a move with no row, `perbo run` walks and reopens a ticket along
 them, and the desktop's sample host moves its tickets by the same rows. It imports only the ticket's
-types, `gateClosedNote`, the note an escalated run's row is guarded on, and `ANSWERS_OWED_NOTE`,
-the note the same row takes back a ticket the loop refused on, so the renderer takes it
+types and `ANSWERS_OWED_NOTE`, the note the row from `provisioning` back to `changes_requested` is
+guarded on, which takes back a ticket the loop refused on, so the renderer takes it
 from `@perbo/contracts/browser`.
 
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived

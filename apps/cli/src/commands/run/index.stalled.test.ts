@@ -446,12 +446,12 @@ describe("perbo run where the loop refuses what the command let through", () => 
 
 /**
  * D-132 beside D-065 at the command line: a refinement stalls with one finding
- * the executor declined and one it could not close, the person ships the other
- * as it is, and the next run delivers without a round. It ends `escalated`
- * over the decline and lands where every escalated run lands, publishing or
+ * the executor declined and one it could not close. Both are the person's: a
+ * run is refused while the declined one is unanswered, and once both are
+ * shipped as they are the next run delivers without a round, publishing or
  * not.
  */
-describe("perbo run on answers that leave a finding the executor declined", () => {
+describe("perbo run on answers to a finding the executor declined", () => {
   const [DECLINED, ANSWERED] = ["src/d.ts", "src/e.ts"].map((file) => ({
     key: findingKey({ rule_id: "verification.execution_missing", criterion_id: "ac_1", file, symbol: null }),
     file,
@@ -460,7 +460,7 @@ describe("perbo run on answers that leave a finding the executor declined", () =
   it.each([
     ["not publishing", false],
     ["publishing", true],
-  ] as const)("lands at changes_requested on the escalated run's row, %s", async (_label, publish) => {
+  ] as const)("is refused until the declined finding is answered, then delivers without a round, %s", async (_label, publish) => {
     const at = fixture(DECLINED.key);
     const store = storeDir(at.repo, null);
     const verified: string[][] = [];
@@ -472,22 +472,21 @@ describe("perbo run on answers that leave a finding the executor declined", () =
     expect(readTicket(store, at.key).history.at(-1)?.note).toBe(gateClosedNote("remediation_stalled"));
 
     expect(await decide(at, ANSWERED.key, "ship-as-is")).toBe(0);
+    const refused = await run(at, { hooks: nothingRuns });
+    expect(refused.code, refused.err).toBe(EXIT_CODES.did_not_complete);
+    expect(refused.err).toContain(`left 1 finding(s) for you to answer (${DECLINED.key.slice(0, 12)})`);
+
+    expect(await decide(at, DECLINED.key, "ship-as-is")).toBe(0);
     const delivered = await run(
       at,
       { hooks: { ...nothingRuns, push: (async () => ({ pushed: true, detail: "recorded" })) as never } },
       publish ? ["--publish"] : [],
     );
-    expect(delivered.code, delivered.err).toBe(2);
+    expect(delivered.code, delivered.err).toBe(0);
     const result = JSON.parse(delivered.out) as { outcome: string; rounds: unknown[] };
-    expect([result.outcome, result.rounds]).toEqual(["escalated", []]);
-    expect(delivered.err).toContain(`${at.key} is now changes_requested`);
+    expect([result.outcome, result.rounds]).toEqual(["approved", []]);
     const ticket = readTicket(store, at.key);
-    expect(ticket.state).toBe("changes_requested");
-    expect(ticket.history.at(-1)).toMatchObject({
-      from: "provisioning",
-      to: "changes_requested",
-      note: gateClosedNote("escalated"),
-    });
+    expect(ticket.state).toBe("pr_open");
     expect(ticket.delivery).toMatchObject(
       publish
         ? { state: "open", pull_request_url: "https://github.com/o/r/pull/15", opened_by: "loop" }

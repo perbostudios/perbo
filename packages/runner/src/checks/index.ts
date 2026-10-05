@@ -1,4 +1,4 @@
-import { basename, isAbsolute, relative, sep } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import { z } from "zod";
 import {
   CheckResultSchema,
@@ -8,6 +8,7 @@ import {
   type CheckStatus,
   type PlanNode,
   type SecretIndex,
+  redactCredentials,
 } from "@perbo/contracts";
 import { run } from "@perbo/workspace";
 import {
@@ -20,6 +21,7 @@ import {
   type ResolvedFailure,
   type TestOutput,
 } from "./internal/rerun.js";
+import { turboRunAt } from "./internal/runner.js";
 import { hostTemporaryEnvironment } from "../scratch.js";
 
 /**
@@ -86,34 +88,6 @@ export const TURBO_FORCE_ENV = "TURBO_FORCE";
 
 /** The flag it means. */
 export const TURBO_FORCE_FLAG = "--force";
-
-/**
- * The words a package manager puts in front of a binary it runs out of the
- * workspace. A token that is not one of these before `turbo` means the program
- * is something else, and what that something does with its arguments is not
- * for this to guess.
- */
-const TURBO_LAUNCHERS: ReadonlySet<string> = new Set([
-  "pnpm",
-  "pnpx",
-  "npm",
-  "npx",
-  "yarn",
-  "bun",
-  "bunx",
-  "exec",
-  "dlx",
-  "x",
-  "-s",
-  "--silent",
-]);
-
-/** Where `turbo run` starts in this argv, or `null` if the command is not one. */
-function turboRunAt(command: readonly string[]): number | null {
-  const at = command.findIndex((token) => basename(token) === "turbo");
-  if (at === -1 || command[at + 1] !== "run") return null;
-  return command.slice(0, at).every((token) => TURBO_LAUNCHERS.has(token)) ? at : null;
-}
 
 /** Whether this argv runs turbo and does not already say `--force`. */
 export function runsTurboWithoutForce(command: readonly string[]): boolean {
@@ -234,8 +208,11 @@ interface Observation {
   duration_ms: number;
   parse: TestOutput;
   resolved: ResolvedFailure[];
-  /** The node the run was for, or `null` for the run over the whole change. */
-  node: CheckNode | null;
+  /**
+   * The node the run was narrowed to, or `null` for the run over the whole
+   * change. The record adds the run's own outcome to it.
+   */
+  node: Omit<Extract<CheckNode, { scope: "files" }>, "run_status"> | null;
 }
 
 /** What running a plan's steps in order measured. */
@@ -409,8 +386,8 @@ export async function runPinnedChecks(args: {
     });
   }
 
-  const record = (observed: Observation, rerun: RerunOutcome | null): CheckResult =>
-    toResult({ observed, rerun, quarantine, secrets: args.secrets, tmpdir });
+  const record = (observed: Observation, rerun: RerunOutcome | null, judge: CheckResult | null): CheckResult =>
+    toResult({ observed, rerun, judge, quarantine, secrets: args.secrets, tmpdir });
 
   const results: CheckResult[] = [];
   for (const observed of observations) {
@@ -418,35 +395,49 @@ export async function runPinnedChecks(args: {
       observed.check.kind === "unit" && observed.status === "failed"
         ? await rerunOnce({ observed, worktree: args.worktree, env, progress })
         : null;
-    results.push(record(observed, rerun));
+    results.push(record(observed, rerun, null));
   }
+  /** Each check's whole-change result, in the declared order: the pinned command's judgement. */
+  const judged = [...results];
 
   /**
    * The same checks again, once per node of the execution graph (D-107).
    *
    * After the whole-change run and never beside it: the results above are what
-   * judges the change, and they are complete before anything narrowed runs. A
-   * node's own run is evidence for that node's review and gates nothing, so a
-   * node whose check fails neither stops the nodes after it nor changes what
-   * the whole change measured.
+   * judges the change, and they are complete before anything narrowed runs.
+   * Only the pinned command can fail a check. A node's result carries the
+   * whole-change status of its check, so no narrowed run turns a check red or
+   * supplies the lines a failure is reported with; the node's own narrowed run
+   * is evidence for that node's review, and is run only where the pinned
+   * command passed and the check narrows to the node's changed test files.
+   * Everywhere else the node carries the whole-change result itself, and its
+   * note says why: running the whole command again per node would multiply a
+   * suite by the graph's size for an answer the whole-change run has given.
    */
   for (const node of nodes) {
-    for (const check of checks) {
-      const plan = NARROWABLE_KINDS.has(check.kind)
-        ? planNodeRun({
-            command: check.command,
-            worktree: args.worktree,
-            paths: node.paths,
-            changed_files,
-          })
-        : {
-            steps: [{ argv: [...check.command], cwd: args.worktree }],
-            scope: "task" as const,
-            note: `a ${check.kind} check is not a test run, so a file list does not narrow it`,
-            files: [] as string[],
-          };
+    for (const [index, check] of checks.entries()) {
+      const judge = judged[index]!;
+      const plan =
+        judge.status !== "passed"
+          ? null
+          : NARROWABLE_KINDS.has(check.kind)
+            ? planNodeRun({
+                command: check.command,
+                worktree: args.worktree,
+                paths: node.paths,
+                changed_files,
+              })
+            : { scope: "task" as const, note: `a ${check.kind} check is not a test run, so a file list does not narrow it` };
+      if (plan === null || plan.scope === "task") {
+        const note =
+          plan?.note ??
+          `${judge.command ?? check.command.join(" ")} did not pass over the whole change, and only it judges the check`;
+        progress(`node ${node.id} check ${check.name}: the whole-change result (${note})`);
+        results.push({ ...judge, node: { node_id: node.id, scope: "task", paths: [], note } });
+        continue;
+      }
       const command = joinSteps(plan.steps);
-      progress(`node ${node.id} check ${check.name} (${plan.scope}): ${command}`);
+      progress(`node ${node.id} check ${check.name} (files): ${command}`);
       const outcome = await runSteps({
         steps: plan.steps,
         worktree: args.worktree,
@@ -458,25 +449,14 @@ export async function runPinnedChecks(args: {
         command,
         ...outcome,
         resolved: resolveFailures(outcome.parse.failing, args.worktree),
-        node:
-          plan.scope === "files"
-            ? { node_id: node.id, scope: "files", paths: plan.files, note: null }
-            : {
-                node_id: node.id,
-                scope: "task",
-                paths: [],
-                note: plan.note ?? "the check ran over the whole change for this node",
-              },
+        node: { node_id: node.id, scope: "files", paths: plan.files, note: null },
       };
       // A failed narrowed run goes again, the same files in the same package:
-      // a node result that did not reproduce is as misleading as a whole-change
-      // one that did not, and there is nothing narrower left to run. A `task`
-      // run does not: it repeats the whole-change command, which the run above
-      // has already measured and, where it failed, already re-run, and one
-      // more per node would multiply a whole suite by the graph's size for
-      // evidence that gates nothing.
+      // a node's evidence that did not reproduce is as misleading as a
+      // whole-change failure that did not, and there is nothing narrower left
+      // to run.
       const rerun =
-        check.kind === "unit" && outcome.status === "failed" && plan.scope === "files"
+        check.kind === "unit" && outcome.status === "failed"
           ? await rerunSteps({
               steps: plan.steps,
               scope: "files",
@@ -488,10 +468,8 @@ export async function runPinnedChecks(args: {
               label: `re-run ${check.name} (node ${node.id})`,
             })
           : null;
-      const result = record(observed, rerun);
-      if (result.status !== "passed") {
-        progress(`node ${node.id}: ${check.name} ${result.status} — ${result.summary}`);
-      }
+      const result = record(observed, rerun, judge);
+      if (outcome.status !== "passed") progress(`node ${node.id}: ${check.name} — ${result.summary}`);
       results.push(result);
     }
   }
@@ -501,15 +479,16 @@ export async function runPinnedChecks(args: {
 /**
  * The check kinds a node's run can be narrowed to a file list (D-107).
  *
- * The narrow form is `pnpm exec vitest run <files>`, so it is the check's own
- * question only where the check is a vitest run of unit tests — the one kind
- * the failed-check re-run already narrows this way. Every other kind runs once
- * over the whole change for the node instead: `scope` and `policy` are
- * computed over the change as a whole; `typecheck` and `lint` answer a
- * different question over a subset of a project, where an error in a file the
- * subset leaves out simply does not appear; `regression-baseline` runs the
- * change's own tests against the base; `integration`, `secret-scan`,
- * `dependency`, `licence`, `migration` and `other` take no file list at all.
+ * The narrow form runs the check's own test runner on the node's changed test
+ * files, so it is the check's own question only where the check is a run of
+ * unit tests — the one kind the failed-check re-run already narrows this way.
+ * Every other kind is carried over the whole change for the node instead:
+ * `scope` and `policy` are computed over the change as a whole; `typecheck`
+ * and `lint` answer a different question over a subset of a project, where an
+ * error in a file the subset leaves out simply does not appear;
+ * `regression-baseline` runs the change's own tests against the base;
+ * `integration`, `secret-scan`, `dependency`, `licence`, `migration` and
+ * `other` take no file list at all.
  */
 const NARROWABLE_KINDS: ReadonlySet<CheckKind> = new Set<CheckKind>(["unit"]);
 
@@ -517,10 +496,19 @@ const NARROWABLE_KINDS: ReadonlySet<CheckKind> = new Set<CheckKind>(["unit"]);
 const joinSteps = (steps: readonly RerunStep[]): string =>
   steps.map((step) => step.argv.join(" ")).join(" ; ");
 
-/** The record of one run, after its re-run has decided what it says. */
+/**
+ * The record of one run, after its re-run has decided what it says.
+ *
+ * `judge` is the whole-change result of the same check, for a node's narrowed
+ * run: the record keeps the node's own command, output and failing tests as
+ * that node's evidence, and takes its status from the judge, so a narrowed run
+ * that failed where the pinned command passed says so in its summary and in
+ * its node's `run_status`, and closes nothing.
+ */
 function toResult(args: {
   observed: Observation;
   rerun: RerunOutcome | null;
+  judge: CheckResult | null;
   quarantine: readonly QuarantinedTest[];
   secrets: SecretIndex;
   tmpdir: string | null;
@@ -540,6 +528,17 @@ function toResult(args: {
       : null;
   const quarantined = quarantineEntries !== null;
   const redact = (text: string) => args.secrets.redact(text).text;
+  // A command line is the check's declared argv, which can carry a literal
+  // credential: the record keeps it redacted by shape as well as by the
+  // materialized secrets, so the finding that names the command, the
+  // reviewer's context and the executor's brief never carry the value (D-063).
+  const redactCommand = (command: string) => redactCredentials(redact(command)).text;
+  const status = flaky || quarantined ? "passed" : observed.status;
+  const summary = flaky
+    ? flakySummary(failing.length)
+    : quarantined
+      ? quarantineSummary(quarantineEntries)
+      : observed.summary;
 
   return CheckResultSchema.parse({
     check_id: observed.check.check_id,
@@ -550,21 +549,19 @@ function toResult(args: {
     // Only an unambiguous pass reopens the gate — a re-run that timed out
     // or could not start says nothing, and leaves the failure standing.
     // A quarantined failure reopens it too, by name rather than by rerun.
-    status: flaky || quarantined ? "passed" : observed.status,
+    // A node's narrowed run is judged by the pinned command's result.
+    status: args.judge === null ? status : args.judge.status,
     summary: redact(
-      flaky
-        ? flakySummary(failing.length)
-        : quarantined
-          ? quarantineSummary(quarantineEntries)
-          : observed.summary,
+      args.judge === null || status === "passed"
+        ? summary
+        : nodeRunSummary(status, summary, args.judge),
     ),
-    command: observed.command,
-    // Capped last, from the end: the parsed failure lines and the re-run's
-    // own line are at the tail, so the cut takes raw log and not evidence.
-    detail:
-      observed.detail === null
-        ? null
-        : redact(withRerunNote(observed.detail, rerun)).slice(-CHECK_DETAIL_MAX_CHARS),
+    command: redactCommand(observed.command),
+    // The command's own output, and nothing the runner adds to it: the tail
+    // is what a failed check's finding quotes, and the re-run has a record of
+    // its own below. Capped last, from the end: the parsed failure lines are
+    // at the tail, so the cut takes raw log and not evidence.
+    detail: observed.detail === null ? null : redact(observed.detail).slice(-CHECK_DETAIL_MAX_CHARS),
     duration_ms: observed.duration_ms,
     source: "file",
     // Absent means configured, which is what a check read out of a file is.
@@ -577,7 +574,7 @@ function toResult(args: {
       rerun === null
         ? null
         : {
-            command: rerun.command,
+            command: redactCommand(rerun.command),
             scope: rerun.scope,
             note: rerun.note,
             status: rerun.status,
@@ -585,8 +582,10 @@ function toResult(args: {
             failing_tests: rerun.failing_tests.map(redact),
             duration_ms: rerun.duration_ms,
           },
-    // Absent on a whole-change result, which is what judges the change.
-    ...(observed.node === null ? {} : { node: observed.node }),
+    // Absent on a whole-change result, which is what judges the change. A
+    // node's carries what its own run came to, the status above being the
+    // pinned command's.
+    ...(observed.node === null ? {} : { node: { ...observed.node, run_status: status } }),
   });
 }
 
@@ -625,14 +624,10 @@ const quarantineSummary = (entries: readonly QuarantinedTest[]): string =>
     .map((entry) => `${entry.test} (${entry.ticket}): ${entry.reason}`)
     .join("; ")}`;
 
-/** The record's own note that a second run happened, kept with the first run's log. */
-function withRerunNote(detail: string, rerun: RerunOutcome | null): string {
-  if (rerun === null) return detail;
-  const verdict = rerun.status === "passed" ? "passed" : `${rerun.status}`;
-  return `${detail}\n\nre-run (${rerun.scope}): ${rerun.command} — ${verdict}${
-    rerun.note === null ? "" : ` (${rerun.note})`
-  }`;
-}
+/** What a node's narrowed run that did not pass says, under the pinned command's status. */
+const nodeRunSummary = (status: CheckStatus, summary: string, judge: CheckResult): string =>
+  `the node's own run ${status} (${summary}); ${judge.command ?? judge.name} ${judge.status} over the ` +
+  "whole change, and only it judges the check";
 
 interface RerunOutcome {
   command: string;

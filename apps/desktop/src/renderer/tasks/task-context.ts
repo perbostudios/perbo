@@ -1,7 +1,8 @@
-import { costOf, formatUsd, gateClosedNote, rollCosts, runEndedOn, settledRow, type Cost } from "@perbo/contracts/browser";
+import { z } from "zod";
+import { costOf, DECISION_CHOICES, formatUsd, gateClosedNote, rollCosts, runEndedOn, settledRow, type Cost } from "@perbo/contracts/browser";
 import type { DefaultedResource, LimitedResource, PerTokenCostLimit, ProhibitedAction, ReviewError } from "@perbo/contracts";
 import { isLive, isRun } from "../../shared/jobs.js";
-import { ATTEMPT_STARTS, runnerStages, runnerTally, spokenByAttempt, spokenWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
+import { ATTEMPT_STARTS, overTheTicket, runnerStages, runnerTally, spokenByAttempt, spokenWords, verificationWords, type LoggedStage, type RunnerStage } from "../../shared/runner-progress.js";
 import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
@@ -308,11 +309,12 @@ export function stageWords(stage: RunnerStage): string {
       return "Sealing the change set";
     case "check":
       return `Running check ${stage.name}`;
-    // The runner counts its rounds from 0; a person counts reviews from 1.
+    // A run's first review is the review; a later one verifies a refinement,
+    // as a closure verification does, said with its pass (`overTheTicket`).
     case "review":
-      return `Review round ${stage.round + 1}`;
+      return stage.round === 0 ? "Independent review" : verificationWords(stage.round);
     case "verify":
-      return "Verifying closures";
+      return verificationWords(stage.round);
     case "delivery":
       return "Opening the pull request";
     // D-137: the pause, and how it ended.
@@ -389,19 +391,10 @@ const RUN_OUTCOME_SENTENCES: Record<string, string> = {
  */
 const NOTHING_ASKED = {
   /**
-   * The executor declined what was left (D-065), as the attempts record it:
-   * answered by a principle, not on the card. Plan it again is named only
-   * where the page offers it.
+   * An escalation with nothing on the record for the person, as an incomplete
+   * review's can be. A finding the executor declined is always one: it is put
+   * to them on the decision card (D-065, D-132), so the run is a pause.
    */
-  declined: (planAgain: boolean): StopReason => ({
-    text: "The executor declined the findings left open, saying no practice determines them.",
-    detail:
-      "The executor declined the findings left open, saying no practice determines them; its reasons are on the " +
-      "round record. A declined finding takes no answer on the decision card: `perbo principle add` records " +
-      "your answer in .perbo/principles.md, which the executor reads on the next run" +
-      (planAgain ? ", and Plan it again starts that run from the spec." : "."),
-  }),
-  /** An escalation with nothing declined and nothing on the record for the person, as an incomplete review's can be. */
   escalated: {
     text: "The review escalated the run, and put nothing on its record to you.",
     detail:
@@ -415,7 +408,7 @@ const NOTHING_ASKED = {
       "The review this run ended on is not readable in the records Perbo holds, so no question on it can be " +
       "asked, and the loop stopped here rather than pausing for you with nothing to answer.",
   },
-} satisfies Record<string, StopReason | ((planAgain: boolean) => StopReason)>;
+} satisfies Record<string, StopReason>;
 
 /** A run's outcome as a sentence (`RUN_OUTCOME_SENTENCES`). */
 export const outcomeSentence = (outcome: string): string =>
@@ -430,32 +423,21 @@ const rowWords = (entry: Pick<Detail["ticket"]["history"][number], "note" | "to"
 /**
  * Why a ticket whose last run closed the gate stopped, where the record puts
  * no question to the person: that its review could not be read; for an
- * escalation, that the executor declined what was left where an attempt since
- * the review records declines, and otherwise that the review put nothing to
- * them; for any other outcome, its row's outcome in Perbo's words and that
- * nothing is left to answer. Null where the row that left the ticket where it
- * is, a run refused for owed answers passed over (`settledRow`), is not such a
- * run's end.
- * `planAgain` says whether the page offers Plan it again, which a reason
- * names only where it does.
+ * escalation, that the review put nothing to them; for any other outcome, its
+ * row's outcome in Perbo's words and that nothing is left to answer. Null
+ * where the row that left the ticket where it is, a run refused for owed
+ * answers passed over (`settledRow`), is not such a run's end.
  */
 export function gateClosedReasons(
   history: Detail["ticket"]["history"],
-  attempts: readonly Pick<AttemptView, "review" | "declines">[],
-  planAgain: boolean,
+  attempts: readonly Pick<AttemptView, "review">[],
 ): StopReason[] | null {
   const last = settledRow(history);
   if (last === undefined || !last.note.startsWith(gateClosedNote(""))) return null;
   const outcome = runEndedOn(last.note);
   if (outcome === null) return null;
-  const reviewed = attempts.findLastIndex((attempt) => attempt.review !== null);
-  if (reviewed === -1) return [NOTHING_ASKED.unreadable];
-  if (outcome === "escalated")
-    return [
-      attempts.slice(reviewed).some((attempt) => (attempt.declines ?? []).length > 0)
-        ? NOTHING_ASKED.declined(planAgain)
-        : NOTHING_ASKED.escalated,
-    ];
+  if (!attempts.some((attempt) => attempt.review !== null)) return [NOTHING_ASKED.unreadable];
+  if (outcome === "escalated") return [NOTHING_ASKED.escalated];
   const text = outcomeSentence(outcome);
   return [
     {
@@ -470,19 +452,28 @@ export function gateClosedReasons(
 /** The ticket states a run moves through, so a move from one of them to `pr_open` is the run's own delivery. */
 const RUN_STATES = new Set(["provisioning", "executing", "verifying", "independent_review"]);
 
+/** One stage the steps list, before the ticket's count words it. */
+interface Stage {
+  stage: RunnerStage;
+  reason: string | null;
+  at: string | null;
+  /** When it sorts: its time, or for a stage read before the page was open, its run's start. */
+  key: string;
+}
+
 /**
  * Every stage the attempts on record went through, oldest first, each at the
  * time its record holds and with the runner's detail where the record has
  * it: the check's result, and the findings a review left open.
  */
-function recordedStages(attempts: readonly AttemptView[]): LoopStep[] {
+function recordedStages(attempts: readonly AttemptView[]): Stage[] {
   return recordedRunnerStages(attempts).flatMap((stages) => {
     // Each stage no earlier than the one before it, as the attempt ran them.
     let floor = stages[0]!.at;
     return stages.map(({ stage, at, check, open }) => {
       floor = Date.parse(at) > Date.parse(floor) ? at : floor;
       return {
-        text: stageWords(stage),
+        stage,
         reason:
           check !== undefined
             ? `Result: ${check.status}.` + (check.detail ? `\n\n${check.detail}` : "")
@@ -490,33 +481,99 @@ function recordedStages(attempts: readonly AttemptView[]): LoopStep[] {
               ? findingsLeft(open)
               : null,
         at: floor,
+        key: floor,
       };
     });
   });
 }
 
+/** A person's answer to a finding, as the verdicts record holds it (D-132). */
+const DecidedSchema = z.object({
+  finding_key: z.string(),
+  decision: z.literal("decide"),
+  choice: z.enum(DECISION_CHOICES),
+  note: z.string().nullable().optional(),
+  decided_at: z.string(),
+  superseded_at: z.string().nullable().optional(),
+});
+/** Answers taken this close together were given at one sitting, as the decision screen records them. */
+const ONE_SITTING_MS = 5 * 60_000;
 /**
- * What the loop page's steps list, newest first: every stage the runner went
- * through and every state the ticket was moved to, each where its time puts
- * it.
+ * The person's decisions, each sitting one step at the time it was taken:
+ * how many findings it answered, with each answer behind the `i`. A sitting
+ * stays a step whatever came after it — a later answer that replaced one of
+ * its answers, a fresh review — so the page keeps saying what the person
+ * decided and when (D-132).
+ */
+function decisionSteps(verdicts: readonly unknown[]): (LoopStep & { key: string })[] {
+  const rows = verdicts
+    .flatMap((row) => {
+      const parsed = DecidedSchema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    })
+    // In the order they were given; of two answers to one finding at one
+    // moment, the one a later answer did not replace comes last.
+    .sort(
+      (left, right) =>
+        Date.parse(left.decided_at) - Date.parse(right.decided_at) ||
+        Number(left.superseded_at === null) - Number(right.superseded_at === null),
+    );
+  const sittings: (typeof rows)[] = [];
+  for (const row of rows) {
+    const sitting = sittings.at(-1);
+    const last = sitting?.at(-1);
+    if (sitting !== undefined && last !== undefined && Date.parse(row.decided_at) - Date.parse(last.decided_at) <= ONE_SITTING_MS) {
+      // A finding answered again at the same sitting is one answer: the one that stands.
+      const again = sitting.findIndex((earlier) => earlier.finding_key === row.finding_key);
+      if (again !== -1) sitting.splice(again, 1);
+      sitting.push(row);
+    } else sittings.push([row]);
+  }
+  const said = (row: (typeof rows)[number]): string =>
+    row.choice === "ship_as_is"
+      ? "Ship as it is."
+      : row.choice === "let_it_decide"
+        ? "Let it decide."
+        : `Your approach: ${row.note ?? ""}`;
+  return sittings.map((sitting) => {
+    const at = sitting.at(-1)!.decided_at;
+    return {
+      text: `You answered ${sitting.length === 1 ? "one finding" : `${sitting.length} findings`}`,
+      reason: sitting.map((row, index) => `${index + 1}. ${said(row)}`).join("\n"),
+      at,
+      key: at,
+    };
+  });
+}
+
+/**
+ * What the loop page's steps list, newest first: every stage the ticket's
+ * loop went through, every state the ticket was moved to and every decision
+ * the person took, each where its time puts it.
  *
- * While a run is live, its stages are read from its log as the CLI announces
- * them, beside the stages of the attempts on record from before it. Once none
- * is, they are rebuilt from the records of every attempt, so a page opened
- * again lists the same stages; the last run's log stands in where it recorded
- * no attempt, as a run that ended before its first did. Only the runner's own
- * stage lines are read: never the executor's or the reviewer's words, and
- * never a tool call, which are the Watch page's.
+ * The steps follow the ticket's loop, not a run (D-129): rounds and passes are
+ * counted over the ticket (`overTheTicket`), so a run continued after a
+ * decision goes on from where the loop was, and each thing that happened is
+ * listed once — from the attempt that recorded it, or from the log of the run
+ * that recorded none of it yet. While a run is live, its stages are read from
+ * its log as the CLI announces them, beside the stages of the attempts on
+ * record from before it. Once none is, they are rebuilt from the records of
+ * every attempt, so a page opened again lists the same stages; the last run's
+ * log stands in where it recorded no attempt, as a run that ended before its
+ * first did. Only the runner's own stage lines are read: never the executor's
+ * or the reviewer's words, and never a tool call, which are the Watch page's.
  */
 export function loopSteps(input: {
   history: Detail["ticket"]["history"];
   jobs: readonly Job[];
   active: Job | undefined;
   attempts: readonly AttemptView[];
+  /** The verdicts record's rows (`Detail.verdicts`): each sitting at which the person answered is a step. */
+  verdicts: readonly unknown[];
   log: StageLog;
   now: string;
 }): LoopStep[] {
-  const { history, jobs, active, attempts, log, now } = input;
+  const { history, jobs, active, attempts, verdicts, log, now } = input;
   const last = jobs.filter(isRun).at(-1);
   const since = (job: Job) => (attempt: AttemptView) => Date.parse(attempt.startedAt) >= Date.parse(job.startedAt);
   const logged =
@@ -526,9 +583,9 @@ export function loopSteps(input: {
         ? last
         : undefined;
   const recorded = recordedStages(logged === undefined ? attempts : attempts.filter((attempt) => !since(logged)(attempt)));
-  const stages = (job: Job): (LoopStep & { key: string })[] =>
+  const announced = (job: Job): Stage[] =>
     log.read(job, now).map(({ stage, at }) => ({
-      text: stageWords(stage.stage),
+      stage: stage.stage,
       // A review's count is the whole of it once a later stage followed, or the run ended.
       reason: stage.stage.kind === "review" && (stage.settled || !isLive(job)) ? findingsLeft(stage.findings) : null,
       at,
@@ -536,6 +593,9 @@ export function loopSteps(input: {
       // after the run started.
       key: at ?? job.startedAt,
     }));
+  // The recorded stages come before the logged run's: counted over the ticket in that order.
+  const stages = [...recorded, ...(logged === undefined ? [] : announced(logged))];
+  const counted = overTheTicket(stages.map(({ stage }) => stage));
   const moves = history.flatMap((entry): LoopStep[] => [
     // The run's delivery, where its log is not the one read.
     ...(entry.to === "pr_open" &&
@@ -546,9 +606,9 @@ export function loopSteps(input: {
     { text: rowWords(entry), reason: null, at: entry.at },
   ]);
   return [
-    ...recorded.map((step) => ({ ...step, key: step.at! })),
-    ...(logged === undefined ? [] : stages(logged)),
+    ...stages.map(({ reason, at, key }, index) => ({ text: stageWords(counted[index]!), reason, at, key })),
     ...moves.map((step) => ({ ...step, key: step.at! })),
+    ...decisionSteps(verdicts),
   ]
     .map((step, order) => ({ step, time: Date.parse(step.key), order }))
     .sort((left, right) => left.time - right.time || left.order - right.order)
@@ -566,6 +626,7 @@ const UNPARSED: Record<ReviewError["kind"], boolean> = {
   malformed_verdict: true,
   unknown_criterion_id: true,
   provider_unavailable: false,
+  request_refused: false,
   budget_exhausted: false,
   timeout: false,
   internal: false,
@@ -817,6 +878,8 @@ export interface RunEnding {
 /** The review errors that are not an answer the reviewer gave, as the stop is said of them. */
 const UNHAD: Record<Exclude<ReviewError["kind"], "verdict_rejected" | "malformed_verdict" | "unknown_criterion_id">, string> = {
   provider_unavailable: "The reviewer's model provider was unavailable, so the change was not reviewed.",
+  request_refused:
+    "The reviewer's model provider refused the request Perbo sent, so the change was not reviewed, and reviewing again will not help.",
   budget_exhausted: "The review ran out of its budget before it reached a verdict.",
   timeout: "The review timed out before it reached a verdict.",
   internal: "The review failed inside Perbo before it reached a verdict.",

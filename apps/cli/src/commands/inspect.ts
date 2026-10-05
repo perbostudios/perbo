@@ -1614,13 +1614,16 @@ export function renderInspect(
           lines.push(head.trimEnd(), ...wrap(check.summary, hang.length).map((line) => paint(line, "mid")));
         }
         // D-107: what a node's run was aimed at, or why it could not be aimed
-        // anywhere narrower than the whole change.
+        // anywhere narrower than the whole change, and what that run came to
+        // where the record has it — evidence beside the mark, which is the
+        // pinned command's.
         if (check.node) {
           lines.push(
             ...fitted(
               `${hang}${
                 check.node.scope === "files"
-                  ? `narrowed to ${check.node.paths.join(", ")}`
+                  ? `narrowed to ${check.node.paths.join(", ")}` +
+                    (check.node.run_status === undefined ? "" : ` · own run ${check.node.run_status}`)
                   : `over the whole change: ${check.node.note ?? "not narrowed"}`
               }`,
               hang.length,

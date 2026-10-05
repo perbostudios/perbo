@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { TicketStateSchema } from "@perbo/contracts";
-import { JOURNEY_END, homeOrder, homeRows, homeTally, homeTone, projectTicket, stageOf, unseenAttention } from "./ticket-workspace.js";
+import { COMPLETED, homeOrder, homeRows, homeTally, homeTone, judgedReview, projectTicket, stageOf, unseenAttention } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { egressQuestionLine, egressSettledLine } from "@perbo/contracts";
 import type { Job } from "../../shared/protocol.js";
@@ -74,7 +74,9 @@ describe("ticket workspace projection", () => {
     workspace.jobs = [job];
     detail.attempts.push({ ...detail.attempts[0]!, id: "later", review: null, reviewDecision: null, checks: [], verification: null });
     const result = projectTicket(workspace, row, detail);
-    expect(result).toMatchObject({ resultReady: false, recoverable: true, evidence: { ready: false, verified: null, kind: "not-retained" } });
+    expect(result).toMatchObject({ resultReady: false, recoverable: true, evidence: { ready: false, kind: "not-retained" } });
+    // Its criteria still read as the review on record left them; nothing says the attempt passed.
+    expect(result.evidence.review?.review_id).toBe(detail.attempts[0]!.review!.review_id);
     expect(result.primary.label).toBe("See the stopped run");
   });
 
@@ -87,14 +89,16 @@ describe("ticket workspace projection", () => {
     expect(projectTicket(workspace, row, detail).evidence).toMatchObject({ kind: "stale", ready: false });
   });
 
-  it("recognises closure verification without manufacturing a fresh criterion review", async () => {
+  it("recognises closure verification, reading the criteria from the review before it rather than a fresh one", async () => {
     const { workspace, row, detail } = await fixture();
     row.ticket.state = "pr_open";
     row.ticket.delivery.pull_request_url = null;
     const prior = detail.attempts[0]!;
     detail.attempts.push({ ...prior, id: "closure", review: null, reviewDecision: null, checks: [{ name: "test", status: "passed", detail: "" }], verification: { all_closed: true, deterministic_failure: null, open_keys: [], per_finding: [{ finding_key: "finding", status: "closed", pointer: "src/result.ts:2" }] } });
     const result = projectTicket(workspace, row, detail);
-    expect(result).toMatchObject({ primary: { label: "Review result" }, evidence: { kind: "closure", ready: true, verified: null, review: undefined, priorReview: prior.review, closuresVerified: true } });
+    expect(result).toMatchObject({ primary: { label: "Review result" }, evidence: { kind: "closure", ready: true, priorReview: prior.review, closuresVerified: true } });
+    expect(result.evidence.review?.review_id).toBe(prior.review!.review_id);
+    expect(result.evidence.review?.coverage).toEqual(prior.review!.coverage);
     expect(projectTicket(workspace, row, detail, "output").screen).toBe("output");
   });
 
@@ -155,11 +159,11 @@ describe("ticket workspace projection", () => {
    * log holds none — never back at the contract, where the state a stop leaves
    * the ticket at would put it.
    */
-  it("keeps the wheel where a run stopped at review round 2 had taken it", async () => {
+  it("keeps the wheel at the furthest stage a run stopped after its second review had reached", async () => {
     const { workspace, row, detail, job } = await fixture();
     const reviewed = detail.attempts[0]!;
     if (reviewed.review === null) throw new Error("the fixture's first attempt must carry its review");
-    // Round 2 of review is the runner's round 1, after a refinement round.
+    // The second review is the runner's round 1, after a refinement round: a verification.
     const second = { ...reviewed, id: "second", round: 1, bundles: [], verification: null };
     detail.attempts = [reviewed, second];
     const log =
@@ -170,22 +174,62 @@ describe("ticket workspace projection", () => {
       // Stopped by the person, and ended on its own.
       for (const ended of ["cancelled", "failed"] as const) {
         workspace.jobs = [{ ...job, state: ended, log }];
-        expect(projectTicket(workspace, row, detail).stage, `${state}, ${ended}, from the log`).toBe(4);
+        expect(projectTicket(workspace, row, detail).stage, `${state}, ${ended}, from the log`).toBe(5);
         workspace.jobs = [{ ...job, state: ended, log: "" }];
-        expect(projectTicket(workspace, row, detail).stage, `${state}, ${ended}, from the records`).toBe(4);
+        expect(projectTicket(workspace, row, detail).stage, `${state}, ${ended}, from the records`).toBe(5);
       }
     }
-    // Stopped after round 2's checks and before its review: the checks.
+    // Stopped after the refinement round's checks and before its review: the refinement.
     detail.attempts = [reviewed, { ...second, review: null, reviewDecision: null }];
-    expect(projectTicket(workspace, row, detail).stage).toBe(3);
-    // Stopped in the refinement round, as the log says.
-    workspace.jobs = [{ ...job, state: "cancelled", log: log.split("  sealing")[0] + "  sealing the change set\n  check test: passed\n  review round 0\n  remediation round 1 of at most 6\n" }];
-    expect(projectTicket(workspace, row, detail).stage).toBe(6);
+    expect(projectTicket(workspace, row, detail).stage).toBe(4);
     // Nothing on record says: the stage the ticket's state names.
     workspace.jobs = [];
     detail.attempts = [];
     row.ticket.state = "verifying";
-    expect(projectTicket(workspace, row, detail).stage).toBe(3);
+    expect(projectTicket(workspace, row, detail).stage).toBe(2);
+  });
+
+  /**
+   * Within one ticket's journey the wheel never goes back (D-129): it shows the
+   * furthest stage the ticket reached over every run, from the records and
+   * every run's log, and what the loop is doing now is its title's to say.
+   */
+  it("never moves the wheel back within a ticket's journey", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    const reviewed = detail.attempts[0]!;
+    if (reviewed.review === null) throw new Error("the fixture's first attempt must carry its review");
+    detail.attempts = [reviewed];
+    const first = { ...job, id: "run-1", state: "completed" as const, error: null, outcome: "escalated" as const,
+      log: "  worktree /tmp/w on ayo/task at 123\n  executing\n  check test: passed\n  review round 0\n" };
+    const read = (state: string, continued: Partial<Job>) => {
+      row.ticket.state = state as typeof row.ticket.state;
+      workspace.jobs = [first, { ...job, id: "run-2", kind: "decide", state: "running", endedAt: null, error: null, ...continued }];
+      return projectTicket(workspace, row, detail);
+    };
+    // Continued after a decision at the review: no stage line yet, then the worktree again.
+    const early = read("provisioning", { log: "" });
+    expect(early.stage).toBe(3);
+    const materialising = read("provisioning", { log: "  worktree /tmp/w on ayo/task at 123\n" });
+    expect(materialising.stage).toBe(3);
+    expect(materialising.observed?.title).toBe("Materialising the worktree");
+    // A refinement round, then its verification.
+    const refining = "  worktree /tmp/w on ayo/task at 123\n  remediation round 1 of at most 6\n";
+    expect(read("executing", { log: refining }).stage).toBe(4);
+    const verified = refining + "  verifying closures, round 1\n";
+    expect(read("independent_review", { log: verified }).stage).toBe(5);
+    // A second refinement round after the verification keeps the verification, and says the round.
+    const again = read("executing", { log: verified + "  remediation round 2 of at most 6\n" });
+    expect(again.stage).toBe(5);
+    expect(again.observed?.title).toBe("Refining the change, round 2");
+    // Before the records are read, the earlier run's log alone keeps the review.
+    const unread = { ...detail, attempts: [] };
+    workspace.jobs = [first, { ...job, id: "run-2", kind: "decide", state: "running", endedAt: null, error: null, log: "" }];
+    row.ticket.state = "provisioning";
+    expect(projectTicket(workspace, row, unread).stage).toBe(3);
+    workspace.jobs = [first, { ...job, id: "run-2", kind: "decide", state: "running", endedAt: null, error: null, log: verified + "  remediation round 2 of at most 6\n" }];
+    // Read again from the journal after a restart, which marks the live run interrupted: the same stage.
+    const restarted = JSON.parse(JSON.stringify({ ...workspace, jobs: workspace.jobs.map((each) => ({ ...each, state: "interrupted" })) }));
+    expect(projectTicket(restarted, row, detail).stage).toBe(5);
   });
 
   it("offers Continue the task only after the person's own stop, taken or still settling, or Perbo closing", async () => {
@@ -233,7 +277,8 @@ describe("ticket workspace projection", () => {
     ];
     expect(window.map((each) => each.tone)).toEqual([null, "yellow", "yellow", "yellow", "yellow"]);
     for (const each of window.slice(1)) {
-      expect(each).toMatchObject({ recoverable: false, paused: true, stage: 5 });
+      // A decision is no stage: the loop waits at the review that asked it.
+      expect(each).toMatchObject({ recoverable: false, paused: true, deciding: true, stage: 3 });
       expect(each.screen).not.toBe("stopped");
     }
     // Once nothing is being read, the card's way in is the answer.
@@ -245,21 +290,36 @@ describe("ticket workspace projection", () => {
     expect(read("provisioning", [{ ...verdict, outcome: undefined }], true).paused).toBe(false);
     // A verdict run whose ticket has since moved on is not a pause.
     expect(read("pr_open", [verdict], false)).toMatchObject({ paused: false, tone: "green" });
-    // A journey that ended is past every step, whatever the loop's last stage line named.
+    // A journey that ended is completed, whatever the loop's last stage line named.
     const reviewed = { ...verdict, outcome: undefined, log: "  executing\n  check test: passed\n  review round 1\n" };
-    for (const state of ["pr_open", "merged", "closed"]) expect(read(state, [reviewed], false).stage, state).toBe(JOURNEY_END);
-    // A loop stopped after review round 2 still sits at the review.
-    expect(read("failed", [{ ...reviewed, state: "cancelled" }], false).stage).toBe(4);
+    for (const state of ["pr_open", "merged", "closed"]) expect(read(state, [reviewed], false).stage, state).toBe(COMPLETED);
+    // A local run finished with nothing to merge on GitHub: completed too.
+    row.ticket.delivery.pull_request_url = null;
+    expect(read("pr_open", [reviewed], false).stage).toBe(COMPLETED);
+    // And one whose review on record approved it with nothing left to refine, the ticket still ready.
+    const approving = structuredClone(detail);
+    const last = approving.attempts.at(-1)!;
+    last.reviewDecision = "approve";
+    last.review = { ...last.review!, decision: "approve", findings: [] };
+    row.ticket.state = "ready";
+    workspace.jobs = [reviewed];
+    workspace.refreshingRepos = [];
+    expect(projectTicket(workspace, row, approving)).toMatchObject({ resultReady: true, stage: COMPLETED });
+    expect(projectTicket(workspace, row, detail).stage).not.toBe(COMPLETED);
+    // A loop stopped after its second review sits at the verification.
+    expect(read("failed", [{ ...reviewed, state: "cancelled" }], false).stage).toBe(5);
   });
 
   /**
    * A run still going that waits on the person's answer about a host off the
-   * allow-list is paused for them: yellow, the wheel at the decisions, until
-   * the answer is printed, when the wheel goes back to the step the log names.
+   * allow-list is paused for them: yellow, the stage it asked at waiting on
+   * them, until the answer is printed, when the loop carries on at that stage.
    */
-  it("sits a run waiting on an unlisted host's answer at the decisions, and back at its step once answered", async () => {
+  it("shows the stage a run waiting on an unlisted host's answer is at as waiting on the person, until it is answered", async () => {
     const { workspace, row, detail, job } = await fixture();
     row.ticket.state = "executing";
+    // A first run, nothing on record yet.
+    detail.attempts = [];
     const question = { key: "egq_0123456789abcdef", host: "registry.example.com", command: "curl https://registry.example.com" };
     const ran = "  worktree /tmp/w on ayo/task at 123\n  executing\n";
     const asked = ran + `  ${egressQuestionLine(question)}\n`;
@@ -267,9 +327,11 @@ describe("ticket workspace projection", () => {
       workspace.jobs = [{ ...job, state, endedAt: null, error: null, log }];
       return projectTicket(workspace, row, detail);
     };
-    expect(read(asked)).toMatchObject({ asking: true, stage: 5, tone: "yellow" });
-    expect(read(asked + `  ${egressSettledLine(question, "allowed")}\n`)).toMatchObject({ asking: false, stage: 2, tone: null });
-    expect(read(ran)).toMatchObject({ asking: false, stage: 2, tone: null });
+    // Asked mid-execution: execution waits on the person.
+    expect(read(asked)).toMatchObject({ asking: true, deciding: true, stage: 2, tone: "yellow" });
+    expect(read(asked).primary).toEqual({ label: "Answer", view: "loop" });
+    expect(read(asked + `  ${egressSettledLine(question, "allowed")}\n`)).toMatchObject({ asking: false, deciding: false, stage: 2, tone: null });
+    expect(read(ran)).toMatchObject({ asking: false, deciding: false, stage: 2, tone: null });
     // Stopped while it waits: the stop, not the question.
     expect(read(asked, "stopping")).toMatchObject({ asking: false, tone: "red" });
   });
@@ -372,7 +434,7 @@ describe("where a Home ticket stands", () => {
       for (const questions of [3, undefined]) {
         const counted = { ...row, ...(questions === undefined ? {} : { questions }) };
         expect(homeTone(workspace, counted), `${jobs.length} ${questions}`).toBe("yellow");
-        expect(projectTicket(workspace, counted)).toMatchObject({ paused: true, recoverable: false, stage: stageOf("changes_requested") });
+        expect(projectTicket(workspace, counted)).toMatchObject({ paused: true, deciding: true, recoverable: false, stage: stageOf("changes_requested") });
         expect(projectTicket(workspace, counted).primary.label).toBe("Answer");
       }
       // None: stopped, with the stopped page to say why, never decisions required.
@@ -380,7 +442,7 @@ describe("where a Home ticket stands", () => {
       expect(homeTone(workspace, none), `${jobs.length}`).toBe("red");
       const projected = projectTicket(workspace, none);
       expect(projected).toMatchObject({ paused: false, recoverable: true, screen: "stopped" });
-      expect(projected.stage).not.toBe(stageOf("changes_requested"));
+      expect(projected.deciding).toBe(false);
       expect(projected.primary.label).toBe("See the stopped run");
     }
     // A run that ended on a verdict, before its records are read, is still the pause.
@@ -548,5 +610,105 @@ describe("a Home ticket's claim on the person", () => {
     expect(unseenAttention(workspace, row)).toBe(true);
     workspace.lastOpened = { [row.repoId + ":" + row.ticket.key]: "2026-09-10T10:01:00.000Z" };
     expect(unseenAttention(workspace, row)).toBe(false);
+  });
+});
+
+describe("how far the host read a journey reached on its records (TaskRow.reached)", () => {
+  it("fills Home's wheel, which holds no detail, to that stage and never back", async () => {
+    const { workspace, row } = await fixture();
+    workspace.refreshingRepos = [];
+    row.ticket.state = "changes_requested";
+    expect(projectTicket(workspace, row).stage).toBe(3);
+    expect(projectTicket(workspace, { ...row, reached: { stage: 5, approved: false } }).stage).toBe(5);
+    // A ticket whose state names an earlier stage keeps the stage its records reached.
+    row.ticket.state = "executing";
+    expect(projectTicket(workspace, { ...row, reached: { stage: 4, approved: false } }).stage).toBe(4);
+  });
+
+  it("counts a journey whose last attempt the records approved as completed, as the loop page does", async () => {
+    const { workspace, row } = await fixture();
+    workspace.refreshingRepos = [];
+    row.ticket.state = "ready";
+    expect(projectTicket(workspace, { ...row, reached: { stage: 3, approved: false } })).toMatchObject({ resultReady: false, stage: 3 });
+    expect(projectTicket(workspace, { ...row, reached: { stage: 3, approved: true } })).toMatchObject({
+      resultReady: true,
+      stage: COMPLETED,
+    });
+  });
+});
+
+describe("the evidence the results page reads after a refinement round", () => {
+  it("counts the criteria the review before the round directly verified, and nothing where no review is on record", async () => {
+    const { workspace, row, detail } = await fixture();
+    workspace.refreshingRepos = [];
+    const reviewed = detail.attempts.findLast((attempt) => attempt.review)!;
+    const met = reviewed.review!.coverage.filter(
+      (entry) => entry.status === "met" && entry.verification_strength === "directly_verified",
+    ).length;
+    expect(met).toBeGreaterThan(0);
+    detail.attempts.push({
+      ...reviewed,
+      id: "refinement-round-1",
+      round: 1,
+      review: null,
+      reviewDecision: null,
+      verification: { all_closed: true, deterministic_failure: null, open_keys: [], per_finding: [] },
+    });
+    const { evidence } = projectTicket(workspace, row, detail);
+    expect(evidence.kind).toBe("closure");
+    expect(evidence.verified).toBe(met);
+    expect(evidence.review?.review_id).toBe(reviewed.review!.review_id);
+    // A review of another version of the contract is not this contract's.
+    const replanned = { ...row, ticket: { ...row.ticket, plan_version: row.ticket.plan_version + 1 } };
+    const other = { ...detail, ticket: replanned.ticket, contract: { ...detail.contract, version: replanned.ticket.plan_version } };
+    expect(projectTicket(workspace, replanned, other).evidence).toMatchObject({ review: undefined, verified: null });
+  });
+});
+
+describe("the review the results page reads each criterion from", () => {
+  /** The sample's reviewed attempt, its review holding two open findings, and a verification that judged some of them. */
+  async function judged() {
+    const { detail } = await fixture();
+    const reviewed = detail.attempts.findLast((attempt) => attempt.review)!;
+    const base = reviewed.review!.findings[0]!;
+    const review = {
+      ...reviewed.review!,
+      findings: [
+        { ...base, key: "first", status: "open" as const },
+        { ...base, key: "second", status: "open" as const },
+      ],
+    };
+    const contract = { plan_id: review.plan_id, plan_version: review.plan_version };
+    const verification = (id: string, per_finding: Array<[string, "closed" | "not_closed"]>) => ({
+      ...reviewed,
+      id,
+      review: null,
+      reviewDecision: null,
+      verification: {
+        all_closed: per_finding.every(([, status]) => status === "closed"),
+        deterministic_failure: null,
+        open_keys: per_finding.filter(([, status]) => status !== "closed").map(([key]) => key),
+        per_finding: per_finding.map(([finding_key, status]) => ({ finding_key, status, pointer: "src/result.ts:2" })),
+      },
+    });
+    return { reviewed: { ...reviewed, review }, contract, verification };
+  }
+
+  const statuses = (review: ReturnType<typeof judgedReview>) => review!.findings.map((finding) => [finding.key, finding.status]);
+
+  it("reads a finding open where a later verification left it open, though an earlier one closed it", async () => {
+    const { reviewed, contract, verification } = await judged();
+    const attempts = [
+      reviewed,
+      verification("round-1", [["first", "closed"], ["second", "closed"]]),
+      verification("round-2", [["first", "not_closed"]]),
+    ];
+    expect(statuses(judgedReview(attempts, contract))).toEqual([["first", "open"], ["second", "resolved"]]);
+  });
+
+  it("reads nothing a verification before the review judged", async () => {
+    const { reviewed, contract, verification } = await judged();
+    const attempts = [verification("before", [["first", "closed"]]), reviewed];
+    expect(statuses(judgedReview(attempts, contract))).toEqual([["first", "open"], ["second", "open"]]);
   });
 });

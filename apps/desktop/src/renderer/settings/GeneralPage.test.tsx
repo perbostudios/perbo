@@ -41,3 +41,41 @@ describe("the name on Settings · General (D-133)", () => {
     expect((saved as Extract<Request, { kind: "saveSettings" }>).settings.name).toBe("n".repeat(PERSON_NAME_MAX_CHARS));
   });
 });
+
+describe("the Graph pane's node runs switch on Settings · General (D-107)", () => {
+  it("is off on a profile that never set it, and turns on and off, each saved", async () => {
+    const sent: Extract<Request, { kind: "saveSettings" }>["settings"][] = [];
+    // The sample host answers, as it answers the preview: what it keeps is
+    // what a reopened page reads.
+    const forward = sampleBridge.request.bind(sampleBridge);
+    vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {
+      if (request.kind === "saveSettings") sent.push(request.settings);
+      return forward(request);
+    }) as typeof bridge.request);
+    const current = await sampleBridge.request({ kind: "snapshot" });
+    const page = (settings: Snapshot["settings"]) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <GeneralPage workspace={{ ...structuredClone(current), settings }} navigate={() => undefined} />
+      </QueryClientProvider>
+    );
+    const view = render(page(current.settings));
+    const toggle = screen.getByRole("switch", { name: "Show each node's own tests" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(
+      screen.getByText(
+        "The Graph pane marks a node whose own tests did not pass while the pinned command passed. Only the pinned command judges the check.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(sent.at(-1)?.graphNodeRuns).toBe(true));
+    expect((await sampleBridge.request({ kind: "snapshot" })).settings.graphNodeRuns).toBe(true);
+
+    view.rerender(page((await sampleBridge.request({ kind: "snapshot" })).settings));
+    const on = screen.getByRole("switch", { name: "Show each node's own tests" });
+    expect(on.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(on);
+    await waitFor(() => expect(sent.at(-1)?.graphNodeRuns).toBe(false));
+    expect((await sampleBridge.request({ kind: "snapshot" })).settings.graphNodeRuns).toBe(false);
+  });
+});

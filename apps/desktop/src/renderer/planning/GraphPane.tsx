@@ -501,6 +501,27 @@ function NodeState({ state }: { state: ShownState }) {
 }
 
 /**
+ * A check the pinned command passed and this node's own narrowed run did not,
+ * shown while `graphNodeRuns` is on (D-107). Evidence beside the node's state
+ * and never a state of its own: only the pinned command judges a check, so the
+ * line says that it passed as plainly as it says the node's tests did not. A
+ * skipped run reads "did not run", as a verification's sentence says it.
+ */
+function OwnRun({ node, own }: { node: string; own: { name: string; run: string } }) {
+  const outcome = own.run === "skipped" ? "did not run" : own.run;
+  return (
+    <div className="node-own-run" role="note" aria-label={`Own tests under ${node}`}>
+      <span className="state state--own_run" title="From the node's own narrowed run, recorded beside the pinned check.">
+        own tests {outcome}
+      </span>
+      <span>
+        {own.name}: this node&rsquo;s own tests {outcome}. The pinned command passed, and only it judges the check.
+      </span>
+    </div>
+  );
+}
+
+/**
  * The changed paths no node's globs match: work nobody planned for, said
  * rather than dropped. Empty for a plan that has not run and for a flat one,
  * which has no node for a path to be outside of.
@@ -921,6 +942,7 @@ function Node({
           ))}
         </div>
       )}
+      {live?.ownRuns?.map((own) => <OwnRun key={own.name} node={node.id} own={own} />)}
       {choosable && <span
         className="handle"
         title="Drag to another node to draw an edge"

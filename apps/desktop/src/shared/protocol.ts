@@ -147,6 +147,12 @@ export const SettingsSchema = z.strictObject({
   theme: z.enum(["light", "dark", "system"]).default("system"),
   textSize: z.enum(["small", "default", "large"]).default("default"),
   reduceMotion: z.boolean().default(false),
+  /**
+   * The Graph pane marks a node whose own narrowed run did not pass where the
+   * pinned command passed (D-107). Off unless the person turns it on, and a
+   * profile without it reads as off.
+   */
+  graphNodeRuns: z.boolean().default(false),
   afk: AfkSchema.default({ holdSleep: false, displaySleep: true, releaseOnBattery: true }),
   shortcuts: z.partialRecord(ShortcutActionSchema, BindingSchema).default({}),
 });
@@ -1038,6 +1044,12 @@ export interface GraphNodeLive {
   changed: string[];
   /** The pinned checks narrowed to this node's own changed files (D-107). */
   checks: { name: string; status: string }[];
+  /**
+   * The checks the pinned command passed and this node's own narrowed run did
+   * not, with what that run came to (D-107). Evidence, and no part of the
+   * node's state. Present only while `graphNodeRuns` is on.
+   */
+  ownRuns?: { name: string; run: string }[];
   criteria: GraphCriterionState[];
 }
 /**
@@ -1516,6 +1528,8 @@ export interface Job {
   publish?: boolean | undefined;
   /** A run that completed on a verdict for the person: the outcome its CLI reported. */
   outcome?: RunVerdict | undefined;
+  /** A failed job whose model provider refused the request Perbo sent: running it again is no use. */
+  refused?: true | undefined;
 }
 export interface TaskRow {
   repoId: string;
@@ -1530,6 +1544,16 @@ export interface TaskRow {
    * every other state, which the host does not count.
    */
   questions?: number;
+  /**
+   * How far the ticket's journey has reached on its records, as the host reads
+   * its bundles and attempts (`reachedOnRecord`): the furthest wheel stage an
+   * attempt of the contract it holds went through, and whether the last
+   * attempt was approved. `projectTicket` fills the wheel to no less than this
+   * stage and counts the journey completed on this approval, so Home, which
+   * holds no detail, shows the wheel the loop page shows and never moves it
+   * back. Absent where no attempt of the contract is on record.
+   */
+  reached?: { stage: number; approved: boolean };
 }
 /** Whether the machine is being held awake for a live run (S6F, Away from keyboard). */
 export interface PowerState {
@@ -1594,6 +1618,7 @@ const JobUpdateSchema = z.object({
   editing: z.object({ sessionId: identifier, operationId: identifier }).optional(),
   publish: z.boolean().optional(),
   outcome: z.enum(RUN_VERDICTS).optional(),
+  refused: z.literal(true).optional(),
 });
 export const PowerStateSchema = z.strictObject({
   holding: z.boolean(),
@@ -1689,10 +1714,10 @@ export interface AttemptView {
   verification: unknown;
   /**
    * The findings this attempt's executor declined as having no determinable
-   * practice (D-065), by key, as `perbo inspect` reads them. Absent where the
-   * records it was read from do not say.
+   * practice (D-065), each with the reason it gave, as the attempt's record
+   * holds them. Absent where the records it was read from do not say.
    */
-  declines?: readonly string[];
+  declines?: readonly { finding_key: string; reason: string }[];
   bundles: RunBundle[];
 }
 export interface Detail {
@@ -1755,6 +1780,13 @@ export interface DecisionQuestion {
   id: string;
   title: string;
   context: string;
+  /**
+   * The executor's own reasons for declining the finding since the review
+   * (D-065), each whole and as the record holds it, redacted: shown to the
+   * person as data beside the question, never an instruction. Empty where it
+   * declined nothing.
+   */
+  declined: readonly string[];
   /**
    * The answers the finding takes (D-132);
    * none where the question takes the person's words for a principle alone.

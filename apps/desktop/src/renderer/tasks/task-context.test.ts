@@ -441,7 +441,7 @@ describe("loopSteps", () => {
     result: null,
   });
   const steps = (job: Job, log: StageLog, now: string, history: Parameters<typeof loopSteps>[0]["history"] = []) =>
-    loopSteps({ history, jobs: [job], active: job.state === "running" ? job : undefined, attempts: [], log, now });
+    loopSteps({ history, jobs: [job], active: job.state === "running" ? job : undefined, attempts: [], verdicts: [], log, now });
 
   it("keeps a stage the log's tail has since cut, and times only the stages that arrived after it", () => {
     const log = new StageLog();
@@ -467,7 +467,7 @@ describe("loopSteps", () => {
     const later = steps(run(review + "  remediation round 1 of at most 6\n"), new StageLog(), "2026-09-24T02:10:00.000Z");
     expect(later.map(({ text, reason: why }) => [text, why])).toEqual([
       ["Refinement round 1", null],
-      ["Review round 1", "The review left 2 findings open."],
+      ["Independent review", "The review left 2 findings open."],
     ]);
   });
 
@@ -676,7 +676,7 @@ describe("loopTally", () => {
 });
 
 describe("loopSteps from the records", () => {
-  it("numbers each refinement round from 1 within its run, as the runner announced it, whatever round of the loop it was", () => {
+  it("numbers each refinement round over the ticket, not the run, and a round taken again as the same round", () => {
     const at = (minute: number) => `2026-09-24T01:${String(minute).padStart(2, "0")}:05.000Z`;
     const attempt = (id: string, run: number, round: number, kind: "execute" | "remediate" | "resolve_conflict", minute: number) =>
       recordedAttempt({ id, run, round, kind, startedAt: at(minute), commands: 1, paths: [], execution: { input: 1, output: 1, micros: 0 } });
@@ -688,11 +688,11 @@ describe("loopSteps from the records", () => {
       // The same round again, after a transport failure: still the first refinement.
       attempt("att_4", 1, 2, "remediate", 15),
       attempt("att_5", 1, 3, "remediate", 20),
-      // The next run counts its own from 1.
+      // The next run goes on counting where the ticket was.
       attempt("att_6", 2, 0, "execute", 30),
       attempt("att_7", 2, 1, "remediate", 35),
     ];
-    const steps = loopSteps({ history: [], jobs: [], active: undefined, attempts, log: new StageLog(), now: at(59) });
+    const steps = loopSteps({ history: [], jobs: [], active: undefined, attempts, verdicts: [], log: new StageLog(), now: at(59) });
     expect(
       steps
         .map(({ text }) => text)
@@ -703,8 +703,108 @@ describe("loopSteps from the records", () => {
       "Refinement round 1",
       "Refinement round 1",
       "Refinement round 2",
-      "Refinement round 1",
+      "Refinement round 3",
     ]);
+  });
+});
+
+/**
+ * PRB-15 after an answer: run 1 reviewed the change, refined it twice — the
+ * first round verified, the second stalled — and the person answered three
+ * findings; run 2 continued from the answer with a round scoped to it and
+ * verified it. The steps follow the ticket's loop, not a run (D-129): one
+ * review, the decision where it was taken, and the rounds and passes counted
+ * over the ticket, each thing listed once whether the records or a log said it.
+ */
+describe("loopSteps over the ticket's loop", () => {
+  const at = (hour: number, minute: number) => `2026-09-27T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:05.000Z`;
+  const usage = { input: 1, output: 1, micros: 0 };
+  const verified = (attempt: AttemptView): AttemptView => ({
+    ...attempt,
+    verification: { all_closed: true, deterministic_failure: null, open_keys: [], per_finding: [] },
+  });
+  const run1 = [
+    recordedAttempt({ id: "att_1", run: 1, round: 0, kind: "execute", startedAt: at(10, 0), commands: 1, paths: [], execution: usage, review: usage }),
+    verified(recordedAttempt({ id: "att_2", run: 1, round: 1, kind: "remediate", startedAt: at(10, 10), commands: 1, paths: [], execution: usage })),
+    // The second round stalled: sealed and checked, and nothing verified it.
+    recordedAttempt({ id: "att_3", run: 1, round: 2, kind: "remediate", startedAt: at(10, 20), commands: 1, paths: [], execution: usage }),
+  ];
+  const answered = ["approach", "let_it_decide", "ship_as_is"].map((choice, index) => ({
+    finding_key: `stp_${index}`,
+    decision: "decide",
+    choice,
+    note: choice === "approach" ? "Keep the old importer behind a flag." : "noted",
+    decided_at: new Date(Date.parse(at(11, 0)) + index * 20_000).toISOString(),
+    superseded_at: null,
+  }));
+  const run2 = verified(recordedAttempt({ id: "att_4", run: 2, round: 1, kind: "remediate", startedAt: at(11, 5), commands: 1, paths: [], execution: usage }));
+  const words = (steps: ReturnType<typeof loopSteps>) => steps.map(({ text }) => text).reverse();
+  const LOOP = [
+    "Provisioning the worktree",
+    "Executing",
+    "Sealing the change set",
+    "Independent review",
+    "Refinement round 1",
+    "Sealing the change set",
+    "Verification",
+    "Refinement round 2",
+    "Sealing the change set",
+    "You answered 3 findings",
+    "Provisioning the worktree",
+    "Refinement round 3",
+    "Sealing the change set",
+    "Verification 2",
+  ];
+
+  it("reads review, decision, refinement and verification from the records, with no second review", () => {
+    const steps = loopSteps({
+      history: [], jobs: [], active: undefined, attempts: [...run1, run2], verdicts: answered, log: new StageLog(), now: at(12, 0),
+    });
+    expect(words(steps)).toEqual(LOOP);
+    expect(words(steps).filter((text) => text === "Independent review")).toHaveLength(1);
+    // The answers behind the decision's `i`, in the words the person chose.
+    expect(steps.find(({ text }) => text === "You answered 3 findings")?.reason).toBe(
+      "1. Your approach: Keep the old importer behind a flag.\n2. Let it decide.\n3. Ship as it is.",
+    );
+  });
+
+  it("lists the continued run's stages once, live from its log and then from its records", () => {
+    const live: Job = {
+      id: "run-2", repoId: "repo", key: "PRB-15", kind: "decide", label: "Run engineering loop", state: "running",
+      startedAt: at(11, 4), endedAt: null, error: null, resultKey: null, result: null,
+      log: "  worktree /w on b at c\n  remediation round 1 of at most 6\n  sealing the change set\n  verifying closures, round 1\n",
+    };
+    const during = loopSteps({
+      history: [], jobs: [live], active: live, attempts: run1, verdicts: answered, log: new StageLog(), now: at(11, 30),
+    });
+    expect(words(during)).toEqual(LOOP);
+    // Its attempt on record before the run has ended: listed from the record, and not from the log again.
+    const recordedToo = loopSteps({
+      history: [], jobs: [live], active: live, attempts: [...run1, run2], verdicts: answered, log: new StageLog(), now: at(11, 30),
+    });
+    expect(words(recordedToo)).toEqual(LOOP);
+    const ended = { ...live, state: "completed" as const, endedAt: at(11, 40) };
+    const after = loopSteps({
+      history: [], jobs: [ended], active: undefined, attempts: [...run1, run2], verdicts: answered, log: new StageLog(), now: at(12, 0),
+    });
+    expect(words(after)).toEqual(LOOP);
+  });
+
+  it("goes on counting a round a continued run starts again at 1, where the stalled round before it was also 1", () => {
+    const stalled = recordedAttempt({ id: "att_2", run: 1, round: 1, kind: "remediate", startedAt: at(10, 10), commands: 1, paths: [], execution: usage });
+    const steps = loopSteps({
+      history: [], jobs: [], active: undefined, attempts: [run1[0]!, stalled, run2], verdicts: answered, log: new StageLog(), now: at(12, 0),
+    });
+    expect(words(steps).filter((text) => text.startsWith("Refinement"))).toEqual(["Refinement round 1", "Refinement round 2"]);
+  });
+
+  it("counts a continued run that reviews its branch afresh as a verification of the ticket", () => {
+    const fresh = recordedAttempt({ id: "att_4", run: 2, round: 0, kind: "execute", startedAt: at(11, 5), commands: 1, paths: [], execution: usage, review: usage });
+    const steps = loopSteps({
+      history: [], jobs: [], active: undefined, attempts: [...run1, fresh], verdicts: answered, log: new StageLog(), now: at(12, 0),
+    });
+    expect(words(steps).slice(-4)).toEqual(["Provisioning the worktree", "Executing", "Sealing the change set", "Verification 2"]);
+    expect(words(steps).filter((text) => text === "Independent review")).toHaveLength(1);
   });
 });
 
@@ -736,6 +836,7 @@ describe("loopSteps across runs", () => {
       jobs: [...jobs, live],
       active: live,
       attempts: [earlier, first],
+      verdicts: [],
       log: new StageLog(),
       now: "2026-09-24T02:05:00.000Z",
     });
@@ -756,6 +857,7 @@ describe("loopSteps across runs", () => {
       jobs: [...jobs, ended],
       active: undefined,
       attempts: [earlier, first],
+      verdicts: [],
       log: new StageLog(),
       now: "2026-09-24T02:31:00.000Z",
     });
@@ -774,6 +876,7 @@ describe("loopSteps across runs", () => {
       jobs: [...jobs, ended],
       active: undefined,
       attempts: [earlier, first, third],
+      verdicts: [],
       log: new StageLog(),
       now: "2026-09-24T02:31:00.000Z",
     });
@@ -807,6 +910,7 @@ describe("how a run ended, in the steps", () => {
       jobs: [],
       active: undefined,
       attempts: [],
+      verdicts: [],
       log: new StageLog(),
       now: "2026-09-27T13:00:00.000Z",
     });
@@ -819,5 +923,36 @@ describe("how a run ended, in the steps", () => {
     for (const outcome of RUN_VERDICTS) {
       expect(outcomeSentence(outcome), outcome).not.toMatch(/^The run ended: /);
     }
+  });
+});
+
+describe("a person's answers, in the steps", () => {
+  it("lists a sitting once, at the time its last answer was given, each finding once in the words that stand, and never an endorsement", () => {
+    const answer = (over: Record<string, unknown>) => ({
+      review: { reference: "PRB-20" },
+      finding_key: "e".repeat(64),
+      decision: "decide",
+      choice: "approach",
+      note: "Add a test script that runs the suite.",
+      decided_at: "2026-09-27T17:40:00.000Z",
+      superseded_at: null,
+      ...over,
+    });
+    const steps = loopSteps({
+      history: [],
+      jobs: [],
+      active: undefined,
+      attempts: [],
+      log: new StageLog(),
+      now: "2026-09-27T18:00:00.000Z",
+      verdicts: [
+        answer({}),
+        answer({ finding_key: "a".repeat(64), choice: "ship_as_is", note: "Ship it.", decided_at: "2026-09-27T17:41:00.000Z" }),
+        answer({ note: "An earlier answer.", superseded_at: "2026-09-27T17:40:00.000Z" }),
+        answer({ decision: "endorse", choice: undefined }),
+      ],
+    });
+    expect(steps.map(({ text, at }) => [text, at])).toEqual([["You answered 2 findings", "2026-09-27T17:41:00.000Z"]]);
+    expect(steps[0]!.reason).toBe("1. Your approach: Add a test script that runs the suite.\n2. Ship as it is.");
   });
 });

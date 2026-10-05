@@ -9,7 +9,7 @@ at each, the rule ids each carries and which evaluation round scored it — is c
 Three properties are why a verdict here can be trusted:
 
 - **`verification_strength`** per criterion — the executor writes the tests the criteria refer to, so `directly_verified`, `proxy` and `asserted_only` are distinguished and the reviewer must name the assertion.
-- **Stable finding keys** — `hash(rule_id | criterion_id | file | symbol)`, so resolution and waivers survive a re-run.
+- **Stable finding keys** — `hash(rule_id | criterion_id | file | symbol)`, so resolution and waivers survive a re-run. A `check.*` finding's symbol is the check's name: its statement names the pinned command, and a changed command leaves the key, and every answer on it, where it was.
 - **`blocking` decided by a policy matrix, not arithmetic** — deterministic security/scope/check failures always block; high-risk semantic findings block above a confidence floor; ordinary semantic findings are advisory. Model confidence is not a multiplicand in a hard gate.
 - **A fifth outcome since D-051** — a finding the executor can close without a decision only a human can make is `remediable`: it goes back to the executor as a new attempt, and the gate stays closed while it does. Routing is one structured question — *who can close this* — answered `executor`, `human` or `unclear`, and only an affirmative `executor` routes. `context.*` and `security.*` never route at all.
 

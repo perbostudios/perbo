@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { NEVER_HANDED_FAMILIES, SecretIndex, type ReviewArtifact } from "@perbo/contracts";
 import { isRemediableFamily } from "@perbo/review";
+import { initRepository } from "@perbo/test-support";
 import { BundleStore } from "../../bundle.js";
-import { decidedDelivery, judgedOnRecord, remediationToContinue } from "./continuation.js";
+import { decidedDelivery, judgedOnRecord, remediationToContinue, restoreJudgedCommit } from "./continuation.js";
 import { finding, makeReview } from "../../test-support/records.js";
 
 const TICKET = "tkt_scp194";
@@ -71,7 +72,7 @@ function writeVerification(
 
 describe("the remediation a re-run continues", () => {
   it("has nothing to continue where no review is on record", () => {
-    expect(remediationToContinue({ bundles: store(), ticket_id: TICKET, decided: [], history: [] })).toBeNull();
+    expect(remediationToContinue({ bundles: store(), ticket_id: TICKET, decided: [], history: [], declines: [] })).toBeNull();
   });
 
   it("continues what the verifications left open, from the commit the last one judged", () => {
@@ -89,13 +90,13 @@ describe("the remediation a re-run continues", () => {
       "2026-08-27T01:00:00.000Z",
     );
 
-    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] });
+    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [], declines: [] });
 
     expect(continuing?.findings.map((entry) => entry.key)).toEqual([open.key]);
     expect(continuing?.head_commit).toBe("fed4321");
   });
 
-  it("never gives a finding the executor declined again, though an earlier round was given it", () => {
+  it("never gives a finding the executor declined again by itself, though an earlier round was given it: it is the person's", () => {
     const bundles = store();
     const declined = finding({ key: "a".repeat(64) });
     const open = finding({ key: "b".repeat(64) });
@@ -111,11 +112,17 @@ describe("the remediation a re-run continues", () => {
     );
     writeVerification(
       bundles,
-      { findings_given: open.key, findings_open: open.key, findings_declined: declined.key, head_commit: "fed4322" },
+      { findings_given: open.key, findings_open: open.key, head_commit: "fed4322" },
       "2026-08-27T02:00:00.000Z",
     );
 
-    const continuing = remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] });
+    const continuing = remediationToContinue({
+      bundles,
+      ticket_id: TICKET,
+      decided: [],
+      history: [],
+      declines: [{ finding_key: declined.key, reason: "No practice determines it.", at: "2026-08-27T01:30:00.000Z" }],
+    });
 
     expect(continuing?.findings.map((entry) => entry.key)).toEqual([open.key]);
   });
@@ -128,7 +135,7 @@ describe("the remediation a re-run continues", () => {
       "2026-08-27T00:00:00.000Z",
     );
 
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] })?.head_commit).toBe("def5678");
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [], declines: [] })?.head_commit).toBe("def5678");
   });
 
   it("refuses a verification that never recorded what was still open", () => {
@@ -140,7 +147,7 @@ describe("the remediation a re-run continues", () => {
     );
     writeVerification(bundles, { head_commit: "fed4321" }, "2026-08-27T01:00:00.000Z");
 
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [] })).toBeNull();
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [], history: [], declines: [] })).toBeNull();
   });
 });
 
@@ -161,7 +168,7 @@ describe("the delivery a person's answers take without a round", () => {
     decided_at: at,
   });
   const delivery = (bundles: BundleStore, at: string) =>
-    decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [answer(at)], history: [] });
+    decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [answer(at)], history: [], declines: [] });
 
   it("counts a finding the executor closed, as a verification recorded it, beside the answered one", () => {
     const bundles = store();
@@ -230,7 +237,7 @@ describe("the delivery a person's answers take without a round", () => {
     );
     const at = "2026-08-27T02:00:00.000Z";
     const both = [answer(at), { ...answer(at), finding_key: remediable.key }];
-    expect(decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: both, history: [] })).toBeNull();
+    expect(decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: both, history: [], declines: [] })).toBeNull();
   });
 
   it("delivers nothing where no standing finding was answered by a person", () => {
@@ -269,6 +276,7 @@ describe("the delivery a person's answers take without a round", () => {
         repository_id: "repo_fixture",
         decided: [{ ...answer("2026-08-27T02:00:00.000Z"), review_id }],
         history: [],
+        declines: [],
       });
     expect(named("rev_0000000000000001")).toBeNull();
     expect(named("rev_0000000000000002")?.decided).toHaveLength(1);
@@ -285,11 +293,11 @@ describe("the delivery a person's answers take without a round", () => {
       { findings_given: forPerson.key, findings_open: "", head_commit: "fed4321" },
       "2026-08-27T02:00:00.000Z",
     );
-    const again = decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed], history: [] });
+    const again = decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed], history: [], declines: [] });
     expect(again?.head_commit).toBe("fed4321");
     expect(again?.decided).toEqual([handed]);
     expect(again?.review.findings[0]).toMatchObject({ status: "resolved", outcome: "fixed" });
-    expect(judgedOnRecord({ bundles, ticket_id: TICKET, history: [] })?.head_commit).toBe("fed4321");
+    expect(judgedOnRecord({ bundles, ticket_id: TICKET, history: [], declines: [] })?.head_commit).toBe("fed4321");
   });
 
   it("does not hand a finding a round verified closed to the executor again", () => {
@@ -307,9 +315,9 @@ describe("the delivery a person's answers take without a round", () => {
       "2026-08-27T02:00:00.000Z",
     );
     const shipped = { ...answer("2026-08-27T03:00:00.000Z"), finding_key: other.key };
-    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [handed, shipped], history: [] })).toBeNull();
+    expect(remediationToContinue({ bundles, ticket_id: TICKET, decided: [handed, shipped], history: [], declines: [] })).toBeNull();
     expect(
-      decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed, shipped], history: [] })
+      decidedDelivery({ bundles, ticket_id: TICKET, repository_id: "repo_fixture", decided: [handed, shipped], history: [], declines: [] })
         ?.decided.map((row) => row.choice),
     ).toEqual(["approach", "ship_as_is"]);
   });
@@ -342,7 +350,7 @@ describe("the delivery a person's answers take without a round", () => {
         }),
         "2026-08-27T00:00:00.000Z",
       );
-      const input = { bundles, ticket_id: TICKET, decided: [handed], history: [] };
+      const input = { bundles, ticket_id: TICKET, decided: [handed], history: [], declines: [] };
       return {
         continuing: remediationToContinue(input),
         delivered: decidedDelivery({ ...input, repository_id: "repo_fixture" }),
@@ -362,5 +370,56 @@ describe("the answers a finding takes", () => {
     for (const family of ["scope", "changeset", "check", "legibility", "criterion", "evidence"]) {
       expect(isRemediableFamily(`${family}.x`), family).toBe(true);
     }
+  });
+});
+
+/**
+ * SCP-194: after a refused round the branch goes back to the commit last
+ * judged, and only the ticket's own branch moves. A worktree on any other
+ * branch, or on none, is left where it is.
+ */
+describe("the branch a refused round is put back on", () => {
+  const BRANCH = "perbo/prb-194-tkt_scp194";
+
+  /** A worktree on the ticket's branch: the judged commit, and a refused one on it. */
+  function refusedBranch() {
+    const dir = mkdtempSync(join(tmpdir(), "perbo-restore-"));
+    scratch.push(dir);
+    const repo = initRepository(dir, { files: { "src/index.ts": "export const version = 1;\n" } });
+    repo.git("checkout", "-q", "-b", BRANCH);
+    const judged = repo.commit({ "src/index.ts": "export const version = 2;\n" }, "judged");
+    const refused = repo.commit({ "test/extra.test.ts": "// widened\n" }, "refused");
+    const bundles = store();
+    writeReview(
+      bundles,
+      makeReview({ decision: "changes_requested", findings: [finding()], head_commit: judged }),
+      "2026-08-27T00:00:00.000Z",
+    );
+    const restore = () => restoreJudgedCommit({ worktree: dir, branch: BRANCH, bundles, ticket_id: TICKET });
+    const at = (ref: string) => repo.git("rev-parse", ref).trim();
+    return { repo, judged, refused, restore, at };
+  }
+
+  it("moves the ticket's branch back to the judged commit", async () => {
+    const { judged, restore, at } = refusedBranch();
+    expect(await restore()).toBe(judged);
+    expect(at(`refs/heads/${BRANCH}`)).toBe(judged);
+  });
+
+  it("moves nothing where the worktree is on another branch", async () => {
+    const { repo, refused, restore, at } = refusedBranch();
+    repo.git("checkout", "-q", "-b", "someone-else");
+    expect(await restore()).toBeNull();
+    expect(at("refs/heads/someone-else")).toBe(refused);
+    expect(at(`refs/heads/${BRANCH}`)).toBe(refused);
+    expect(at("HEAD")).toBe(refused);
+  });
+
+  it("moves nothing where the worktree is on no branch", async () => {
+    const { repo, refused, restore, at } = refusedBranch();
+    repo.git("checkout", "-q", "--detach");
+    expect(await restore()).toBeNull();
+    expect(at("HEAD")).toBe(refused);
+    expect(at(`refs/heads/${BRANCH}`)).toBe(refused);
   });
 });

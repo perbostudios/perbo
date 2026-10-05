@@ -1,4 +1,5 @@
 import { EXIT_CODES, LimitExceededError } from "@perbo/contracts";
+import { ProviderError } from "@perbo/model";
 import {
   AgentConfigurationPresentError,
   AnswersOwedError,
@@ -28,6 +29,25 @@ function refusalReport(noun: string, error: RunRefusedError): string {
 }
 
 /**
+ * What a command says when its model provider refused the request Perbo sent
+ * (`request_refused`): that it was refused, in the provider's words, and that
+ * the same request is refused again. Nothing offers to try again.
+ */
+export function refusedRequestSentence(noun: string, said: string): string {
+  return (
+    `${noun} was refused by the model provider: ${said}. The provider refuses the request ` +
+    "Perbo sends as it is built, so trying again will not help."
+  );
+}
+
+/**
+ * A command whose model provider refused the request Perbo sent, said in the
+ * command's own words. It exits `request_refused`, which a caller does not run
+ * again.
+ */
+export class RequestRefusedError extends Error {}
+
+/**
  * One sentence per failure class, with the fix where one is known. A stack
  * trace is kept only for an error nothing here recognises, because a partner
  * reading "the review did not complete: Error: spawn claude ENOENT" followed
@@ -37,6 +57,10 @@ export function describeFailure(command: string, error: unknown): { message: str
   const noun =
     command === "review" ? "the review" : command === "run" ? "the run" : `\`perbo ${command}\``;
   const code = EXIT_CODES.did_not_complete;
+  if (error instanceof RequestRefusedError) return { message: error.message, code: EXIT_CODES.request_refused };
+  if (error instanceof ProviderError && error.kind === "request_refused") {
+    return { message: refusedRequestSentence(noun, error.message), code: EXIT_CODES.request_refused };
+  }
   if (error instanceof RunRefusedError) return { message: refusalReport(noun, error), code };
   if (error instanceof AnswersOwedError) return { message: error.message, code };
   if (error instanceof LimitExceededError) {

@@ -20,7 +20,7 @@ import type { LoopMergeOutcome } from "../../merge.js";
 import { RunRefusedError } from "../../refusal.js";
 import type { TicketRunConfig } from "./config.js";
 import { resolvePorts, type LoopPorts } from "./context.js";
-import { attemptsThatSealed, judgedOnRecord, retainedReview } from "./continuation.js";
+import { attemptsThatSealed, declinesOfRecord, judgedOnRecord, retainedReview } from "./continuation.js";
 import { publish, type PullRequestRef } from "./deliver.js";
 import { branchLine } from "./relevel.js";
 
@@ -135,7 +135,12 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
   const bundles = new BundleStore({ root: config.bundle_root, retainContext: config.retain_context });
   const attemptsPath = join(config.state_root, attemptsFileName(contract.ticket_id));
   const prior = readAttemptsRecord(attemptsPath);
-  const judged = judgedOnRecord({ bundles, ticket_id: contract.ticket_id, history: args.history ?? [] });
+  const judged = judgedOnRecord({
+    bundles,
+    ticket_id: contract.ticket_id,
+    history: args.history ?? [],
+    declines: declinesOfRecord(prior),
+  });
   if (judged === null) refuse(`no review of ${key} is on record, so there is nothing to publish its branch under`);
   const { head_commit } = judged!;
   const attempts = attemptsThatSealed(prior, head_commit);

@@ -256,7 +256,7 @@ through local `gh`, hands its title and body to a model as delimited `trust="ext
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
 the work has, each with an assertion and a kind, a proposed scope of as many globs as the work
 lands in, a rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v6`). The draft is written beside the ticket as
+(`@perbo/planning`, prompt `draft_v7`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
 created in `plan_review`. The ticket is named per D-127.
 **A draft is never executed; only an approved contract is.** The person's
@@ -605,7 +605,9 @@ iterations, commands, wall clock, tokens and cost **against their ceilings** (`i
 ceiling hit`, using the ceiling in force when it was hit rather than the one in the file today, and
 `no ceiling` where nothing bounds one), the
 checks — the whole-change results, then each node's under its node id with the paths its run was
-narrowed to, or the reason it was not ([D-107](../../docs/11-open-decisions.md)) — the review
+narrowed to and, where the record has it, what that run came to (`own run failed`, `errored` or `skipped`), beside the mark,
+which is the pinned command's, or the reason it was not narrowed
+([D-107](../../docs/11-open-decisions.md)) — the review
 decision and every finding with its rule, routing, location and statement as persisted,
 closure verification per round, the executor's declines, and the pull request — marked
 `(handed off — a person opened it, not the loop)` when the last row that walked the ticket to
@@ -739,6 +741,7 @@ learning curve is allowed 1.25×, every confounder, and a verdict of `pass`, `fa
 | `1` | Usage or input error: bad flags, an unreadable contract, a verdict naming a `criterion_id` absent from the plan |
 | `2` | `changes_requested`, `escalate` or `remediable` — the review completed and the gate is closed |
 | `3` | `error` or `incomplete` — the review did not complete |
+| `4` | A command other than `review` whose model provider refused the request Perbo sent; `review` exits `3` with its error's kind `request_refused` |
 
 `2` and `3` are separate because they fail differently. A caller treating every non-zero code as
 blocking is correct; a caller checking only for `2` merges changes whose review never ran.

@@ -453,6 +453,41 @@ describe("a pinned check the change itself broke (d069)", () => {
   });
 });
 
+describe("a check finding names the pinned command that judged it", () => {
+  const measured = (asserted_status: CheckResult["status"]) =>
+    scriptedModel([submits({ ...bothMet, check_assertions: [{ check_id: "check_ut", asserted_status }] })]);
+  const checkFinding = async (checks: CheckResult[]) => {
+    const status = checks[0]!.status;
+    const { artifact } = await run({ checks, model: measured(status), baseVerified: true });
+    return artifact.findings.find((entry) => entry.rule_id === "check.unit")!;
+  };
+
+  it("says the command in a failed check's statement and in a skipped one's", async () => {
+    const failed = await checkFinding([{ ...passingChecks[0]!, status: "failed", summary: "exited 1" }]);
+    const skipped = await checkFinding([
+      { ...passingChecks[0]!, status: "skipped", summary: "no database available" },
+    ]);
+    expect(failed.statement).toBe("The unit check (`vitest run`) failed (exited 1).");
+    expect(skipped.statement).toMatch(/^The unit check \(`vitest run`\) did not run \(no database available\)\. /);
+  });
+
+  it("keys the finding by the check alone, so an answer on record survives a changed command", async () => {
+    const under = (command: string) =>
+      checkFinding([{ ...passingChecks[0]!, status: "failed", summary: "exited 1", command }]);
+    const vitest = await under("vitest run");
+    const pnpm = await under("pnpm test");
+    expect(pnpm.statement).toContain("(`pnpm test`)");
+    expect(pnpm.key).toBe(vitest.key);
+  });
+
+  it("names the check alone where no command was recorded", async () => {
+    const failed = await checkFinding([
+      { ...passingChecks[0]!, status: "failed", summary: "exited 1", command: null },
+    ]);
+    expect(failed.statement).toBe("The unit check failed (exited 1).");
+  });
+});
+
 describe("verification strength", () => {
   it("downgrades directly_verified when no assertion is named", async () => {
     const { artifact } = await run({

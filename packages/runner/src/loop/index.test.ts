@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { hostname } from "node:os";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -398,7 +398,7 @@ describe("the loop closes", () => {
           return {
             prompt_version: "closure_verify_v1",
             per_finding: keys.map((finding_key) => ({ finding_key, status: "cannot_tell", pointer: "" })),
-            deterministic_failure: "check_ut is failed: the fixed tree does not pass the pinned checks",
+            deterministic_failure: "the unit check (`node -e process.exit(0)`) failed on the round's tree; the round changed src/round-1.ts.",
             all_closed: false,
             open_keys: keys,
             usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
@@ -410,8 +410,11 @@ describe("the loop closes", () => {
     });
 
     expect(result.outcome).toBe("changes_requested");
-    expect(result.detail).toContain("pinned checks");
+    expect(result.detail).toMatch(/^the fix regressed: the unit check \(`node -e process\.exit\(0\)`\) failed/);
   }, 60_000);
+
+  /** What the verifier says of a round that left the pinned check failing. */
+  const STILL_FAILING = "the unit check (`node -e process.exit(0)`) failed on the round's tree; the round changed src/round-1.ts.";
 
   /**
    * d069 (SCP-276): a round given the failing pinned check that leaves it
@@ -481,12 +484,9 @@ describe("the loop closes", () => {
   };
 
   it("a routed check still failing after its round stops as the checks failing, not as a regression", async () => {
-    const result = await stopAfterRoutedCheck(
-      "check",
-      "check_ut is failed: the fixed tree does not pass the pinned checks",
-    );
+    const result = await stopAfterRoutedCheck("check", STILL_FAILING);
     expect(result.outcome).toBe("changes_requested");
-    expect(result.detail).toMatch(/^the pinned checks still fail after remediation round 1: check_ut is failed/);
+    expect(result.detail).toBe(`the pinned checks still fail after remediation round 1: ${STILL_FAILING}`);
   }, 60_000);
 
   it("a scope escape after a routed check's round is a regression and says so", async () => {
@@ -3497,45 +3497,63 @@ describe("a scope escape handed back to a remediation round", () => {
     expect(bundle?.versions).toMatchObject({ model: "none", prompt: "none" });
     expect(bundle?.replayability).toBe("exact");
     // The review stays on record, anchored on the commit it judged, with the
-    // refusal's open set: a later run finds the review and sees the branch has
-    // moved past what was judged.
-    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id, history: [] });
+    // refusal's open set, and the branch is back at that commit: the refused
+    // commit is on the record, never at the branch's head.
+    const judged = judgedOnRecord({ bundles: store, ticket_id: contract.ticket_id, history: [], declines: [] });
     expect(judged?.review.review_id).toBe("rev_0000000000000196");
     expect(judged?.head_commit).toBe(first.final_review!.target.head_commit);
     expect(judged?.head_commit).not.toBe(round.attempt.head_commit);
     expect(judged?.openKeys).toEqual(new Set([scopeFinding.key]));
-
-    // Run 3 on the widened branch: nothing judged that commit, so the run
-    // reviews it afresh rather than continuing from the refusal.
-    const reviewed: unknown[] = [];
+    const branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome });
+    expect(repo.git("rev-parse", `refs/heads/${branch}`).trim()).toBe(judged!.head_commit);
+    expect(repo.git("cat-file", "-t", round.attempt.head_commit!).trim()).toBe("commit");
+    const sealedBundle = store.forTicket(contract.ticket_id).find((entry) => entry.subject_id === round.attempt.attempt_id)!;
+    expect(store.artifact(sealedBundle, "change.diff")).toContain("test/extra.test.ts");
+    // The refused finding is the person's now (D-132): their answer runs one
+    // round on the judged commit with their words, verified, and no review.
+    const verified: Array<{ findings: Array<{ key: string }> }> = [];
+    const closesEverything = (seen: Array<{ findings: Array<{ key: string }> }>) =>
+      (async (input: { findings: Array<{ key: string }> }) => {
+        seen.push(input);
+        const keys = input.findings.map((entry) => entry.key);
+        return {
+          prompt_version: "closure_verify_v1",
+          per_finding: keys.map((finding_key) => ({ finding_key, status: "closed", pointer: "src/feature.ts" })),
+          deterministic_failure: null,
+          all_closed: true,
+          open_keys: [],
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          cost_micros: 30,
+          cost_basis: "provider_list_estimate",
+        };
+      }) as never;
+    const agent = agentDouble((worktree) => {
+      writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 2;\n");
+    });
     const third = await runTicket({
       config,
       contract,
+      decided: [
+        {
+          finding_key: scopeFinding.key,
+          choice: "approach",
+          review_id: null,
+          note: "Keep the change inside src/ and drop the extra test file.",
+          author: "Owen <owen@example.com>",
+          decided_at: new Date().toISOString(),
+        },
+      ],
       hooks: {
-        agent: agentDouble((worktree) => {
-          rmSync(join(worktree, "test", "extra.test.ts"));
-        }).run as never,
-        review: (async (input: Record<string, unknown>) => {
-          reviewed.push(input);
-          return {
-            artifact: makeReview({
-              review_id: "rev_0000000000000197",
-              decision: "approve" as const,
-              findings: [],
-              head_commit: input.head_commit as string,
-              changeset_id: (input.changeset as { changeset_id: string }).changeset_id,
-            }),
-            bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
-          };
+        agent: agent.run as never,
+        review: (async () => {
+          throw new Error("the person's answer acts on the judged commit, never a fresh review");
         }) as never,
-        verify: (async () => {
-          throw new Error("a widened branch is reviewed afresh, never verified against the refusal");
-        }) as never,
+        verify: closesEverything(verified),
       },
     });
-    expect(reviewed).toHaveLength(1);
-    expect(third.rounds[0]!.kind).toBe("execute");
-    expect(third.detail).not.toContain("widened the change set");
+    expect(third.rounds.map((entry) => entry.kind)).toEqual(["remediate"]);
+    expect(agent.calls[0]).toContain("Keep the change inside src/ and drop the extra test file.");
+    expect(verified.map((input) => input.findings.map((entry) => entry.key))).toEqual([[scopeFinding.key]]);
     expect(third.outcome).toBe("approved");
   }, 90_000);
 });
@@ -3645,19 +3663,22 @@ describe("a graphed ticket's round", () => {
     });
   };
 
-  /** An executor that writes one source file and one test file. */
+  /** An executor that writes one source file and one passing `node:test` file. */
   const writesBoth = () =>
     agentDouble((worktree) => {
       mkdirSync(join(worktree, "src"), { recursive: true });
       mkdirSync(join(worktree, "test"), { recursive: true });
       writeFileSync(join(worktree, "src", "feature.ts"), "export const total = (n) => n.length;\n");
-      writeFileSync(join(worktree, "test", "feature.test.ts"), "// exercises total()\n");
+      writeFileSync(
+        join(worktree, "test", "feature.test.js"),
+        'require("node:test")("exercises total()", () => {});\n',
+      );
     });
 
   it("records the pinned check once per node beside the whole-change result", async () => {
     const repo = runnerRepository(scratch);
     const contract = graphed(repo.head);
-    const config = makeConfig(repo.dir);
+    const config = makeConfig(repo.dir, undefined, ["node", "--test"]);
     const agent = writesBoth();
     const reviewInputs: Array<Record<string, unknown>> = [];
 
@@ -3680,12 +3701,13 @@ describe("a graphed ticket's round", () => {
     expect(module.node?.scope).toBe("task");
     expect(module.node?.note).toContain("test file");
 
-    // The node whose paths hold the change's test file was narrowed to it.
-    // The fixture worktree has no test runner to resolve, so this asserts what
-    // the run was aimed at and not what it concluded.
+    // The node whose paths hold the change's test file was narrowed to it,
+    // with the pinned check's own runner.
     const tests = checks.find((check) => check.node?.node_id === "node_tests")!;
     expect(tests.node?.scope).toBe("files");
-    expect(tests.node?.paths).toEqual(["test/feature.test.ts"]);
+    expect(tests.node?.paths).toEqual(["test/feature.test.js"]);
+    expect(tests.command).toBe("node --test test/feature.test.js");
+    expect(tests.status).toBe("passed");
 
     // D-107: reviewed once per node, in plan order, then once overall — three
     // calls. A node's own call is handed only that node's own check result; the

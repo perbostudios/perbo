@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
-import { credentialValuesOf, redactCredentials, replaceValues } from "@perbo/contracts";
+import { EXIT_CODES, credentialValuesOf, redactCredentials, replaceValues } from "@perbo/contracts";
+import { RefusedRequestError } from "../shared/reading-retry.js";
 
 export interface ProcessResult {
   code: number;
@@ -384,6 +385,9 @@ export function startLineProcess(
  * a failure the person caused.
  */
 export function requireSuccess(result: ProcessResult): string {
+  // The CLI's exit code, not its words, says the provider refused the request.
+  if (result.code === EXIT_CODES.request_refused && !result.cancelled)
+    throw new RefusedRequestError(result.stderr.trim() || `CLI exited with code ${result.code}.`);
   if (result.code !== 0)
     throw new Error(
       result.cancelled

@@ -18,14 +18,15 @@ const sessionId = "90000000-0000-4000-8000-000000000002";
 const jobId = "90000000-0000-4000-8000-000000000003";
 const key = "PRB-901";
 
-afterEach(() => { vi.useRealTimers(); cleanup(); vi.restoreAllMocks(); nodes = []; });
+afterEach(() => { vi.useRealTimers(); cleanup(); vi.restoreAllMocks(); nodes = []; live = []; });
 
 let nodes: GraphView["nodes"] = [];
+let live: GraphView["live"]["nodes"] = [];
 const graph = (): GraphView => ({
   key, state: "planning", approved: false, outcome: "A sample plan", nodes, criteria: nodes.flatMap((node) => node.criteria),
   edges: [], pathsAllowed: [], size: sizeEstimate({ nodes: 0, criteria: 0, files: 0, packages: 0 }),
   editCount: 0, history: [], digest: "0".repeat(64),
-  live: { attempt: null, nodes: [], outside: [], note: null },
+  live: { attempt: live.length ? "attempt_1" : null, nodes: live, outside: [], note: null },
 });
 
 async function pane() {
@@ -95,6 +96,78 @@ describe("a node on the Graph pane (D-138)", () => {
     await pane();
     const node = await screen.findByRole("button", { name: "Node node_1: First part" });
     expect(node.textContent).toContain("1 criterion · src/a/** · src/b.ts");
+  });
+});
+
+/**
+ * A node's own narrowed run that failed where the pinned command passed
+ * (D-107): the host names it only while `graphNodeRuns` is on, and the node
+ * says it as evidence beside its state, never as the check failing.
+ */
+describe("a node's own tests on the Graph pane", () => {
+  const criterion = { id: "ac_1", text: "It holds.", kind: "test" as const, assertion: "It holds.", requirement: null, manual: null };
+  const passed = {
+    id: "node_1",
+    state: "checks_passed" as const,
+    changed: ["src/a/one.ts"],
+    criteria: [],
+    checks: [{ name: "Tests", status: "passed" }],
+  };
+
+  it("shows nothing of them where the view names none, as with the switch off", async () => {
+    nodes = [{ id: "node_1", title: "First part", criteria: [criterion], paths: ["src/a/**"], page: null }];
+    live = [passed];
+    await pane();
+    const node = await screen.findByRole("button", { name: "Node node_1: First part" });
+    expect(node.querySelector(".state")?.textContent).toBe("checks passed");
+    expect(node.querySelectorAll(".state")).toHaveLength(1);
+    expect(node.querySelector(".node-own-run")).toBeNull();
+    expect(node.textContent).not.toMatch(/own tests/);
+  });
+
+  it("marks a node whose own tests failed, and says the pinned command passed and judges the check", async () => {
+    nodes = [{ id: "node_1", title: "First part", criteria: [criterion], paths: ["src/a/**"], page: null }];
+    live = [{ ...passed, ownRuns: [{ name: "Tests", run: "failed" }] }];
+    await pane();
+    const node = await screen.findByRole("button", { name: "Node node_1: First part" });
+    // The state is the pinned command's, unchanged.
+    expect(node.querySelector(".state--checks_passed")?.textContent).toBe("checks passed");
+    expect(node.querySelector(".state--checks_failed")).toBeNull();
+    const own = screen.getByRole("note", { name: "Own tests under node_1" });
+    expect(own.querySelector(".state--own_run")?.textContent).toBe("own tests failed");
+    expect(own.textContent).toContain(
+      "Tests: this node\u2019s own tests failed. The pinned command passed, and only it judges the check.",
+    );
+  });
+
+  it("says an errored own run errored and a skipped one did not run", async () => {
+    nodes = [{ id: "node_1", title: "First part", criteria: [criterion], paths: ["src/a/**"], page: null }];
+    live = [
+      {
+        ...passed,
+        checks: [
+          { name: "Tests", status: "passed" },
+          { name: "Lint", status: "passed" },
+        ],
+        ownRuns: [
+          { name: "Tests", run: "errored" },
+          { name: "Lint", run: "skipped" },
+        ],
+      },
+    ];
+    await pane();
+    const node = await screen.findByRole("button", { name: "Node node_1: First part" });
+    expect(node.querySelector(".state--checks_passed")?.textContent).toBe("checks passed");
+    const [errored, skipped] = screen.getAllByRole("note", { name: "Own tests under node_1" });
+    expect(errored!.querySelector(".state--own_run")?.textContent).toBe("own tests errored");
+    expect(errored!.textContent).toContain(
+      "Tests: this node\u2019s own tests errored. The pinned command passed, and only it judges the check.",
+    );
+    expect(skipped!.querySelector(".state--own_run")?.textContent).toBe("own tests did not run");
+    expect(skipped!.textContent).toContain(
+      "Lint: this node\u2019s own tests did not run. The pinned command passed, and only it judges the check.",
+    );
+    expect(node.textContent).not.toMatch(/skipped/);
   });
 });
 

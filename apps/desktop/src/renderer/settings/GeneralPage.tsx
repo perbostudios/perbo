@@ -149,6 +149,20 @@ export function GeneralPage({ workspace, navigate }: PageProps) {
               <span className="spacer" />
               <Switch on={settings.reduceMotion} label="Reduce motion" onChange={(on) => save({ reduceMotion: on })} />
             </div>
+            <div className="general-row">
+              <div className="spacer">
+                <strong>Show each node&rsquo;s own tests</strong>
+                <p className="small muted">
+                  The Graph pane marks a node whose own tests did not pass while the pinned command passed. Only
+                  the pinned command judges the check.
+                </p>
+              </div>
+              <Switch
+                on={settings.graphNodeRuns}
+                label="Show each node's own tests"
+                onChange={(on) => save({ graphNodeRuns: on })}
+              />
+            </div>
           </section>
         </div>
         <div className="stack">

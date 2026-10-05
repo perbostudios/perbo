@@ -18,7 +18,7 @@ No findings that need you.
 ### Findings tied to no acceptance criterion
 
 - **blocks** · `check.lint` · unlocatable — a deterministic check measured this over the change set rather than at a path · measured
-  The lint check failed (1 error). Its last lines: packages/search/src/query.ts: prefer const
+  The lint check (`eslint .`) failed (1 error). Its last lines: packages/search/src/query.ts: prefer const
   Why it blocks: deterministic: a security, scope or check failure always blocks — no confidence term
 
 > **Legibility**: passed — every changed file renders in the diff

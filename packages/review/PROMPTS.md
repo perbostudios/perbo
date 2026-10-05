@@ -19,8 +19,8 @@ the same version must have been produced by the same reviewer (`prompt.ts:28-34`
 
 A third prompt sits beside these two but outside this package: `packages/runner/src/prompt.ts`
 briefs the *executor* — the coding agent making the change — and is versioned separately
-(`EXECUTOR_PROMPT_VERSION`, currently `executor_v11`, plus `RESUMED_EXECUTOR_PROMPT_VERSION`). It is
-not a reviewer prompt and this document does not catalogue it.
+(`EXECUTOR_PROMPT_VERSION`, currently `executor_v15`, plus `RESUMED_EXECUTOR_PROMPT_VERSION`, currently
+`executor_resumed_v3`). It is not a reviewer prompt and this document does not catalogue it.
 
 ## How a version is chosen at run time
 
@@ -30,21 +30,21 @@ harness option selects an older one — a run always builds the current prompt. 
 still be read from a stored artifact's `model.prompt_version`, but nothing in this codebase can
 produce a fresh review under one.
 
-`closureVerifySystemPrompt()` (`src/closure-verify.ts:124`) is the same shape: no version argument,
+`closureVerifySystemPrompt()` (`src/closure-verify.ts:125`) is the same shape: no version argument,
 exactly one closure-verification prompt in force at a time, `CLOSURE_VERIFY_PROMPT_VERSION`
-(`src/closure-verify.ts:40`).
+(`src/closure-verify.ts:41`).
 
 ## How a version is pinned in a review bundle
 
 Every `ReviewArtifact` carries the version that produced it in `model.prompt_version`, a required
-string (`packages/contracts/src/review.ts:475`), written by `runReview` at `src/review.ts:892`. The
-same value is copied onto `independence.context_builder` (`src/review.ts:870`, so two artifacts can
+string (`packages/contracts/src/review.ts:475`), written by `runReview` at `src/review.ts:900`. The
+same value is copied onto `independence.context_builder` (`src/review.ts:878`, so two artifacts can
 be compared for prompt identity from that field alone) and onto the run bundle's own
-`prompt_version` (`src/review.ts:908`, interface at `src/review.ts:114`). The runner writes that
+`prompt_version` (`src/review.ts:916`, interface at `src/review.ts:114`). The runner writes that
 artifact to `review.json` in the pull request's run bundle (`writeReviewBundle`,
 `packages/runner/src/loop/internal/review.ts`).
 Closure verification stamps its own version the same way, on `ClosureVerification.prompt_version`
-(`src/closure-verify.ts:68`, set throughout `verifyClosures`).
+(`src/closure-verify.ts:69`, set throughout `verifyClosures`).
 
 `prompt_version` is one of the keys the credential redactor never touches
 (`REDACTION_SKIPPED_KEYS`, `src/redact.ts:49`) — it is compared and matched downstream, not scanned
@@ -52,10 +52,21 @@ for secret shapes, so the version string always survives redaction byte-exact.
 
 ## The judging prompt — `reviewer_v11`
 
-`PROMPT_VERSION` covers everything the reviewer is shown — the system prompt, the tool schema, and
-the delimited blocks `buildContext` and `renderReadFileResult` produce (`src/prompt.ts:29-34`) — not
-only the prose in `systemPrompt()`: a changed byte anywhere in that surface is a new version and a
-fresh regression-suite score.
+`PROMPT_VERSION` covers what this package shows the reviewer — the system prompt, the tool schema,
+and the delimited blocks `buildContext` and `renderReadFileResult` produce (`src/prompt.ts:29-34`) —
+not only the prose in `systemPrompt()`: a changed byte anywhere in that surface is a new version and
+a fresh regression-suite score. What a transport adds to a turn is not in it. The OpenCode reviewer,
+when its model calls a tool, is next sent `NO_TOOLS`, the sentence that no tool is available, which
+lives in `@perbo/model` (`packages/model/src/opencode.ts`) and is held there by `opencode.test.ts`,
+not by this version.
+
+A finding's `statement` is not in that surface either. The reviewer's context carries the check
+results themselves (`src/prompt.ts:303-316`), never a finding, and a `check.*` finding's statement —
+the check by name and by its pinned command, its status and summary, and a failed check's last lines
+(`checkFindings`, `src/review.ts:215`; `checkNamed`, `src/review.ts:251`) — is composed after the
+reviewer's turn, for the person to read. Where it reaches another model — the executor's remediation
+brief, or the Architect drafting a decision's answers in `@perbo/planning` — it arrives as data inside
+that prompt's own delimited block, and that prompt's version moves only with its template.
 
 Every block after the system prompt is delimited with a `<perbo:kind trust="…">` /
 `</perbo:kind>` pair (`OPEN`/`CLOSE`, `src/prompt.ts:43-49`) and carries a trust tier:
@@ -98,25 +109,30 @@ the deterministic checks, and the fixed policy matrix below, never chosen by the
 
 ## The closure-verification prompt — `closure_verify_v2`
 
-`closureVerifySystemPrompt()` (`src/closure-verify.ts:124-141`) asks about specific findings from an
+`closureVerifySystemPrompt()` (`src/closure-verify.ts:125-142`) asks about specific findings from an
 earlier review, never raises a new one, and never reconsiders whether a finding was right. Two
 deterministic gates run before any model call and can only fail verification, never pass it: a
-failed pinned check or a scope escape short-circuits with every finding `cannot_tell`
-(`src/closure-verify.ts:172-217`), and a `check.*` finding routed by the review is closed by that
-same passing evidence without asking the model at all (`src/closure-verify.ts:219-234`).
+failed pinned check, a scope escape or illegible bytes short-circuit with every finding `cannot_tell`
+(`src/closure-verify.ts:209-254`), and a `check.*` finding routed by the review is closed by that
+same passing evidence without asking the model at all (`src/closure-verify.ts:256-271`). A failed
+check's `deterministic_failure` names the check, its pinned command and its status, and the paths the
+round itself changed, which the runner reads from git against the commit last judged
+(`checkFailureSentence`, `src/closure-verify.ts:162`). No model is asked on that path, and the
+verifier's findings block leaves out every `check.*` finding, so neither sentence is part of what
+the verifier is shown and neither moves `CLOSURE_VERIFY_PROMPT_VERSION`.
 
 Where a model call is needed, it answers two questions per finding, in one forced turn with no file
-reader (`src/closure-verify.ts:266-273`):
+reader (`src/closure-verify.ts:303-310`):
 
-- `status` — `closed` / `not_closed` / `cannot_tell` (`ClosureStatus`, `src/closure-verify.ts:42`),
+- `status` — `closed` / `not_closed` / `cannot_tell` (`ClosureStatus`, `src/closure-verify.ts:43`),
   where `cannot_tell` counts as not closed;
 - `idiomatic` — `established_pattern` / `working_but_not_idiomatic` / `cannot_tell`
-  (`ClosureIdiomatic`, `src/closure-verify.ts:54`), which never gates: a `working_but_not_idiomatic`
+  (`ClosureIdiomatic`, `src/closure-verify.ts:55`), which never gates: a `working_but_not_idiomatic`
   answer still closes the finding and carries the named alternative (`practice`) into the
   notification rather than reopening the loop.
 
 A finding the model does not answer is `cannot_tell`, never silently closed
-(`src/closure-verify.ts:310-322`).
+(`src/closure-verify.ts:347-359`).
 
 ## Rule ids
 
@@ -137,7 +153,7 @@ are never routed to the executor and always stop, whatever the `closure` or `dir
 `scope.*` (`src/scope.ts:105,122,136,152,167`) and `check.*` (`src/review.ts:220`) are the
 deterministic families raised by the harness itself rather than the model, and always block.
 
-`closureVerifySchema()` (`src/closure-verify.ts:87`) does not mint rule ids at all — it verifies
+`closureVerifySchema()` (`src/closure-verify.ts:88`) does not mint rule ids at all — it verifies
 findings the judging prompt already raised, addressed by `finding_key`, and its own `idiomatic`
 answer never changes a finding's `rule_id` or its family.
 

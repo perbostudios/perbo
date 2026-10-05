@@ -20,6 +20,7 @@ import {
   listBundles,
   owedOnBranch,
   questionsOnFiles,
+  reachedOnRecord,
   readAttempts,
   readDraftEditRecordsOrNone,
   reviewOnRecord,
@@ -93,7 +94,9 @@ export const ReportSchema = z
             .nullable(),
           checks: z.array(CheckSchema).nullable(),
           verification: z.unknown(),
-          declines: z.array(z.object({ finding_key: z.string() }).passthrough()).default([]),
+          record: z
+            .object({ declines: z.array(z.object({ finding_key: z.string(), reason: z.string() })).optional() })
+            .passthrough(),
           bundles: z.array(RunBundleSchema),
         })
         .passthrough(),
@@ -143,7 +146,11 @@ export function attemptViews(report: z.infer<typeof ReportSchema>): Detail["atte
         .join("\n\n"),
     })),
     verification: attempt.verification,
-    declines: attempt.declines.map((decline) => decline.finding_key),
+    // What the attempt declined, as its own record holds it and the loop and
+    // the CLI read it; absent where the record does not say.
+    ...(attempt.record.declines === undefined
+      ? {}
+      : { declines: attempt.record.declines.map(({ finding_key, reason }) => ({ finding_key, reason })) }),
     bundles: attempt.bundles,
   }));
 }
@@ -239,18 +246,26 @@ export class TicketReads {
         if (listing.status === "rejected") throw listing.reason;
         const list = listing.value;
         // What a ticket waiting on the person asks them, as its decision card
-        // asks it, so Home is yellow only where there is a question.
-        const bundles = list.tickets.some((ticket) => ticket.state === "changes_requested")
-          ? await this.bundles(repo)
-          : [];
+        // asks it, so Home is yellow only where there is a question; and how
+        // far each journey has reached on its records, so Home's wheel is the
+        // loop page's.
+        const bundles = await this.bundles(repo);
         return {
           repository,
-          tasks: list.tickets.map((ticket) => ({
-            repoId,
-            repository: repo.name,
-            ticket,
-            ...(ticket.state === "changes_requested" ? this.questionsOf(repo, ticket, bundles) : {}),
-          })),
+          tasks: list.tickets.map((ticket) => {
+            const reached = reachedOnRecord({
+              ticket,
+              attempts: readAttempts(attemptsPath(repo, ticket.ticket_id)).attempts,
+              bundles,
+            });
+            return {
+              repoId,
+              repository: repo.name,
+              ticket,
+              ...(ticket.state === "changes_requested" ? this.questionsOf(repo, ticket, bundles) : {}),
+              ...(reached === null ? {} : { reached }),
+            };
+          }),
           errors: [],
         };
       } catch (error) {
@@ -274,6 +289,7 @@ export class TicketReads {
       ticket,
       objectsDirectory: objectsPath(repo),
       verdictsPath: verdictsPath(repo),
+      attemptsPath: attemptsPath(repo, ticket.ticket_id),
     });
     return { questions: asked?.length ?? 0 };
   }
@@ -293,6 +309,7 @@ export class TicketReads {
         ticket,
         objectsDirectory: objectsPath(repo),
         verdictsPath: verdictsPath(repo),
+        attemptsPath: attemptsPath(repo, ticket.ticket_id),
       }),
       ticket,
       contract,

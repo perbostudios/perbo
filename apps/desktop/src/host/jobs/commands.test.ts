@@ -309,7 +309,7 @@ describe("the guards a job runs before it starts", () => {
   });
 
   it("refuses a run that owes the person's answers, in one sentence counting them, and no other", () => {
-    const question = { id: "y", title: "s", context: "", choices: ["approach", "let_it_decide", "ship_as_is"] } as const;
+    const question = { id: "y", title: "s", context: "", declined: [], choices: ["approach", "let_it_decide", "ship_as_is"] } as const;
     expect(() => assertNothingOwed([question], "PRB-1")).toThrow(
       "PRB-1's last run finished trying and left 1 question for you to answer, none of them handed to the executor, so the loop does not start: answer them on its decision card.",
     );

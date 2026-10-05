@@ -353,12 +353,7 @@ function stalledStore(name: string, outcome: string | null, declined = false): {
       kind: "review",
       subject_id: `cv_${remediation.attempt_id}`,
       ticket_id: TICKET_ID,
-      inputs: {
-        head_commit: "b2c3d4e",
-        findings_given: given.join(","),
-        findings_open: open.join(","),
-        findings_declined: declines.join(","),
-      },
+      inputs: { head_commit: "b2c3d4e", findings_given: given.join(","), findings_open: open.join(",") },
       context_manifest: [],
       versions: { code: "stage-3", prompt: "closure_verify_v1", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
       usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
@@ -385,6 +380,90 @@ function stalledStore(name: string, outcome: string | null, declined = false): {
     });
     writeFileSync(path, JSON.stringify(ticket));
   }
+  return made;
+}
+
+/** What the executor gave as its reason for declining STOP_TWO (D-065). */
+const DECLINE_REASON = "A person must decide whether review should run the suite itself.";
+
+/**
+ * AYO-7 as PRB-20 left it: a review that routed its findings to the executor,
+ * a remediation round that closed two and declined STOP_TWO with a reason,
+ * and the row the run wrote as it ended escalated.
+ */
+function declinedStore(name: string): { repo: string; store: string } {
+  const made = storeWith(name, { decision: "remediable", toExecutor: true });
+  const remediation = {
+    ...makeAttempt({
+      attempt_id: "att_verdict00000002",
+      ticket_id: TICKET_ID,
+      created_at: "2026-09-03T12:10:00.000Z",
+      termination: { reason: "completed", detail: "" },
+      usage: { cost_basis: "unavailable" },
+      changeset_id: "cs_verdict0001",
+      head_commit: "b2c3d4e",
+      remediation_round: 1,
+    }),
+    declines: [{ finding_key: STOP_TWO!, reason: DECLINE_REASON }],
+  };
+  const bundles = new BundleStore({ root: join(made.store, "bundles"), retainContext: true });
+  // The executor's own words, which `perbo inspect` reads the decline from as the loop did.
+  const said = JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "text", text: `NO_PRACTICE ${STOP_TWO!}: ${DECLINE_REASON}` }] },
+  });
+  bundles.write({
+    kind: "execution",
+    subject_id: remediation.attempt_id,
+    ticket_id: TICKET_ID,
+    inputs: { termination: "completed" },
+    context_manifest: [],
+    versions: { code: "stage-3", prompt: "executor_v4", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
+    usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
+    artifacts: [
+      { name: "attempt.json", media_type: "application/json", body: JSON.stringify(remediation) },
+      { name: "transcript.jsonl", media_type: "application/x-ndjson", body: `${said}\n` },
+    ],
+    errors: [],
+    transitions: [],
+    retention: { class: "raw_transcript", expires_at: null },
+    secrets: new SecretIndex(),
+    excluded_paths: [],
+    deterministic: false,
+    model_version_pinned: true,
+    now: new Date("2026-09-03T12:12:00.000Z"),
+  });
+  bundles.write({
+    kind: "review",
+    subject_id: `cv_${remediation.attempt_id}`,
+    ticket_id: TICKET_ID,
+    inputs: { head_commit: "b2c3d4e", findings_given: [STOP_ONE!, STOP_THREE!].join(","), findings_open: "" },
+    context_manifest: [],
+    versions: { code: "stage-3", prompt: "closure_verify_v1", policy: "A2b", model: "claude-opus-5", tool: "1.0.98" },
+    usage: { input_tokens: 1, output_tokens: 1, cost_micros: 0, cost_basis: "unavailable", wall_clock_ms: 1 },
+    artifacts: [],
+    errors: [],
+    transitions: [],
+    retention: { class: "raw_transcript", expires_at: null },
+    secrets: new SecretIndex(),
+    excluded_paths: [],
+    deterministic: false,
+    model_version_pinned: true,
+    now: new Date("2026-09-03T12:15:00.000Z"),
+  });
+  writeFileSync(
+    join(made.store, "state", `${TICKET_ID}.attempts.json`),
+    `${JSON.stringify({ ticket_id: TICKET_ID, attempts: [attempt, remediation] }, null, 2)}\n`,
+  );
+  const path = join(made.store, "tickets", "AYO-7.json");
+  const ticket = TicketSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  ticket.history.push({
+    at: "2026-09-03T12:30:00.000Z",
+    from: "independent_review",
+    to: "changes_requested",
+    note: gateClosedNote("escalated"),
+  });
+  writeFileSync(path, JSON.stringify(ticket));
   return made;
 }
 
@@ -1484,16 +1563,26 @@ describe("perbo verdict --decide records a person's answer that closes the findi
     }
   });
 
-  it("refuses an answer to a finding the executor declined before the stall, and takes one to the finding beside it", async () => {
-    const { repo, store } = stalledStore("decide-declined", "remediation_stalled", true);
-    for (const choice of ["approach", "let-it-decide", "ship-as-is"]) {
-      expect(() => decide(repo, STOP_ONE!, "Use fifty.", ["--choice", choice], LATER), choice).toThrow(
-        /is a finding the executor declined \(D-065\), and no choice closes it: `perbo principle add` carries your answer/,
-      );
-    }
-    expect(existsSync(join(store, "verdicts.json"))).toBe(false);
+  it("answers a finding the executor declined before the stall, and the finding beside it", async () => {
+    const { repo, store } = stalledStore("decide-declined-stalled", "remediation_stalled", true);
+    expect(await decide(repo, STOP_ONE!, "Use fifty.", [], LATER)).toBe(0);
     expect(await decide(repo, STOP_TWO!, null, ["--choice", "ship-as-is"], LATER)).toBe(0);
-    expect(decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => row.finding_key)).toEqual([STOP_TWO]);
+    expect(
+      decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => [row.finding_key, row.choice]),
+    ).toEqual([
+      [STOP_ONE, "approach"],
+      [STOP_TWO, "ship_as_is"],
+    ]);
+  });
+
+  it("answers a finding the executor declined, and still refuses what its round closed (D-065)", async () => {
+    const { repo, store } = declinedStore("decide-declined");
+    expect(await decide(repo, STOP_TWO!, "Add a test script that runs the suite.", [], LATER)).toBe(0);
+    expect(() => decide(repo, STOP_ONE!, null, ["--choice", "ship-as-is"], LATER)).toThrow(/routed to a person/);
+    expect(() => decide(repo, STOP_THREE!, null, ["--choice", "ship-as-is"], LATER)).toThrow(/routed to a person/);
+    expect(
+      decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => [row.finding_key, row.choice, row.note]),
+    ).toEqual([[STOP_TWO, "approach", "Add a test script that runs the suite."]]);
   });
 
   it("refuses an answer to a finding routed to the executor while the loop is still trying it", async () => {

@@ -13,6 +13,7 @@ import {
 } from "../ui/index.js";
 import { Rename } from "./Rename.js";
 import { timeAgo } from "../time-ago.js";
+import { wheelFill } from "../../shared/runner-progress.js";
 import { errorMessage, useAction, useTaskSummary } from "../workspace/index.js";
 import { ConfirmDelete, confirmDeleteFiled, useCreate, useDiscardTicket, withoutDeleting } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
@@ -21,7 +22,7 @@ import type { PageProps } from "../shell/route.js";
 import { ARCHIVE_SEARCH_MAX_CHARS, type Snapshot, type TaskRow, type TaskSummary } from "../../shared/protocol.js";
 import { archiveRows, isArchivable, isFiled, isMergeDecided } from "../../shared/archive.js";
 import { pullRequestOpen } from "../../shared/discard.js";
-import { HOME_TONES, HOME_TONE_LABELS, JOURNEY_END, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
+import { HOME_TONES, HOME_TONE_LABELS, COMPLETED, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
 const lower = (word: string): string => word.toLowerCase();
@@ -94,12 +95,13 @@ function StageRing({
         </span>
       </span>
     );
-  // A journey that ended fills the ring: every step is done.
-  const share = (Math.min(stage, JOURNEY_END - 1) / (JOURNEY_END - 1)) * 100;
+  // Equal slices, as the loop's bar: the contract none, completed the whole.
+  const share = wheelFill(stage) * 100;
   return (
     <span
       className={cx("stage-ring", tone && "stage-ring--" + tone)}
-      aria-label={stage === JOURNEY_END ? "Every step done" : `Stage ${stage} of ${JOURNEY_END - 1}`}
+      // Completed on the wheel and the merge not yet decided: the review is ready (D-097).
+      aria-label={stage === COMPLETED ? "Review ready" : `Stage ${stage} of ${COMPLETED}`}
       style={{
         background: `conic-gradient(var(--ink) 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
       }}
@@ -128,7 +130,7 @@ function TaskCard({
   renaming: boolean;
   onRenameChange: (open: boolean) => void;
 }) {
-  const { stage, tone, description } = projectTicket(workspace, row);
+  const { stage, tone, description, deciding } = projectTicket(workspace, row);
   // Completed is a decided merge alone: a cancelled or rolled-back ticket is a stop, or work a run carries again.
   const completed = isMergeDecided(workspace, row);
   const stopped = tone === "red";
@@ -176,7 +178,16 @@ function TaskCard({
       )}
       <div className="task-card-header">
         <StageRing stage={stage} tone={tone} decided={completed} />
-        <span className="stage-pill">{stopped ? "loop stopped" : completed ? "completed" : stageName(stage)}</span>
+        <span className="stage-pill">{stopped
+            ? "loop stopped"
+            : completed
+              ? "completed"
+              : deciding
+                ? "decision required"
+                : // Completed on the wheel, and not yet decided: the header counts it as waiting on the merge decision.
+                  stage === COMPLETED
+                  ? "review ready"
+                  : stageName(stage)}</span>
         <span className="task-key" title={row.ticket.key}>
           {displayKey(row.ticket.key)}
         </span>

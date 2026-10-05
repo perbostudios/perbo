@@ -10,7 +10,7 @@ import {
   decidable,
   decisionChoicesFor,
   egressQuestionsPath,
-  leftToPrinciple,
+  declinesOnRecord,
   loopOnRecord,
   NOTHING_TRIED,
   routedToPerson,
@@ -353,8 +353,6 @@ export interface KnownFinding {
    * done on that review, `loopOnRecord`).
    */
   to_person: boolean;
-  /** Whether it is left to a principle (`leftToPrinciple`, D-065), which no choice answers. */
-  declined: boolean;
   /** The decision of the run's own review that raised it; null where no run's review did. */
   review_decision: ReviewDecision | null;
   /** Whether that review takes an answer (`decidable`); null where no run's review raised it. */
@@ -404,7 +402,6 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         rule_id: finding.rule_id,
         routing: stopRoutingOf(finding.routing),
         to_person: false,
-        declined: false,
         review_decision: null,
         decidable: null,
         source: `the review ${review.review_id}`,
@@ -414,19 +411,19 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
   const report = buildReportForSubject({ storeDirectory: dir, subject, attempt: null });
   const history = subject.kind === "ticket" ? readTicket(dir, subject.ticket).history : [];
   const bundles = report.attempts.flatMap((attempt) => attempt.bundles);
+  const declines = declinesOnRecord(report.attempts.map((attempt) => attempt.record));
   for (const attempt of report.attempts) {
     const review = attempt.review;
     const loop =
       review === null
         ? NOTHING_TRIED
-        : (loopOnRecord({ review_id: review.review_id, bundles, history })?.loop ?? NOTHING_TRIED);
+        : (loopOnRecord({ review_id: review.review_id, bundles, history, declines })?.loop ?? NOTHING_TRIED);
     for (const finding of review?.findings ?? []) {
       found.set(finding.key, {
         finding_key: finding.key,
         rule_id: finding.rule_id,
         routing: stopRoutingOf(finding.routing),
         to_person: routedToPerson(finding, loop),
-        declined: leftToPrinciple(finding, loop),
         review_decision: review!.decision,
         decidable: decidable(review!, loop),
         source: "the review artifact",
@@ -438,11 +435,9 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         finding_key: decline.finding_key,
         rule_id: prior?.rule_id ?? DECLINED_RULE_UNRECORDED,
         routing: "declined",
-        // Whether a person answers it is the review's rule, which reads the
-        // declines its closure verifications recorded (`routedToPerson`,
-        // `leftToPrinciple`).
+        // A decline is the executor's; whether the person answers it is the
+        // review's finding's, as the loop reads it (D-132).
         to_person: prior?.to_person ?? false,
-        declined: prior?.declined ?? false,
         review_decision: prior?.review_decision ?? null,
         decidable: prior?.decidable ?? null,
         source: prior?.source ?? "the executor's decline",
@@ -455,7 +450,6 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
       rule_id: stop.rule_id,
       routing: stop.routing,
       to_person: found.get(stop.finding_key)?.to_person ?? false,
-      declined: found.get(stop.finding_key)?.declined ?? false,
       review_decision: found.get(stop.finding_key)?.review_decision ?? null,
       decidable: found.get(stop.finding_key)?.decidable ?? null,
       source: "the pull request",
@@ -815,12 +809,6 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
         "handed (D-065), so it cannot be handed an approach: choose --choice ship-as-is, or change it by hand",
     );
   }
-  if (args.decision === "decide" && !finding.to_person && finding.declined) {
-    throw new UsageError(
-      `${finding.finding_key.slice(0, 12)} (${finding.rule_id}) is a finding the executor declined (D-065), ` +
-        "and no choice closes it: `perbo principle add` carries your answer to the executor",
-    );
-  }
   if (args.decision === "decide" && !finding.to_person) {
     throw new UsageError(
       `--decide answers an open finding a run's review routed to a person, and ` +
@@ -834,7 +822,8 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
         `${finding.review_decision}: ` +
         (finding.review_decision === "incomplete" || finding.review_decision === "error"
           ? "it did not judge the whole change, so an answer would settle a finding on a change nobody finished judging, and it takes none"
-          : "its findings are the executor's until a run ends remediation_stalled or remediation_exhausted, and it takes no answer before then") +
+          : "its findings are the executor's until a run ends remediation_stalled or remediation_exhausted, the executor declines one of them, " +
+            "or the runner refuses a round given one, and it takes no answer before then") +
         ". `perbo principle add` carries your words to the executor",
     );
   }

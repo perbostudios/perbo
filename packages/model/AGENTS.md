@@ -12,6 +12,12 @@ work here. [`README.md`](README.md) says what each module owns.
   summary of a [regression-suite](../../docs/evaluation/regression-suite.md) run in its pull
   request body ([D-010](../../docs/11-open-decisions.md)), and
   [`packages/review/AGENTS.md`](../review/AGENTS.md) states the bars it is read against.
+- **No tool a reviewer's model reaches for ever runs.** Where a provider makes the session offer
+  one — OpenCode's reviewer offers a read and a shell tool, because Zen's free models refuse a session
+  without them — every call is refused and never allowed or saved, and the turn carries on with the
+  model told so, within a bound that fails the turn (`REVIEWER_REFUSED_TOOL_CALLS` in
+  `src/opencode.ts`); a tool the provider reports having run fails it outright
+  ([D-134](../../docs/11-open-decisions.md)).
 - **The goldens are the proof, and they are never regenerated to make a run green.** A golden that
   changed says the bytes reaching a provider changed. If that is the intent, say so in the commit
   message and nowhere else; if it is not, the change is wrong.

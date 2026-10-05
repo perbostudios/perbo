@@ -67,6 +67,7 @@ import { RepoReader } from "@perbo/review";
 import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES } from "../scheduling.js";
 import { UsageError, readInput } from "../usage-error.js";
+import { RequestRefusedError, refusedRequestSentence } from "../failure.js";
 import {
   listFlag,
   parseArgv,
@@ -1246,6 +1247,12 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
     });
   } catch (error) {
     if (error instanceof PlanningError) throw new UsageError(error.message);
+    if (error instanceof ProviderError && error.kind === "request_refused") {
+      throw new RequestRefusedError(
+        `${refusedRequestSentence("the draft", error.message)} Admit the work by hand with ` +
+          "--outcome, --criterion and --path.",
+      );
+    }
     if (error instanceof ProviderError) {
       throw new UsageError(
         `the draft could not be produced (${error.kind}): ${error.message}. Admit the work by ` +
