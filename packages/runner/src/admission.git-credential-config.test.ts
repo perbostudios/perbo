@@ -90,9 +90,15 @@ describe("what stays admitted", () => {
       "git config --get-all credential.helper",
       "git config --list",
       "git config -l",
+      "git config credential.helper",
     ]) {
       expect(judge(command).decision, command).toBe("allowed");
     }
+  });
+
+  it("reads a lone credential key the shell can split as the write it can be", () => {
+    // With `X='helper !cmd'`, `git config credential.$X` writes `credential.helper`.
+    expect(judge("git config credential.$X")).toMatchObject({ decision: "denied", rule: ADMISSION_RULES.git_alias });
   });
 });
 
@@ -202,7 +208,7 @@ describe("git's own environment variables", () => {
 
   it("keeps a non-credential GIT_CONFIG_KEY_<n> admitted", () => {
     const admission = judge(
-      "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.editor GIT_CONFIG_VALUE_0=vim git fetch",
+      "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=color.ui GIT_CONFIG_VALUE_0=always git fetch",
     );
     expect(admission.decision).toBe("allowed");
   });
